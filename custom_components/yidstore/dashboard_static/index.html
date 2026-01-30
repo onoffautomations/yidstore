@@ -1032,7 +1032,7 @@
         async function load() {
             grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
             try {
-                const r = await fetch('/api/onoff_store/repos');
+                const r = await fetch('/api/yidstore/repos');
                 items = await r.json();
                 apply(); // This will call populateAuthorFilter with visible items
             } catch (e) { grid.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--dim);">Error loading store.</div>'; }
@@ -1080,7 +1080,7 @@
 
         async function checkUpdates() {
             try {
-                await fetch('/api/onoff_store/refresh', { method: 'POST' });
+                await fetch('/api/yidstore/refresh', { method: 'POST' });
                 load();
             } catch (e) { }
         }
@@ -1401,7 +1401,7 @@
 
         async function executeRemoveDirect(o, r, t) {
             try {
-                await fetch('/api/onoff_store/uninstall', {
+                await fetch('/api/yidstore/uninstall', {
                     method: 'POST',
                     body: JSON.stringify({ owner: o, repo: r, type: t }),
                     headers: { 'Content-Type': 'application/json' }
@@ -1411,7 +1411,7 @@
 
         async function toggleHide(o, r, currentlyHidden, e) {
             if (e) e.stopPropagation();
-            const endpoint = currentlyHidden ? '/api/onoff_store/unhide' : '/api/onoff_store/hide';
+            const endpoint = currentlyHidden ? '/api/yidstore/unhide' : '/api/yidstore/hide';
             try {
                 await fetch(endpoint, {
                     method: 'POST',
@@ -1439,7 +1439,7 @@
                     body.source = 'github';
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
-                await fetch('/api/onoff_store/install', {
+                await fetch('/api/yidstore/install', {
                     method: 'POST',
                     body: JSON.stringify(body),
                     headers: { 'Content-Type': 'application/json' }
@@ -1459,7 +1459,7 @@
             // Fetch available releases for version selection
             let releases = [];
             try {
-                const relResp = await fetch(`/api/onoff_store/releases/${o}/${r}`);
+                const relResp = await fetch(`/api/yidstore/releases/${o}/${r}`);
                 if (relResp.ok) {
                     releases = await relResp.json();
                 }
@@ -1499,7 +1499,7 @@
             `;
 
             try {
-                const resp = await fetch(`/api/onoff_store/readme/${o}/${r}`);
+                const resp = await fetch(`/api/yidstore/readme/${o}/${r}`);
                 let md = '';
                 if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
                 md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
@@ -1524,9 +1524,9 @@
                 candidates.push(item.icon_url.replace('/icons/icon.png', '/icons/logo.svg'));
             }
 
-            candidates.push(`/api/onoff_store/brands/${domain}/dark_logo.png`);
-            candidates.push(`/api/onoff_store/brands/${domain}/logo.png`);
-            candidates.push(`/api/onoff_store/brands/${domain}/logo.svg`);
+            candidates.push(`/api/yidstore/brands/${domain}/dark_logo.png`);
+            candidates.push(`/api/yidstore/brands/${domain}/logo.png`);
+            candidates.push(`/api/yidstore/brands/${domain}/logo.svg`);
 
             const dataAttr = candidates.filter(Boolean).join('|');
             return `
@@ -1596,7 +1596,7 @@
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
 
-                const res = await fetch('/api/onoff_store/install', {
+                const res = await fetch('/api/yidstore/install', {
                     method: 'POST',
                     body: JSON.stringify(body),
                     headers: { 'Content-Type': 'application/json' }
@@ -1631,7 +1631,7 @@
             listEl.innerHTML = '<div style="text-align: center; color: var(--dim);"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
 
             try {
-                const resp = await fetch('/api/onoff_store/custom/list');
+                const resp = await fetch('/api/yidstore/custom/list');
                 const repos = await resp.json();
 
                 if (repos.length === 0) {
@@ -1662,7 +1662,7 @@
             if (!confirm(`Remove ${owner}/${repo} from custom repositories?`)) return;
 
             try {
-                await fetch('/api/onoff_store/custom/remove', {
+                await fetch('/api/yidstore/custom/remove', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ owner, repo })
@@ -1694,7 +1694,7 @@
                     ? { source: 'github', url: githubUrl, type: githubType }
                     : { owner, repo };
 
-                await fetch('/api/onoff_store/custom/add', {
+                await fetch('/api/yidstore/custom/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
@@ -1753,7 +1753,7 @@
         async function executeRemove(o, r, t) {
             closePop();
             try {
-                const res = await fetch('/api/onoff_store/uninstall', {
+                const res = await fetch('/api/yidstore/uninstall', {
                     method: 'POST',
                     body: JSON.stringify({ owner: o, repo: r, type: t }),
                     headers: { 'Content-Type': 'application/json' }
@@ -1784,7 +1784,7 @@
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
 
-                const res = await fetch('/api/onoff_store/install', {
+                const res = await fetch('/api/yidstore/install', {
                     method: 'POST',
                     body: JSON.stringify(body),
                     headers: { 'Content-Type': 'application/json' }
