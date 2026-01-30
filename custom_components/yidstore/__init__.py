@@ -39,6 +39,8 @@ SERVICE_SCHEMA_GENERIC = vol.Schema(
         vol.Optional("mode", default=MODE_ASSET): vol.In([MODE_ASSET, MODE_ZIPBALL]),
         vol.Optional("tag"): str,
         vol.Optional("asset_name"): str,
+        vol.Optional("source"): str,
+        vol.Optional("repo_url"): str,
     }
 )
 
@@ -49,6 +51,8 @@ SERVICE_SCHEMA_SIMPLE = vol.Schema(
         vol.Optional("mode"): vol.In([MODE_ASSET, MODE_ZIPBALL]),
         vol.Optional("tag"): str,
         vol.Optional("asset_name"): str,
+        vol.Optional("source"): str,
+        vol.Optional("repo_url"): str,
     }
 )
 
@@ -555,6 +559,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         owner = (call.data.get("owner") or "").strip()
         if owner:
             return owner
+        if call.data.get("source") == "github":
+            repo_url = (call.data.get("repo_url") or "").strip()
+            if repo_url:
+                try:
+                    cleaned = repo_url.replace("https://", "").replace("http://", "")
+                    if cleaned.endswith(".git"):
+                        cleaned = cleaned[:-4]
+                    parts = cleaned.split("/")
+                    if len(parts) >= 3 and parts[0].lower() == "github.com":
+                        return parts[1]
+                except Exception:
+                    pass
         if default_owner:
             return default_owner
         raise ValueError("Missing owner. Set it in integration config or pass owner in service call.")
@@ -589,7 +605,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Using latest release tag: %s", resolved)
         return resolved
 
-    async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None) -> tuple[str, str]:
+    async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None, source: str | None) -> tuple[str, str]:
+        if source == "github":
+            ref = tag or "main"
+            url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{ref}" if tag else f"https://api.github.com/repos/{owner}/{repo}/zipball"
+            return url, ref
+
         # Intelligent "Zipball First" logic with silent Asset recovery
         
         # 1. Always try Zipball first as requested
@@ -645,7 +666,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
             tag = call.data.get("tag")
 
-            url, version = await _download_url_for_call(owner, repo, mode, tag, asset_name)
+            source = call.data.get("source")
+            url, version = await _download_url_for_call(owner, repo, mode, tag, asset_name, source)
             _LOGGER.info("")
             _LOGGER.info("=" * 60)
             _LOGGER.info("Installing Package")
@@ -662,7 +684,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Get auth token for download - use client's token (not Accept: application/json header)
             download_headers = {}
             current_token = client.token  # Get from client instance
-            if current_token:
+            if source != "github" and current_token:
                 download_headers["Authorization"] = f"token {current_token}"
                 _LOGGER.debug("Using authenticated download for %s/%s", owner, repo)
             else:
@@ -746,6 +768,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 installed_version=version,
                 mode=mode,
                 asset_name=asset_name,
+                source=source or "gitea",
             )
 
             _LOGGER.info("✓ Package registered with ID: %s", package_id)

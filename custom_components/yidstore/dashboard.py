@@ -18,6 +18,26 @@ from .const import DOMAIN, CONF_SIDE_PANEL, SERVICE_INSTALL
 from .config_flow import load_store_list
 from .installer import uninstall_package
 
+
+def _parse_github_url(url: str) -> tuple[str, str] | None:
+    try:
+        cleaned = url.strip()
+        if cleaned.endswith(".git"):
+            cleaned = cleaned[:-4]
+        cleaned = cleaned.replace("https://", "").replace("http://", "")
+        parts = cleaned.split("/")
+        if len(parts) < 3:
+            return None
+        if parts[0].lower() != "github.com":
+            return None
+        owner = parts[1].strip()
+        repo = parts[2].strip()
+        if not owner or not repo:
+            return None
+        return owner, repo
+    except Exception:
+        return None
+
 _LOGGER = logging.getLogger(__name__)
 
 URL_BASE = "/onoff_store_static"
@@ -400,12 +420,43 @@ class OnOffStoreReposView(HomeAssistantView):
 
             # F. Explicitly fetch custom repos if they weren't in organizations or users
             for cr in custom_repos_to_fetch:
-                if not any(x["owner"].lower() == cr["owner"].lower() and x["repo_name"].lower() == cr["repo"].lower() for x in resp_data):
-                    try:
-                        r = await client.get_repo(cr["owner"], cr["repo"])
-                        if r: self._fill(resp_data, r, coordinator, yaml_items=yaml_items, bypass_filter=True, is_authenticated=is_authenticated)
-                    except Exception:
-                        pass
+                owner = (cr.get("owner") or "").strip()
+                repo = (cr.get("repo") or "").strip()
+                source = cr.get("source", "gitea")
+                if not owner or not repo:
+                    continue
+
+                if not any(x["owner"].lower() == owner.lower() and x["repo_name"].lower() == repo.lower() for x in resp_data):
+                    if source == "github":
+                        repo_type = cr.get("type") or "integration"
+                        repo_url = cr.get("url")
+                        icon_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/icons/icon.png"
+                        resp_data.append({
+                            "name": f"{owner}/{repo}",
+                            "repo_name": repo,
+                            "owner": owner,
+                            "owner_display_name": owner,
+                            "type": repo_type,
+                            "description": "",
+                            "updated_at": "",
+                            "mode": "zipball",
+                            "asset_name": None,
+                            "is_installed": coordinator.get_package_by_repo(owner, repo) is not None,
+                            "update_available": False,
+                            "latest_version": None,
+                            "release_notes": None,
+                            "is_hidden": coordinator.is_hidden_repo(owner, repo),
+                            "icon_url": icon_url,
+                            "default_branch": "main",
+                            "source": "github",
+                            "repo_url": repo_url,
+                        })
+                    else:
+                        try:
+                            r = await client.get_repo(owner, repo)
+                            if r: self._fill(resp_data, r, coordinator, yaml_items=yaml_items, bypass_filter=True, is_authenticated=is_authenticated)
+                        except Exception:
+                            pass
 
             return web.json_response(resp_data)
         except Exception as e:
@@ -482,6 +533,7 @@ class OnOffStoreReposView(HomeAssistantView):
             "is_hidden": is_hidden,
             "icon_url": icon_url,
             "default_branch": default_branch,
+            "source": "gitea",
         })
 
 
@@ -506,6 +558,8 @@ class OnOffStoreInstallView(HomeAssistantView):
 
             body = await request.json()
             o, r, t = body.get("owner"), body.get("repo"), body.get("type", "integration")
+            source = body.get("source")
+            repo_url = body.get("repo_url")
             mode = body.get("mode")
             asset_name = body.get("asset_name")
             
@@ -518,6 +572,10 @@ class OnOffStoreInstallView(HomeAssistantView):
                 "repo": r,
                 "type": t
             }
+            if source:
+                svc_data["source"] = source
+            if repo_url:
+                svc_data["repo_url"] = repo_url
             if mode: svc_data["mode"] = mode
             if asset_name: svc_data["asset_name"] = asset_name
             
@@ -551,6 +609,20 @@ class OnOffStoreReadmeView(HomeAssistantView):
                 else: return web.Response(text="Not ready", status=503)
 
             client = hass.data[DOMAIN][eid].get("client")
+            coordinator = hass.data[DOMAIN][eid].get("coordinator")
+
+            # If repo is a GitHub custom repo, fetch README from GitHub
+            if coordinator:
+                for cr in coordinator.get_custom_repos():
+                    if cr.get("source") == "github" and cr.get("owner", "").lower() == owner.lower() and cr.get("repo", "").lower() == repo.lower():
+                        sess = async_get_clientsession(hass)
+                        for branch in ("main", "master"):
+                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md"
+                            async with sess.get(raw_url, timeout=30) as resp:
+                                if resp.status == 200:
+                                    return web.Response(text=await resp.text(), content_type="text/markdown")
+                        break
+
             txt = await client.get_readme(owner, repo)
             return web.Response(text=txt or f"{repo} has no instructions available.", content_type="text/markdown")
         except Exception:
@@ -577,6 +649,13 @@ class OnOffStoreReleasesView(HomeAssistantView):
                 else: return web.json_response({"error": "Not ready"}, status=503)
 
             client = hass.data[DOMAIN][eid].get("client")
+            coordinator = hass.data[DOMAIN][eid].get("coordinator")
+
+            if coordinator:
+                for cr in coordinator.get_custom_repos():
+                    if cr.get("source") == "github" and cr.get("owner", "").lower() == owner.lower() and cr.get("repo", "").lower() == repo.lower():
+                        return web.json_response([])
+
             releases = await client.get_releases(owner, repo)
             return web.json_response(releases)
         except Exception as e:
@@ -625,8 +704,19 @@ class OnOffStoreAddCustomView(HomeAssistantView):
         hass = request.app["hass"]
         try:
             body = await request.json()
+            source = body.get("source", "gitea")
+            repo_type = body.get("type") or "integration"
+            repo_url = body.get("url")
             o, r = body.get("owner"), body.get("repo")
-            if not o or not r:
+
+            if source == "github":
+                if not repo_url:
+                    return web.json_response({"error": "Missing GitHub URL"}, status=400)
+                parsed = _parse_github_url(repo_url)
+                if not parsed:
+                    return web.json_response({"error": "Invalid GitHub URL"}, status=400)
+                o, r = parsed
+            elif not o or not r:
                 return web.json_response({"error": "Missing params"}, status=400)
             
             eid = self.entry_id
@@ -638,7 +728,7 @@ class OnOffStoreAddCustomView(HomeAssistantView):
 
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
-                await coordinator.async_add_custom_repo(o, r)
+                await coordinator.async_add_custom_repo(o, r, source=source, repo_type=repo_type, repo_url=repo_url)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:

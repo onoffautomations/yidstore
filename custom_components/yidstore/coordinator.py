@@ -79,6 +79,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         installed_version: str,
         mode: str = None,
         asset_name: str = None,
+        source: str = "gitea",
     ) -> str:
         """Add or update a tracked package."""
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
@@ -102,6 +103,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             "last_check": existing_data.get("last_check"),  # Preserve last check time
             "mode": mode,
             "asset_name": asset_name,
+            "source": source or existing_data.get("source", "gitea"),
         }
 
         _LOGGER.info("Package data for %s: installed=%s, latest=%s, update_available=%s",
@@ -225,6 +227,10 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
 
         for package_id, package_data in self.packages.items():
             try:
+                if package_data.get("source", "gitea") == "github":
+                    _LOGGER.debug("Skipping update check for GitHub repo: %s", package_id)
+                    continue
+
                 owner = package_data["owner"]
                 repo = package_data["repo_name"]
                 installed_version = package_data["installed_version"]
@@ -287,16 +293,21 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
         return self.packages.get(package_id)
 
-    async def async_add_custom_repo(self, owner: str, repo: str) -> None:
+    async def async_add_custom_repo(self, owner: str, repo: str, source: str = "gitea", repo_type: str | None = None, repo_url: str | None = None) -> None:
         """Add a custom repo to the visible list."""
-        if not any(r["owner"] == owner and r["repo"] == repo for r in self.custom_repos):
-            self.custom_repos.append({"owner": owner, "repo": repo})
+        if not any(r.get("owner") == owner and r.get("repo") == repo for r in self.custom_repos):
+            entry = {"owner": owner, "repo": repo, "source": source}
+            if repo_type:
+                entry["type"] = repo_type
+            if repo_url:
+                entry["url"] = repo_url
+            self.custom_repos.append(entry)
             await self._custom_store.async_save({"repos": self.custom_repos})
-            _LOGGER.info("Added custom repo: %s/%s", owner, repo)
+            _LOGGER.info("Added custom repo: %s/%s (source=%s)", owner, repo, source)
 
     def is_custom_repo(self, owner: str, repo: str) -> bool:
         """Check if a repo is in the custom list."""
-        return any(r["owner"].lower() == owner.lower() and r["repo"].lower() == repo.lower() for r in self.custom_repos)
+        return any(r.get("owner", "").lower() == owner.lower() and r.get("repo", "").lower() == repo.lower() for r in self.custom_repos)
 
     async def async_remove_custom_repo(self, owner: str, repo: str) -> None:
         """Remove a custom repo from the list."""
