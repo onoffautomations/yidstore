@@ -1,4 +1,4 @@
-DOMAIN = "onoff_gitea_store"
+DOMAIN = "yidstore"
 
 SERVICE_INSTALL = "install"
 SERVICE_INSTALL_INTEGRATION = "install_integration"
@@ -21,7 +21,7 @@ UPDATE_CHECK_INTERVAL = 7200  # seconds
 
 # Storage keys
 STORAGE_VERSION = 1
-STORAGE_KEY_PACKAGES = "onoff_gitea_store_packages"
+STORAGE_KEY_PACKAGES = "yidstore_packages"
 
 # Sensor attributes
 ATTR_REPO_NAME = "repo_name"

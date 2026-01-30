@@ -40,8 +40,8 @@ def _parse_github_url(url: str) -> tuple[str, str] | None:
 
 _LOGGER = logging.getLogger(__name__)
 
-URL_BASE = "/onoff_store_static"
-BRANDS_PATCHER_URL = "/onoff_store_static/yidstore-brands.js"
+URL_BASE = "/yidstore_static"
+BRANDS_PATCHER_URL = "/yidstore_static/yidstore-brands.js"
 
 
 async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
@@ -57,7 +57,7 @@ async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
 (function() {
     'use strict';
 
-    const BRANDS_API = '/api/onoff_store/brands';
+    const BRANDS_API = '/api/yidstore/brands';
     let localBrands = {};
     let patchApplied = false;
 
@@ -235,14 +235,14 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     if entry.data.get(CONF_SIDE_PANEL, True):
         # Sidebar entry for Admin users - Cache buster added
         # Check if panel already registered to avoid error on reload
-        if "onoff_store" not in hass.data.get("frontend_panels", {}):
+        if "yidstore" not in hass.data.get("frontend_panels", {}):
             try:
                 frontend.async_register_built_in_panel(
                     hass,
                     component_name="iframe",
                     sidebar_title="YidStore",
                     sidebar_icon="mdi:storefront",
-                    frontend_url_path="onoff_store",
+                    frontend_url_path="yidstore",
                     config={"url": f"{URL_BASE}/index.html?v={int(time.time())}"},
                     require_admin=True,
                 )
@@ -273,8 +273,8 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
 
 class OnOffStoreReposView(HomeAssistantView):
     """API to list Gitea repositories."""
-    url = "/api/onoff_store/repos"
-    name = "api:onoff_store:repos"
+    url = "/api/yidstore/repos"
+    name = "api:yidstore:repos"
     requires_auth = False 
 
     def __init__(self, entry_id: str) -> None:
@@ -539,8 +539,8 @@ class OnOffStoreReposView(HomeAssistantView):
 
 class OnOffStoreInstallView(HomeAssistantView):
     """API to install integration."""
-    url = "/api/onoff_store/install"
-    name = "api:onoff_store:install"
+    url = "/api/yidstore/install"
+    name = "api:yidstore:install"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -591,8 +591,8 @@ class OnOffStoreInstallView(HomeAssistantView):
 
 class OnOffStoreReadmeView(HomeAssistantView):
     """API to fetch README."""
-    url = "/api/onoff_store/readme/{owner}/{repo}"
-    name = "api:onoff_store:readme"
+    url = "/api/yidstore/readme/{owner}/{repo}"
+    name = "api:yidstore:readme"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -631,8 +631,8 @@ class OnOffStoreReadmeView(HomeAssistantView):
 
 class OnOffStoreReleasesView(HomeAssistantView):
     """API to fetch all releases for a repository."""
-    url = "/api/onoff_store/releases/{owner}/{repo}"
-    name = "api:onoff_store:releases"
+    url = "/api/yidstore/releases/{owner}/{repo}"
+    name = "api:yidstore:releases"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -665,8 +665,8 @@ class OnOffStoreReleasesView(HomeAssistantView):
 
 class OnOffStoreRefreshView(HomeAssistantView):
     """API to trigger update check."""
-    url = "/api/onoff_store/refresh"
-    name = "api:onoff_store:refresh"
+    url = "/api/yidstore/refresh"
+    name = "api:yidstore:refresh"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -693,8 +693,8 @@ class OnOffStoreRefreshView(HomeAssistantView):
 
 class OnOffStoreAddCustomView(HomeAssistantView):
     """API to add a custom repository."""
-    url = "/api/onoff_store/custom/add"
-    name = "api:onoff_store:custom:add"
+    url = "/api/yidstore/custom/add"
+    name = "api:yidstore:custom:add"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -737,8 +737,8 @@ class OnOffStoreAddCustomView(HomeAssistantView):
 
 class OnOffStoreListCustomView(HomeAssistantView):
     """API to list custom repositories."""
-    url = "/api/onoff_store/custom/list"
-    name = "api:onoff_store:custom:list"
+    url = "/api/yidstore/custom/list"
+    name = "api:yidstore:custom:list"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -764,8 +764,8 @@ class OnOffStoreListCustomView(HomeAssistantView):
 
 class OnOffStoreRemoveCustomView(HomeAssistantView):
     """API to remove a custom repository."""
-    url = "/api/onoff_store/custom/remove"
-    name = "api:onoff_store:custom:remove"
+    url = "/api/yidstore/custom/remove"
+    name = "api:yidstore:custom:remove"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -797,8 +797,8 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
 
 class OnOffStoreHideView(HomeAssistantView):
     """API to hide a repository."""
-    url = "/api/onoff_store/hide"
-    name = "api:onoff_store:hide"
+    url = "/api/yidstore/hide"
+    name = "api:yidstore:hide"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -827,8 +827,8 @@ class OnOffStoreHideView(HomeAssistantView):
 
 class OnOffStoreUnhideView(HomeAssistantView):
     """API to unhide a repository."""
-    url = "/api/onoff_store/unhide"
-    name = "api:onoff_store:unhide"
+    url = "/api/yidstore/unhide"
+    name = "api:yidstore:unhide"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -858,8 +858,8 @@ class OnOffStoreUnhideView(HomeAssistantView):
 
 class OnOffStoreUninstallView(HomeAssistantView):
     """API to uninstall a repository."""
-    url = "/api/onoff_store/uninstall"
-    name = "api:onoff_store:uninstall"
+    url = "/api/yidstore/uninstall"
+    name = "api:yidstore:uninstall"
     requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
@@ -894,8 +894,8 @@ class OnOffStoreUninstallView(HomeAssistantView):
 
 class LocalBrandsIconView(HomeAssistantView):
     """Serve local brand icons for custom integrations."""
-    url = "/api/onoff_store/brands/{domain}/{filename}"
-    name = "api:onoff_store:brands"
+    url = "/api/yidstore/brands/{domain}/{filename}"
+    name = "api:yidstore:brands"
     requires_auth = False
 
     async def get(self, request: web.Request, domain: str, filename: str) -> web.Response:
@@ -940,8 +940,8 @@ class LocalBrandsIconView(HomeAssistantView):
 
 class LocalBrandsListView(HomeAssistantView):
     """List all available local brand icons."""
-    url = "/api/onoff_store/brands"
-    name = "api:onoff_store:brands_list"
+    url = "/api/yidstore/brands"
+    name = "api:yidstore:brands_list"
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
@@ -959,9 +959,9 @@ class LocalBrandsListView(HomeAssistantView):
                     icon_png = os.path.join(domain_path, "icon.png")
                     icon_svg = os.path.join(domain_path, "icon.svg")
                     if os.path.exists(icon_png):
-                        domains_with_icons[domain] = f"/api/onoff_store/brands/{domain}/icon.png"
+                        domains_with_icons[domain] = f"/api/yidstore/brands/{domain}/icon.png"
                     elif os.path.exists(icon_svg):
-                        domains_with_icons[domain] = f"/api/onoff_store/brands/{domain}/icon.svg"
+                        domains_with_icons[domain] = f"/api/yidstore/brands/{domain}/icon.svg"
 
         # Check custom_components folders
         cc_path = hass.config.path("custom_components")
@@ -974,17 +974,17 @@ class LocalBrandsListView(HomeAssistantView):
                     icon_png = os.path.join(domain_path, "icon.png")
                     icon_svg = os.path.join(domain_path, "icon.svg")
                     if os.path.exists(icon_png):
-                        domains_with_icons[domain] = f"/api/onoff_store/brands/{domain}/icon.png"
+                        domains_with_icons[domain] = f"/api/yidstore/brands/{domain}/icon.png"
                     elif os.path.exists(icon_svg):
-                        domains_with_icons[domain] = f"/api/onoff_store/brands/{domain}/icon.svg"
+                        domains_with_icons[domain] = f"/api/yidstore/brands/{domain}/icon.svg"
 
         return web.json_response(domains_with_icons)
 
 
 class LocalBrandsUploadView(HomeAssistantView):
     """Upload local brand icons for custom integrations."""
-    url = "/api/onoff_store/brands/upload"
-    name = "api:onoff_store:brands_upload"
+    url = "/api/yidstore/brands/upload"
+    name = "api:yidstore:brands_upload"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:

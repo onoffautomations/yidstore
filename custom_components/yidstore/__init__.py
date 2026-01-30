@@ -387,7 +387,7 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
             {
                 "title": "YidStore - Card Installed",
                 "message": message,
-                "notification_id": f"onoff_gitea_store_{timestamp}"
+                "notification_id": f"yidstore_{timestamp}"
             },
             blocking=False
         )

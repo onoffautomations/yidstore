@@ -1,13 +1,12 @@
 {
-  "domain": "YidStore",
+  "domain": "yidstore",
   "name": "YidStore",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "documentation": "onoffautomations.com/integrations",
   "config_flow": true,
   "requirements": [],
   "codeowners": [],
   "iot_class": "local_polling"
 }
-
 
 

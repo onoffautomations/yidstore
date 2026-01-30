@@ -126,7 +126,7 @@ class PackageUpdateButton(ButtonEntity):
                 {
                     "title": "YidStore - Update Started",
                     "message": f"Updating **{repo_name}**...\n\nCheck logs for progress.",
-                    "notification_id": f"onoff_store_update_button_{self._package_id}"
+                    "notification_id": f"yidstore_update_button_{self._package_id}"
                 },
                 blocking=False
             )
@@ -141,7 +141,7 @@ class PackageUpdateButton(ButtonEntity):
                 {
                     "title": "YidStore - Update Failed",
                     "message": f"Failed to update **{repo_name}**\n\nError: {str(e)}",
-                    "notification_id": f"onoff_store_update_error_{self._package_id}"
+                    "notification_id": f"yidstore_update_error_{self._package_id}"
                 },
                 blocking=False
             )

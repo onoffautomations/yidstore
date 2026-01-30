@@ -246,7 +246,7 @@ async def install_package(
     ha_brands = Path(hass.config.path("www", "brands"))
 
     def _work() -> dict:
-        with tempfile.TemporaryDirectory(prefix="onoff_gitea_store_") as td:
+        with tempfile.TemporaryDirectory(prefix="yidstore_") as td:
             extract_dir = Path(td)
             _extract_zip_bytes(zip_bytes, extract_dir)
             root = _detect_single_top_folder(extract_dir)
