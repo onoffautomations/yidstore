@@ -1,0 +1,31 @@
+name: Attach YidStore ZIP on Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  attach-asset:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Package YidStore
+        run: |
+          cd custom_components/yidstore
+          zip -r __artifact__.zip .
+          mv __artifact__.zip $GITHUB_WORKSPACE/yidstore.zip
+          echo "ASSET=yidstore.zip" >> $GITHUB_ENV
+
+      - name: Upload ZIP Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ env.ASSET }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
