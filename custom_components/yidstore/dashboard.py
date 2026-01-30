@@ -533,7 +533,7 @@ class OnOffStoreReposView(HomeAssistantView):
             "is_hidden": is_hidden,
             "icon_url": icon_url,
             "default_branch": default_branch,
-            "source": "gitea",
+            "source": p.get("source", "gitea") if p else "gitea",
         })
 
 

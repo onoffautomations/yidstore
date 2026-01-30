@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -84,6 +85,172 @@ def _with_time_update(url: str) -> str:
 def _strip_query(url: str) -> str:
     p = urlparse(url)
     return urlunparse((p.scheme, p.netloc, p.path, p.params, "", p.fragment))
+
+
+def _scan_custom_components_versions(hass: HomeAssistant) -> dict[str, str]:
+    """Return installed custom_components domains mapped to their manifest versions."""
+    cc_root = Path(hass.config.path("custom_components"))
+    versions: dict[str, str] = {}
+    if not cc_root.exists():
+        return versions
+
+    for domain_dir in cc_root.iterdir():
+        if not domain_dir.is_dir():
+            continue
+        domain = domain_dir.name
+        if domain.startswith("."):
+            continue
+        version = "unknown"
+        manifest_path = domain_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                version = data.get("version") or version
+                manifest_domain = (data.get("domain") or "").strip()
+                if manifest_domain and manifest_domain.lower() != domain.lower():
+                    versions.setdefault(manifest_domain.lower(), version)
+            except Exception as e:
+                _LOGGER.debug("Failed to read manifest for %s: %s", domain, e)
+        versions[domain.lower()] = version
+
+    return versions
+
+
+def _load_hacs_integrations(hass: HomeAssistant) -> set[str]:
+    """Return a set of installed HACS integration domains."""
+    hacs_path = Path(hass.config.path(".storage", "hacs"))
+    if not hacs_path.exists():
+        return set()
+
+    try:
+        raw = json.loads(hacs_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        _LOGGER.debug("Failed to read HACS storage: %s", e)
+        return set()
+
+    data = raw.get("data", raw)
+    repos = data.get("repositories", [])
+    domains: set[str] = set()
+
+    for repo in repos:
+        try:
+            category = repo.get("category") or repo.get("data", {}).get("category")
+            installed = repo.get("installed")
+            if installed is None:
+                installed = repo.get("data", {}).get("installed")
+            if category != "integration" or not installed:
+                continue
+            domain = repo.get("domain") or repo.get("data", {}).get("domain")
+            if isinstance(domain, str) and domain:
+                domains.add(domain.lower())
+            else:
+                domains_list = repo.get("domains") or repo.get("data", {}).get("domains") or []
+                for d in domains_list:
+                    if isinstance(d, str) and d:
+                        domains.add(d.lower())
+        except Exception:
+            continue
+
+    return domains
+
+
+async def _sync_preinstalled_integrations(
+    hass: HomeAssistant,
+    coordinator,
+    entry: ConfigEntry,
+) -> None:
+    """Track custom_components integrations as installed when they already exist on disk."""
+    installed = await hass.async_add_executor_job(_scan_custom_components_versions, hass)
+    if not installed:
+        return
+
+    hacs_domains = await hass.async_add_executor_job(_load_hacs_integrations, hass)
+    from .config_flow import load_store_list
+
+    default_owner: str | None = (entry.data.get("owner") or "").strip() or None
+    store_packages = await hass.async_add_executor_job(load_store_list, hass)
+
+    to_track: list[tuple[str, str, str, str | None, str | None, str]] = []
+
+    def _match_installed_domain(repo: str, pkg_domain: str | None = None) -> str | None:
+        candidates = []
+        if pkg_domain:
+            candidates.append(pkg_domain)
+        candidates.append(repo)
+        candidates.append(repo.replace("-", "_"))
+        for cand in candidates:
+            key = (cand or "").strip().lower()
+            if key and key in installed:
+                return key
+        return None
+
+    for pkg in store_packages:
+        repo = (pkg.get("repo") or "").strip()
+        if not repo:
+            continue
+        if pkg.get("type", TYPE_INTEGRATION) != TYPE_INTEGRATION:
+            continue
+        match_domain = _match_installed_domain(repo, pkg.get("domain"))
+        if not match_domain:
+            continue
+        owner = (pkg.get("owner") or default_owner or "").strip()
+        if not owner:
+            continue
+        if coordinator.get_package_by_repo(owner, repo) is not None:
+            continue
+        source = "hacs" if match_domain in hacs_domains else pkg.get("source", "gitea")
+        to_track.append(
+            (
+                owner,
+                repo,
+                installed.get(match_domain, "unknown"),
+                pkg.get("mode"),
+                pkg.get("asset_name"),
+                source,
+            )
+        )
+
+    for cr in coordinator.get_custom_repos():
+        repo = (cr.get("repo") or "").strip()
+        if not repo:
+            continue
+        repo_type = cr.get("type") or TYPE_INTEGRATION
+        if repo_type != TYPE_INTEGRATION:
+            continue
+        match_domain = _match_installed_domain(repo, cr.get("domain"))
+        if not match_domain:
+            continue
+        owner = (cr.get("owner") or default_owner or "").strip()
+        if not owner:
+            continue
+        if coordinator.get_package_by_repo(owner, repo) is not None:
+            continue
+        source = "hacs" if match_domain in hacs_domains else cr.get("source", "gitea")
+        to_track.append(
+            (
+                owner,
+                repo,
+                installed.get(match_domain, "unknown"),
+                None,
+                None,
+                source,
+            )
+        )
+
+    if not to_track:
+        return
+
+    _LOGGER.info("Tracking %d pre-installed custom_components integrations", len(to_track))
+    for owner, repo, version, mode, asset_name, source in to_track:
+        await coordinator.async_add_or_update_package(
+            repo_name=repo,
+            owner=owner,
+            package_type=TYPE_INTEGRATION,
+            installed_version=version,
+            mode=mode,
+            asset_name=asset_name,
+            source=source,
+        )
 
 
 async def _dump_resources_state(hass: HomeAssistant) -> None:
@@ -435,6 +602,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "headers": headers,
         "coordinator": coordinator,
     }
+
+    # Track already-installed custom_components integrations as if installed by the store
+    await _sync_preinstalled_integrations(hass, coordinator, entry)
 
     # Setup Dashboard (Store UI) - catch errors so setup doesn't fail entirely
     try:

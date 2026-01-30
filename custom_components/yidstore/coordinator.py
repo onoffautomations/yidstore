@@ -227,8 +227,8 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
 
         for package_id, package_data in self.packages.items():
             try:
-                if package_data.get("source", "gitea") == "github":
-                    _LOGGER.debug("Skipping update check for GitHub repo: %s", package_id)
+                if package_data.get("source", "gitea") in {"github", "hacs"}:
+                    _LOGGER.debug("Skipping update check for %s repo: %s", package_data.get("source"), package_id)
                     continue
 
                 owner = package_data["owner"]
