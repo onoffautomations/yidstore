@@ -38,6 +38,12 @@
             -webkit-tap-highlight-color: transparent;
         }
 
+        html.modal-open,
+        body.modal-open {
+            overflow: hidden;
+            height: 100%;
+        }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -568,6 +574,7 @@
             color: #cbd5e1;
             font-size: 0.9rem;
             -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
         }
 
         .modal-b::-webkit-scrollbar {
@@ -892,7 +899,7 @@
                 <div class="logo-desc">Your Integration Store</div>
             </div>
             <div class="powered-by">
-                Powered by: <strong><a href="https://onoffautmations.com" style="color: inherit; text-decoration: none;">OnOff Automations</a></strong><br>
+                Powered by: <strong><a href="https://onoffautomations.com/" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none;">OnOff Automations</a></strong><br>
             </div>
             <div class="controls">
                 <div class="search-box">
@@ -1022,6 +1029,21 @@
         let lastFiltered = [];
         let collapsedSections = new Set();
         const grid = document.getElementById('grid');
+
+        function isOverlayOpen() {
+            const modal = document.getElementById('modal');
+            const customModal = document.getElementById('customModal');
+            const pop = document.getElementById('pop-o');
+            return (modal && modal.style.display === 'flex') ||
+                (customModal && customModal.style.display === 'flex') ||
+                (pop && pop.style.display === 'flex');
+        }
+
+        function updateScrollLock() {
+            const lock = isOverlayOpen();
+            document.body.classList.toggle('modal-open', lock);
+            document.documentElement.classList.toggle('modal-open', lock);
+        }
 
         function formatName(n) {
             let s = n.startsWith('x-') ? n.substring(2) : n;
@@ -1171,7 +1193,7 @@
                 <div class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</div>
                 <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
                      ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : '<span class="badge badge-inst">Installed</span>') : ''}
+                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : (i.source === 'hacs' ? '<span class="badge badge-inst">Installed by HACS</span>' : '<span class="badge badge-inst">Installed</span>')) : ''}
                 </div>
             </div>
             <div style="display: flex; gap: 0.8rem; align-items: flex-start;">
@@ -1236,7 +1258,7 @@
                         <span class="title-text">${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : '<span class="badge badge-inst">Installed</span>') : ''}
+                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : (i.source === 'hacs' ? '<span class="badge badge-inst">Installed by HACS</span>' : '<span class="badge badge-inst">Installed</span>')) : ''}
                     </div>
                     <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''}</div>
                 </div>
@@ -1453,6 +1475,7 @@
             const body = document.getElementById('mb');
             body.innerHTML = '<center style="padding:3rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2.5rem;"></i><br><br>Loading...</center>';
             document.getElementById('modal').style.display = 'flex';
+            updateScrollLock();
 
             const foot = document.getElementById('mf');
 
@@ -1622,6 +1645,7 @@
         async function openCustomModal() {
             document.getElementById('dropdown').style.display = 'none';
             document.getElementById('customModal').style.display = 'flex';
+            updateScrollLock();
             toggleCustomRepoFields();
             await loadCustomRepos();
         }
@@ -1674,7 +1698,10 @@
             }
         }
 
-        function closeCustomModal() { document.getElementById('customModal').style.display = 'none'; }
+        function closeCustomModal() {
+            document.getElementById('customModal').style.display = 'none';
+            updateScrollLock();
+        }
 
         async function addCustomRepo() {
             const isGithub = document.getElementById('customIsGithub').checked;
@@ -1823,10 +1850,17 @@
                 a.innerHTML = `<button class="btn btn-p" onclick="closePop()">OK</button>`;
             }
             document.getElementById('pop-o').style.display = 'flex';
+            updateScrollLock();
         }
 
-        function closePop() { document.getElementById('pop-o').style.display = 'none'; }
-        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+        function closePop() {
+            document.getElementById('pop-o').style.display = 'none';
+            updateScrollLock();
+        }
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+            updateScrollLock();
+        }
 
         window.onclick = (e) => {
             if (e.target == document.getElementById('modal')) closeModal();
