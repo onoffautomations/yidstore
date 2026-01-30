@@ -1,0 +1,1653 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>YidStore</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --primary: #00d2ff;
+            --secondary: #3a7bd5;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --dim: #94a3b8;
+            --glow: rgba(0, 210, 255, 0.2);
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --grad: linear-gradient(135deg, #00d2ff, #3a7bd5);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            padding: 1rem;
+            min-height: 100vh;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+        }
+
+        .logo-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--grad);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .logo-desc {
+            font-size: 0.75rem;
+            color: var(--dim);
+            font-weight: 400;
+        }
+
+        .powered-by {
+            font-size: 0.7rem;
+            color: var(--dim);
+            text-align: right;
+            line-height: 1.4;
+        }
+
+        .powered-by a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .powered-by a:hover {
+            text-decoration: underline;
+        }
+
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+            flex-grow: 1;
+            justify-content: flex-end;
+        }
+
+        .search-box {
+            position: relative;
+            width: 100%;
+            max-width: 220px;
+            min-width: 150px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 0.5rem 0.8rem 0.5rem 2.2rem;
+            border-radius: 50px;
+            background: var(--card);
+            border: 1px solid #334155;
+            color: #fff;
+            outline: none;
+            transition: 0.3s;
+            font-size: 0.85rem;
+        }
+
+        .search-box input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 15px var(--glow);
+        }
+
+        .search-box i {
+            position: absolute;
+            left: 0.8rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--dim);
+            font-size: 0.9rem;
+        }
+
+        select {
+            padding: 0.5rem 0.8rem;
+            border-radius: 50px;
+            background: var(--card);
+            border: 1px solid #334155;
+            color: #fff;
+            cursor: pointer;
+            outline: none;
+            font-size: 0.8rem;
+            max-width: 130px;
+        }
+
+        .bulk-bar {
+            background: var(--primary);
+            color: #000;
+            padding: 0.6rem 1rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 700;
+            font-size: 0.85rem;
+            animation: slideDown 0.3s;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .menu-container {
+            position: relative;
+        }
+
+        .btn-icon {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 1.3rem;
+            cursor: pointer;
+            padding: 0.4rem;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .btn-icon:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: var(--card);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            min-width: 200px;
+            display: none;
+            z-index: 100;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .dropdown div {
+            padding: 0.7rem 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .dropdown div:hover {
+            background: #334155;
+            color: var(--primary);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+
+        .grid.list-view {
+            grid-template-columns: 1fr;
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 1.2rem;
+            border: 1px solid #334155;
+            cursor: pointer;
+            transition: 0.3s;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--primary);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .card.selected {
+            border-color: var(--primary);
+            background: rgba(0, 210, 255, 0.05);
+        }
+
+        .card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--grad);
+            opacity: 0;
+            transition: 0.3s;
+        }
+
+        .card:hover::after {
+            opacity: 1;
+        }
+
+        .list-row {
+            background: var(--card);
+            border-radius: 14px;
+            border: 1px solid #334155;
+            padding: 0.8rem 1rem;
+            display: grid;
+            grid-template-columns: 48px minmax(0, 1fr) auto;
+            gap: 0.8rem;
+            align-items: center;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .list-row:hover {
+            border-color: var(--primary);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .list-row.selected {
+            border-color: var(--primary);
+            background: rgba(0, 210, 255, 0.05);
+        }
+
+        .list-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .list-title .title-text {
+            flex: 1 1 240px;
+            min-width: 0;
+            word-break: normal;
+            overflow-wrap: normal;
+            white-space: normal;
+        }
+
+        .list-meta {
+            color: var(--dim);
+            font-size: 0.8rem;
+            margin-top: 0.2rem;
+        }
+
+        .list-actions {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.8rem;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+
+        .card-check {
+            position: absolute;
+            top: 0.8rem;
+            right: 0.8rem;
+            font-size: 1.3rem;
+            color: var(--primary);
+            display: none;
+        }
+
+        .card.selected .card-check {
+            display: block;
+        }
+
+        .type-tag {
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.6rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 0.2rem;
+        }
+
+        .tag-int {
+            background: rgba(0, 210, 255, 0.1);
+            color: #00d2ff;
+        }
+
+        .tag-card {
+            background: rgba(168, 85, 247, 0.1);
+            color: #a855f7;
+        }
+
+        .tag-blue {
+            background: rgba(236, 72, 153, 0.1);
+            color: #ec4899;
+        }
+
+        .badge {
+            font-size: 0.6rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 50px;
+            font-weight: 700;
+            border: 1px solid transparent;
+        }
+
+        .badge-update {
+            background: rgba(234, 179, 8, 0.1);
+            color: var(--warning);
+            border-color: rgba(234, 179, 8, 0.2);
+        }
+
+        .badge-inst {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+            border-color: rgba(34, 197, 94, 0.2);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.5rem;
+        }
+
+        .card-title span {
+            word-break: break-word;
+        }
+
+        .card-desc {
+            color: var(--dim);
+            font-size: 0.85rem;
+            line-height: 1.4;
+            margin-bottom: 0.5rem;
+            flex-grow: 1;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .card-foot {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 0.8rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 0.3rem;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: none;
+            color: var(--dim);
+            padding: 0.6rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .action-btn.hide-btn:hover {
+            color: var(--danger);
+        }
+
+        .btn {
+            padding: 0.7rem 1.2rem;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            transition: 0.3s;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+        }
+
+        .btn-p {
+            background: var(--grad);
+            color: #fff;
+        }
+
+        .btn-p:hover {
+            transform: scale(1.03);
+            box-shadow: 0 5px 15px var(--glow);
+        }
+
+        .btn-p:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-o {
+            background: transparent;
+            border: 1px solid #334155;
+            color: #fff;
+        }
+
+        .btn-o:hover {
+            background: #334155;
+        }
+
+        .btn-dark {
+            background: #000;
+            color: #fff;
+        }
+
+        .btn-refresh {
+            padding: 0.5rem 0.8rem;
+            font-size: 0.75rem;
+        }
+
+        #modal,
+        #customModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 15, 30, 0.95);
+            backdrop-filter: blur(15px);
+            display: none;
+            z-index: 1000;
+            padding: 0.5rem;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-c {
+            background: var(--card);
+            width: 100%;
+            max-width: 900px;
+            height: 95vh;
+            max-height: 95vh;
+            border-radius: 20px;
+            border: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: zoom 0.3s;
+        }
+
+        #customModal .modal-c {
+            height: auto;
+            max-width: 400px;
+            max-height: 90vh;
+        }
+
+        .modal-h {
+            padding: 1rem 1.2rem;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .modal-h h2 {
+            font-size: 1.1rem;
+            word-break: break-word;
+        }
+
+        .modal-b {
+            padding: 1.2rem;
+            overflow-y: auto;
+            flex-grow: 1;
+            line-height: 1.7;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .modal-f {
+            padding: 1rem 1.2rem;
+            border-top: 1px solid #334155;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.8rem;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.4rem;
+            color: var(--dim);
+            font-size: 0.85rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.7rem 1rem;
+            border-radius: 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #fff;
+            outline: none;
+            font-size: 0.9rem;
+        }
+
+        .pop-o {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2100;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .pop {
+            background: #1e293b;
+            padding: 1.5rem;
+            border-radius: 20px;
+            border: 1px solid var(--primary);
+            text-align: center;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 0 40px var(--glow);
+            animation: pop 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+
+        @keyframes pop {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @keyframes zoom {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 0.4rem;
+            }
+
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.8rem;
+                margin-bottom: 1rem;
+            }
+
+            .logo-section {
+                text-align: center;
+            }
+
+            .logo {
+                font-size: 1.4rem;
+                justify-content: center;
+            }
+
+            .powered-by {
+                text-align: center;
+                font-size: 0.65rem;
+            }
+
+            .controls {
+                justify-content: center;
+                gap: 0.5rem;
+            }
+
+            .search-box {
+                max-width: 100%;
+                order: -1;
+                width: 100%;
+            }
+
+            .search-box input {
+                padding: 0.7rem 1rem 0.7rem 2.5rem;
+                font-size: 0.95rem;
+            }
+
+            select {
+                flex: 1;
+                min-width: 0;
+                max-width: none;
+                font-size: 0.85rem;
+                padding: 0.6rem;
+            }
+
+            .btn-refresh {
+                display: none;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .list-row {
+                grid-template-columns: 40px 1fr;
+                gap: 0.6rem;
+            }
+
+            .list-actions {
+                grid-column: 1 / -1;
+                justify-content: flex-start;
+            }
+
+            .card {
+                padding: 1.2rem;
+                border-radius: 14px;
+            }
+
+            .card-title {
+                font-size: 1.1rem;
+            }
+
+            .card-desc {
+                font-size: 0.9rem;
+                -webkit-line-clamp: 3;
+                line-clamp: 3;
+            }
+
+            .modal-c {
+                border-radius: 0;
+                height: 100vh;
+                max-height: 100vh;
+                width: 100vw;
+            }
+        }
+
+        /* Markdown styling */
+        .modal-b h1,
+        .modal-b h2,
+        .modal-b h3 {
+            color: #fff;
+            margin: 1rem 0 0.5rem;
+        }
+
+        .modal-b h1 {
+            font-size: 1.3rem;
+        }
+
+        .modal-b h2 {
+            font-size: 1.1rem;
+        }
+
+        .modal-b h3 {
+            font-size: 1rem;
+        }
+
+        .modal-b p {
+            margin-bottom: 0.8rem;
+        }
+
+        .modal-b code {
+            background: #0f172a;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .modal-b pre {
+            background: #0f172a;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0.8rem 0;
+        }
+
+        .modal-b pre code {
+            padding: 0;
+        }
+
+        .modal-b ul,
+        .modal-b ol {
+            margin-left: 1.5rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .modal-b img {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-section">
+                <div class="logo" onclick="load()"><i class="mdi mdi-storefront"></i> YidStore</div>
+                <div class="logo-desc">Your Integration Store</div>
+            </div>
+            <div class="powered-by">
+                Powered by: <strong><a href="https://onoffautmations.com" style="color: inherit; text-decoration: none;">OnOff Automations</a></strong><br>
+                <a href="mailto:info@onoffautomations.com">info@onoffautomations.com</a> | (845) 400-8149
+            </div>
+            <div class="controls">
+                <div class="search-box">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="q" placeholder="Search..." oninput="apply()">
+                </div>
+                <button class="btn btn-o btn-refresh" onclick="checkUpdates()" id="refreshBtn">
+                    <i class="mdi mdi-sync"></i> Refresh
+                </button>
+                <select id="filterF" onchange="apply()" title="Filter">
+                    <option value="all">Filter: All</option>
+                    <option value="integration">Filter: Integrations</option>
+                    <option value="lovelace">Filter: Cards</option>
+                    <option value="blueprints">Filter: Blueprints</option>
+                    <option value="installed">Filter: Installed</option>
+                    <option value="not_installed">Filter: Not Installed</option>
+                    <option value="updates">Filter: Updates</option>
+                </select>
+                <select id="authorF" onchange="apply()" title="Filter by Author">
+                    <option value="all">All Authors</option>
+                </select>
+                <select id="sort" onchange="apply()" title="Sort by">
+                    <option value="name">Sort: Name</option>
+                    <option value="upd">Sort: Updates</option>
+                    <option value="new">Sort: Recent</option>
+                    <option value="type">Sort: Type</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+                <div class="menu-container">
+                    <button class="btn-icon" onclick="toggleView()" title="Toggle View" id="viewToggleBtn"><i class="mdi mdi-format-list-bulleted"></i></button>
+                    <button class="btn-icon" onclick="toggleMenu()"><i class="mdi mdi-dots-vertical"></i></button>
+                    <div id="dropdown" class="dropdown">
+                        <div onclick="checkUpdates()"><i class="mdi mdi-sync"></i> Refresh Updates</div>
+                        <div id="addCustomBtn" onclick="openCustomModal()"><i class="mdi mdi-folder-plus-outline"></i>
+                            Custom Repos
+                        </div>
+                        <div id="toggleHiddenBtn" onclick="toggleShowHidden()"><i class="mdi mdi-eye-off-outline"></i>
+                            Show Hidden</div>
+                        <div onclick="load()"><i class="mdi mdi-refresh"></i> Full Reload</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div id="bulkBar" class="bulk-bar">
+            <span id="bulkText">0 selected</span>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
+                <button class="btn btn-dark" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
+                    Install</button>
+                <button class="btn btn-o" onclick="clearSelection()"
+                    style="border-color:#000; color:#000;">Cancel</button>
+            </div>
+        </div>
+
+        <div id="grid" class="grid"></div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-c">
+            <div class="modal-h">
+                <div style="flex:1; min-width:0;">
+                    <h2 id="mt"></h2>
+                    <p id="ms" style="color:var(--dim); font-size:0.8rem;"></p>
+                </div>
+                <div style="font-size:1.8rem; cursor:pointer; padding:0.5rem;" onclick="closeModal()">&times;</div>
+            </div>
+            <div class="modal-b md" id="mb"></div>
+            <div class="modal-f" id="mf"></div>
+        </div>
+    </div>
+
+    <div id="customModal">
+        <div class="modal-c">
+            <div class="modal-h">
+                <h2>Custom Repositories</h2>
+                <div style="font-size:1.8rem; cursor:pointer; padding:0.5rem;" onclick="closeCustomModal()">&times;
+                </div>
+            </div>
+            <div class="modal-b">
+                <div id="customReposList" style="margin-bottom: 1.5rem;"></div>
+                <div style="border-top: 1px solid #334155; padding-top: 1rem; margin-top: 1rem;">
+                    <h3 style="font-size: 1rem; margin-bottom: 1rem; color: var(--text);">Add New Repository</h3>
+                    <div class="form-group">
+                        <label>Owner / Organization</label>
+                        <input type="text" id="customOwner" placeholder="e.g. Zing">
+                    </div>
+                    <div class="form-group">
+                        <label>Repository Name</label>
+                        <input type="text" id="customRepo" placeholder="e.g. my-integration">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-f">
+                <button class="btn btn-o" onclick="closeCustomModal()">Close</button>
+                <button class="btn btn-p" onclick="addCustomRepo()">Add Repository</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="pop-o" class="pop-o">
+        <div class="pop">
+            <div id="pi" style="font-size:3.5rem; color:var(--success); margin-bottom:1rem;"></div>
+            <h3 id="pt" style="font-size:1.4rem; margin-bottom:0.8rem;"></h3>
+            <p id="pm" style="color:var(--dim); margin-bottom:1.5rem; line-height:1.5; font-size:0.9rem;"></p>
+            <div id="pa" style="display:flex; justify-content:center; gap:0.8rem; flex-wrap:wrap;"></div>
+        </div>
+    </div>
+
+    <script>
+        let items = [];
+        let selectedIds = new Set();
+        let showHidden = false;
+        let viewMode = 'grid';
+        let lastFiltered = [];
+        let collapsedSections = new Set();
+        const grid = document.getElementById('grid');
+
+        function formatName(n) {
+            let s = n.startsWith('x-') ? n.substring(2) : n;
+            s = s.replace(/[_-]/g, ' ');
+            return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+
+        async function load() {
+            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+            try {
+                const r = await fetch('/api/onoff_store/repos');
+                items = await r.json();
+                apply(); // This will call populateAuthorFilter with visible items
+            } catch (e) { grid.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--dim);">Error loading store.</div>'; }
+        }
+
+        function populateAuthorFilter(visibleItems = null) {
+            const authorF = document.getElementById('authorF');
+            const currentValue = authorF.value;
+
+            // Use visible items if provided, otherwise use all items
+            const itemsToCheck = visibleItems || items;
+
+            // Get unique authors with display names - only from visible items
+            const authors = new Map();
+            itemsToCheck.forEach(i => {
+                // Skip hidden items unless showHidden is true
+                if (!showHidden && i.is_hidden) return;
+                const displayName = getDisplayAuthor(i.owner, i.owner_display_name);
+                if (!authors.has(i.owner)) {
+                    authors.set(i.owner, displayName);
+                }
+            });
+
+            // Sort authors by display name
+            const sortedAuthors = Array.from(authors.entries()).sort((a, b) =>
+                a[1].localeCompare(b[1])
+            );
+
+            // Rebuild options
+            authorF.innerHTML = '<option value="all">All Authors</option>';
+            sortedAuthors.forEach(([owner, displayName]) => {
+                const opt = document.createElement('option');
+                opt.value = owner;
+                opt.textContent = displayName;
+                authorF.appendChild(opt);
+            });
+
+            // Restore previous selection if it still exists, otherwise reset to all
+            if (currentValue !== 'all' && authors.has(currentValue)) {
+                authorF.value = currentValue;
+            } else if (currentValue !== 'all') {
+                authorF.value = 'all';
+            }
+        }
+
+        async function checkUpdates() {
+            try {
+                await fetch('/api/onoff_store/refresh', { method: 'POST' });
+                load();
+            } catch (e) { }
+        }
+
+        function apply() {
+            const q = document.getElementById('q').value.toLowerCase();
+            const filterVal = document.getElementById('filterF').value;
+            const s = document.getElementById('sort').value;
+            const authorFilter = document.getElementById('authorF').value;
+
+            // First filter by everything except author (for populating author dropdown)
+            let preAuthorFiltered = items.filter(i => {
+                if (!showHidden && i.is_hidden) return false;
+                const matchQ = i.repo_name.toLowerCase().includes(q) || i.description.toLowerCase().includes(q);
+                const matchFilter =
+                    filterVal === 'all' ||
+                    (['integration', 'lovelace', 'blueprints'].includes(filterVal) && i.type === filterVal) ||
+                    (filterVal === 'installed' && i.is_installed) ||
+                    (filterVal === 'not_installed' && !i.is_installed) ||
+                    (filterVal === 'updates' && i.update_available);
+                return matchQ && matchFilter;
+            });
+
+            // Update author filter with only authors that have visible repos
+            populateAuthorFilter(preAuthorFiltered);
+
+            // Now apply author filter too
+            let filtered = preAuthorFiltered.filter(i => {
+                const matchAuthor = authorFilter === 'all' || i.owner === authorFilter;
+                return matchAuthor;
+            });
+
+            filtered.sort((a, b) => {
+                if (s === 'name') return a.repo_name.localeCompare(b.repo_name);
+                if (s === 'new') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (s === 'upd') {
+                    if (a.update_available && !b.update_available) return -1;
+                    if (!a.update_available && b.update_available) return 1;
+                    return a.repo_name.localeCompare(b.repo_name);
+                }
+                if (s === 'type') {
+                    const typeOrder = { 'integration': 0, 'lovelace': 1, 'blueprints': 2 };
+                    const diff = (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
+                    return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
+                }
+                if (s === 'author') {
+                    const authorA = (a.owner_display_name || a.owner).toLowerCase();
+                    const authorB = (b.owner_display_name || b.owner).toLowerCase();
+                    const diff = authorA.localeCompare(authorB);
+                    return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
+                }
+                return 0;
+            });
+            lastFiltered = filtered;
+            render(filtered);
+        }
+
+        function getDisplayAuthor(owner, displayName) {
+            // Map admin to Joel Weiss
+            if (owner === 'admin' || displayName === 'admin') return 'Joel Weiss';
+            return displayName || owner;
+        }
+
+        function createCard(i) {
+            const id = `${i.owner}/${i.repo_name}`;
+            const card = document.createElement('div');
+            card.className = `card ${selectedIds.has(id) ? 'selected' : ''}`;
+            const typeIcon = i.type === 'lovelace' ? 'mdi-view-dashboard' : (i.type === 'blueprints' ? 'mdi-file-document-outline' : 'mdi-puzzle');
+            const typeClass = i.type === 'lovelace' ? 'tag-card' : (i.type === 'blueprints' ? 'tag-blue' : 'tag-int');
+            const displayTitle = formatName(i.repo_name);
+            const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
+            const typeLabel = i.type === 'lovelace' ? 'Card' : (i.type === 'blueprints' ? 'Blueprint' : 'Integration');
+
+            // Build description: "Integration by: Author" + actual description if any
+            let descContent = `<span style="color: var(--primary);">${typeLabel} by:</span> ${authorDisplay}`;
+            if (i.description) {
+                descContent += `<br><span style="color: var(--dim); font-size: 0.8rem;">${i.description}</span>`;
+            }
+
+            // Icon handling - show icon if URL available, with fallback to type icon
+            const iconHtml = i.icon_url
+                ? `<img src="${i.icon_url}" alt="" class="card-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;"><div class="card-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;"><i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: var(--primary);"></i></div>`
+                : `<div style="width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); display: flex; align-items: center; justify-content: center;"><i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: var(--primary);"></i></div>`;
+
+            card.innerHTML = `
+            <i class="mdi mdi-check-circle card-check"></i>
+            <div class="card-head">
+                <div class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</div>
+                <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
+                     ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
+                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : '<span class="badge badge-inst">Installed</span>') : ''}
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.8rem; align-items: flex-start;">
+                ${iconHtml}
+                <div style="flex: 1; min-width: 0;">
+                    <div class="card-title">
+                        <span>${displayTitle}</span>
+                        <div class="card-actions">
+                            <button class="action-btn hide-btn" onclick="toggleHide('${i.owner}','${i.repo_name}',${i.is_hidden},event)" title="${i.is_hidden ? 'Unhide' : 'Hide'}">
+                                <i class="mdi ${i.is_hidden ? 'mdi-eye-outline' : 'mdi-eye-off-outline'}"></i>
+                            </button>
+                            ${i.is_installed ? `
+                            <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
+                                <i class="mdi mdi-trash-can-outline"></i>
+                            </button>` : ''}
+                        </div>
+                    </div>
+                    <div class="card-desc">${descContent}</div>
+                </div>
+            </div>
+            <div class="card-foot">
+                <div style="color:var(--dim); font-size:0.75rem;">${authorDisplay}</div>
+                <button class="btn btn-p" onclick="openDet('${i.owner}','${i.repo_name}',event)">View <i class="mdi mdi-chevron-right"></i></button>
+            </div>
+        `;
+            card.onclick = (e) => {
+                if (e.ctrlKey || e.metaKey || selectedIds.size > 0) {
+                    toggleSelect(id);
+                } else {
+                    openDet(i.owner, i.repo_name);
+                }
+            };
+            return card;
+        }
+
+        function createListRow(i) {
+            const id = `${i.owner}/${i.repo_name}`;
+            const row = document.createElement('div');
+            row.className = `list-row ${selectedIds.has(id) ? 'selected' : ''}`;
+            const typeIcon = i.type === 'lovelace' ? 'mdi-view-dashboard' : (i.type === 'blueprints' ? 'mdi-file-document-outline' : 'mdi-puzzle');
+            const typeClass = i.type === 'lovelace' ? 'tag-card' : (i.type === 'blueprints' ? 'tag-blue' : 'tag-int');
+            const displayTitle = formatName(i.repo_name);
+            const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
+
+            const iconHtml = i.icon_url
+                ? `<img src="${i.icon_url}" alt="" class="list-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                   <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
+                       <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
+                   </div>`
+                : `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); display: flex; align-items: center; justify-content: center;">
+                       <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
+                   </div>`;
+
+            const actionLabel = i.update_available ? 'Update' : (i.is_installed ? 'Reinstall' : 'Install');
+
+            row.innerHTML = `
+                <div style="display:flex; align-items:center; justify-content:center;">
+                    ${iconHtml}
+                </div>
+                <div style="min-width: 0;">
+                    <div class="list-title">
+                        <span class="title-text">${displayTitle}</span>
+                        <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
+                        ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
+                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : '<span class="badge badge-inst">Installed</span>') : ''}
+                    </div>
+                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''}</div>
+                </div>
+                <div class="list-actions">
+                    <button class="btn btn-p" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
+                    <button class="action-btn hide-btn" onclick="toggleHide('${i.owner}','${i.repo_name}',${i.is_hidden},event)" title="${i.is_hidden ? 'Unhide' : 'Hide'}">
+                        <i class="mdi ${i.is_hidden ? 'mdi-eye-outline' : 'mdi-eye-off-outline'}"></i>
+                    </button>
+                    ${i.is_installed ? `
+                    <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
+                        <i class="mdi mdi-trash-can-outline"></i>
+                    </button>` : ''}
+                    <button class="action-btn" onclick="openDet('${i.owner}','${i.repo_name}',event)" title="Details">
+                        <i class="mdi mdi-open-in-new"></i>
+                    </button>
+                </div>
+            `;
+
+            row.onclick = (e) => {
+                if (e.ctrlKey || e.metaKey || selectedIds.size > 0) {
+                    toggleSelect(id);
+                } else if (!e.target.closest('button')) {
+                    openDet(i.owner, i.repo_name);
+                }
+            };
+            return row;
+        }
+
+        function createSectionHeader(title, icon, count) {
+            return createSectionHeaderWithToggle(title, icon, count, null);
+        }
+
+        function createSectionHeaderWithToggle(title, icon, count, sectionKey) {
+            const header = document.createElement('div');
+            header.style.cssText = 'grid-column: 1/-1; padding: 1rem 0 0.5rem; border-bottom: 1px solid #334155; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;';
+            const isCollapsed = sectionKey ? collapsedSections.has(sectionKey) : false;
+            const toggleIcon = isCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up';
+            header.innerHTML = `
+                <i class="mdi ${icon}" style="font-size: 1.2rem; color: var(--primary);"></i>
+                <span style="font-size: 1.1rem; font-weight: 600;">${title}</span>
+                <span style="color: var(--dim); font-size: 0.85rem;">(${count})</span>
+                ${sectionKey ? `<button class="action-btn" style="margin-left:auto;" onclick="toggleSection('${sectionKey}')"><i class="mdi ${toggleIcon}"></i></button>` : ''}
+            `;
+            return header;
+        }
+
+        function render(data) {
+            const s = document.getElementById('sort').value;
+            grid.innerHTML = '';
+            grid.classList.toggle('list-view', viewMode === 'list');
+
+            if (data.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-package-variant" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> No items found</div>';
+                return;
+            }
+
+            // Always show Updates section at top if there are updates
+            const updatesItems = data.filter(i => i.update_available);
+            const nonUpdatesItems = data.filter(i => !i.update_available);
+
+            if (updatesItems.length > 0) {
+                const key = 'section_updates';
+                grid.appendChild(createSectionHeaderWithToggle('Updates Available', 'mdi-update', updatesItems.length, key));
+                if (!collapsedSections.has(key)) {
+                    updatesItems.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+                }
+            }
+
+            // Render remaining items based on sort mode
+            if (s === 'type' && nonUpdatesItems.length > 0) {
+                // Group by type
+                const types = ['integration', 'lovelace', 'blueprints'];
+                const typeLabels = { 'integration': 'Integrations', 'lovelace': 'Lovelace Cards', 'blueprints': 'Blueprints' };
+                const typeIcons = { 'integration': 'mdi-puzzle', 'lovelace': 'mdi-view-dashboard', 'blueprints': 'mdi-file-document-outline' };
+
+                types.forEach(type => {
+                    const typeItems = nonUpdatesItems.filter(i => i.type === type);
+                    if (typeItems.length > 0) {
+                        const key = `section_type_${type}`;
+                        grid.appendChild(createSectionHeaderWithToggle(typeLabels[type], typeIcons[type], typeItems.length, key));
+                        if (!collapsedSections.has(key)) {
+                            typeItems.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+                        }
+                    }
+                });
+            } else if (s === 'author' && nonUpdatesItems.length > 0) {
+                // Group by author
+                const authors = new Map();
+                nonUpdatesItems.forEach(i => {
+                    const author = i.owner;
+                    if (!authors.has(author)) {
+                        authors.set(author, { displayName: getDisplayAuthor(i.owner, i.owner_display_name), items: [] });
+                    }
+                    authors.get(author).items.push(i);
+                });
+
+                // Sort authors by display name
+                const sortedAuthors = Array.from(authors.entries()).sort((a, b) =>
+                    a[1].displayName.localeCompare(b[1].displayName)
+                );
+
+                sortedAuthors.forEach(([author, data]) => {
+                    const key = `section_author_${author.toLowerCase().replace(/[^a-z0-9_]+/g, '_')}`;
+                    grid.appendChild(createSectionHeaderWithToggle(data.displayName, 'mdi-account', data.items.length, key));
+                    if (!collapsedSections.has(key)) {
+                        data.items.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+                    }
+                });
+            } else {
+                // Default rendering (no sections for non-updates)
+                if (updatesItems.length > 0 && nonUpdatesItems.length > 0) {
+                    const key = 'section_all';
+                    grid.appendChild(createSectionHeaderWithToggle('All Packages', 'mdi-package-variant', nonUpdatesItems.length, key));
+                    if (!collapsedSections.has(key)) {
+                        nonUpdatesItems.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+                    }
+                    return;
+                }
+                nonUpdatesItems.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+            }
+        }
+
+        function toggleSelect(id) {
+            if (selectedIds.has(id)) selectedIds.delete(id);
+            else selectedIds.add(id);
+            updateBulkBar();
+            apply();
+        }
+
+        function updateBulkBar() {
+            const bar = document.getElementById('bulkBar');
+            const text = document.getElementById('bulkText');
+            if (selectedIds.size > 0) {
+                bar.style.display = 'flex';
+                text.innerText = `${selectedIds.size} selected`;
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+
+        function clearSelection() {
+            selectedIds.clear();
+            updateBulkBar();
+            apply();
+        }
+
+        async function bulkAction(act) {
+            if (act === 'install') {
+                if (!confirm(`Install ${selectedIds.size} components?`)) return;
+                const ids = Array.from(selectedIds);
+                clearSelection();
+                pop('Installing', `Installing ${ids.length} packages...`, 'mdi-download-network', false);
+                for (const id of ids) {
+                    const [o, r] = id.split('/');
+                    const item = items.find(x => x.owner === o && x.repo_name === r);
+                    await executeInstDirect(o, r, item.type, item.mode, item.asset_name);
+                }
+                pop('Complete', 'Installation complete. Check logs for details.', 'mdi-check-circle', false);
+                load();
+            }
+        }
+
+        async function executeRemoveDirect(o, r, t) {
+            try {
+                await fetch('/api/onoff_store/uninstall', {
+                    method: 'POST',
+                    body: JSON.stringify({ owner: o, repo: r, type: t }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (e) { }
+        }
+
+        async function toggleHide(o, r, currentlyHidden, e) {
+            if (e) e.stopPropagation();
+            const endpoint = currentlyHidden ? '/api/onoff_store/unhide' : '/api/onoff_store/hide';
+            try {
+                await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner: o, repo: r })
+                });
+                load();
+            } catch (e) { alert('Action failed'); }
+        }
+
+        function toggleShowHidden() {
+            showHidden = !showHidden;
+            const btn = document.getElementById('toggleHiddenBtn');
+            btn.innerHTML = showHidden ? '<i class="mdi mdi-eye-outline"></i> Hide Hidden' : '<i class="mdi mdi-eye-off-outline"></i> Show Hidden';
+            document.getElementById('dropdown').style.display = 'none';
+            apply();
+        }
+
+        async function executeInstDirect(o, r, t, mode, asset_name) {
+            try {
+                const body = { owner: o, repo: r, type: t };
+                if (mode) body.mode = mode;
+                if (asset_name) body.asset_name = asset_name;
+                await fetch('/api/onoff_store/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (e) { }
+        }
+
+        async function openDet(o, r, e) {
+            if (e) e.stopPropagation();
+            const item = items.find(x => x.owner === o && x.repo_name === r);
+            document.getElementById('mt').innerText = formatName(item.repo_name);
+            document.getElementById('ms').innerText = `by ${item.owner_display_name || item.owner}`;
+            const body = document.getElementById('mb');
+            body.innerHTML = '<center style="padding:3rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2.5rem;"></i><br><br>Loading...</center>';
+            document.getElementById('modal').style.display = 'flex';
+
+            const foot = document.getElementById('mf');
+
+            // Fetch available releases for version selection
+            let releases = [];
+            try {
+                const relResp = await fetch(`/api/onoff_store/releases/${o}/${r}`);
+                if (relResp.ok) {
+                    releases = await relResp.json();
+                }
+            } catch (e) {
+                console.log('Failed to fetch releases:', e);
+            }
+
+            // Build version selector if releases are available
+            let versionSelector = '';
+            if (releases && releases.length > 0) {
+                // Get older releases (skip the first/latest one since it's shown as "Latest")
+                const olderReleases = releases.slice(1);
+                versionSelector = `
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.5rem; color: var(--dim); font-size: 0.85rem;">Version:</label>
+                        <select id="versionSelect" style="width: 100%; padding: 0.7rem; border-radius: 10px; background: #0f172a; border: 1px solid #334155; color: #fff; font-size: 0.9rem;">
+                            <option value="">Latest (${releases[0]?.tag_name || 'default'})</option>
+                            ${olderReleases.map(rel => `<option value="${rel.tag_name}">${rel.tag_name}${rel.name ? ' - ' + rel.name : ''}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }
+
+            const btnTxt = item.update_available ? 'Update' : (item.is_installed ? 'Reinstall' : 'Install');
+            foot.innerHTML = `
+                ${versionSelector}
+                <div style="display: flex; gap: 0.8rem; justify-content: flex-end; width: 100%;">
+                    <button class="btn btn-o" onclick="closeModal()">Close</button>
+                    <button class="btn btn-p" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                </div>
+            `;
+
+            try {
+                const resp = await fetch(`/api/onoff_store/readme/${o}/${r}`);
+                let md = '';
+                if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
+                md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
+                body.innerHTML = marked.parse(md);
+            } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
+        }
+
+        function confirmInstWithVersion(o, r, t) {
+            const versionSelect = document.getElementById('versionSelect');
+            const version = versionSelect ? versionSelect.value : null;
+
+            const versionText = version ? ` (version ${version})` : '';
+            pop('Confirm Install', `Install ${formatName(r)}${versionText}?`, 'mdi-download', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: 'Install', c: 'btn-p', f: `executeInstWithVersion('${o}','${r}','${t}','${version || ''}')` }
+            ]);
+        }
+
+        async function executeInstWithVersion(o, r, t, version) {
+            closePop();
+            const item = items.find(x => x.owner === o && x.repo_name === r);
+
+            try {
+                const body = { owner: o, repo: r, type: t };
+                if (item.mode) body.mode = item.mode;
+                if (item.asset_name) body.asset_name = item.asset_name;
+                if (version) body.version = version;
+
+                const res = await fetch('/api/onoff_store/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeModal();
+                    if (t === 'lovelace') {
+                        pop('Installed', 'Card installed. Reload Home Assistant.', 'mdi-refresh', true);
+                    } else {
+                        pop('Restart Required', 'Integration installed. Restart Home Assistant.', 'mdi-restart', false);
+                    }
+                    load();
+                } else pop('Error', data.error, 'mdi-alert', false);
+            } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
+        }
+
+        function toggleMenu() {
+            const d = document.getElementById('dropdown');
+            d.style.display = d.style.display === 'block' ? 'none' : 'block';
+        }
+
+        async function openCustomModal() {
+            document.getElementById('dropdown').style.display = 'none';
+            document.getElementById('customModal').style.display = 'flex';
+            await loadCustomRepos();
+        }
+
+        async function loadCustomRepos() {
+            const listEl = document.getElementById('customReposList');
+            listEl.innerHTML = '<div style="text-align: center; color: var(--dim);"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const resp = await fetch('/api/onoff_store/custom/list');
+                const repos = await resp.json();
+
+                if (repos.length === 0) {
+                    listEl.innerHTML = '<div style="text-align: center; color: var(--dim); padding: 1rem;">No custom repositories added yet.</div>';
+                } else {
+                    listEl.innerHTML = `
+                        <h3 style="font-size: 1rem; margin-bottom: 0.8rem; color: var(--text);">Custom Repositories (${repos.length})</h3>
+                        ${repos.map(r => `
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.7rem; background: #0f172a; border-radius: 8px; margin-bottom: 0.5rem;">
+                                <div>
+                                    <span style="color: var(--text); font-weight: 600;">${r.repo}</span>
+                                    <span style="color: var(--dim); font-size: 0.85rem;"> by ${r.owner}</span>
+                                </div>
+                                <button class="action-btn" onclick="removeCustomRepo('${r.owner}', '${r.repo}')" title="Remove" style="color: var(--danger);">
+                                    <i class="mdi mdi-trash-can-outline"></i>
+                                </button>
+                            </div>
+                        `).join('')}
+                    `;
+                }
+            } catch (e) {
+                listEl.innerHTML = '<div style="text-align: center; color: var(--danger);">Failed to load custom repositories.</div>';
+            }
+        }
+
+        async function removeCustomRepo(owner, repo) {
+            if (!confirm(`Remove ${owner}/${repo} from custom repositories?`)) return;
+
+            try {
+                await fetch('/api/onoff_store/custom/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner, repo })
+                });
+                await loadCustomRepos();
+                load(); // Refresh main list
+            } catch (e) {
+                pop('Error', 'Failed to remove repository.', 'mdi-alert', false);
+            }
+        }
+
+        function closeCustomModal() { document.getElementById('customModal').style.display = 'none'; }
+
+        async function addCustomRepo() {
+            const owner = document.getElementById('customOwner').value.trim();
+            const repo = document.getElementById('customRepo').value.trim();
+            if (!owner || !repo) { pop('Error', 'Please fill in both fields.', 'mdi-alert', false); return; }
+
+            try {
+                await fetch('/api/onoff_store/custom/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner, repo })
+                });
+                document.getElementById('customOwner').value = '';
+                document.getElementById('customRepo').value = '';
+                await loadCustomRepos(); // Refresh list in modal
+                load(); // Refresh main list
+                pop('Added', `${repo} added to store.`, 'mdi-check-circle', false);
+            } catch (e) { pop('Error', 'Failed to add repository.', 'mdi-alert', false); }
+        }
+
+        function toggleView() {
+            viewMode = viewMode === 'grid' ? 'list' : 'grid';
+            const icon = viewMode === 'grid' ? 'mdi-format-list-bulleted' : 'mdi-view-grid-outline';
+            document.getElementById('viewToggleBtn').innerHTML = `<i class="mdi ${icon}"></i>`;
+            render(lastFiltered);
+        }
+
+        function toggleSection(key) {
+            if (collapsedSections.has(key)) collapsedSections.delete(key);
+            else collapsedSections.add(key);
+            render(lastFiltered);
+        }
+
+        function confirmInst(o, r, t) {
+            pop('Confirm Install', `Install ${formatName(r)}?`, 'mdi-download', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: 'Install', c: 'btn-p', f: `executeInst('${o}','${r}','${t}')` }
+            ]);
+        }
+
+        function confirmRemove(o, r, t, e) {
+            if (e) e.stopPropagation();
+            const msg = t === 'integration'
+                ? `Delete ${formatName(r)}? Remove from HA Integrations first.`
+                : `Delete ${formatName(r)}?`;
+
+            pop('Confirm Delete', msg, 'mdi-trash-can', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: 'Delete', c: 'btn-p', f: `executeRemove('${o}','${r}','${t}')` }
+            ]);
+        }
+
+        async function executeRemove(o, r, t) {
+            closePop();
+            try {
+                const res = await fetch('/api/onoff_store/uninstall', {
+                    method: 'POST',
+                    body: JSON.stringify({ owner: o, repo: r, type: t }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (t === 'lovelace') {
+                        pop('Removed', 'Card deleted. Reloading...', 'mdi-check-circle', false);
+                        setTimeout(() => window.top.location.reload(), 1500);
+                    } else {
+                        pop('Deleted', 'Files removed. Restart Home Assistant.', 'mdi-restart', false);
+                        load();
+                    }
+                } else pop('Error', data.error, 'mdi-alert', false);
+            } catch { pop('Error', 'Removal failed', 'mdi-alert', false); }
+        }
+
+        async function executeInst(o, r, t) {
+            closePop();
+            const item = items.find(x => x.owner === o && x.repo_name === r);
+
+            try {
+                const body = { owner: o, repo: r, type: t };
+                if (item.mode) body.mode = item.mode;
+                if (item.asset_name) body.asset_name = item.asset_name;
+
+                const res = await fetch('/api/onoff_store/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeModal();
+                    if (t === 'lovelace') {
+                        pop('Installed', 'Card installed. Reload Home Assistant.', 'mdi-refresh', true);
+                    } else {
+                        pop('Restart Required', 'Integration installed. Restart Home Assistant.', 'mdi-restart', false);
+                    }
+                    load();
+                } else pop('Error', data.error, 'mdi-alert', false);
+            } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
+        }
+
+        function pop(t, m, i, isReload, customActions) {
+            document.getElementById('pt').innerText = t;
+            document.getElementById('pm').innerHTML = m;
+            document.getElementById('pi').innerHTML = `<i class="mdi ${i}"></i>`;
+            const a = document.getElementById('pa');
+            a.innerHTML = '';
+
+            if (customActions) {
+                customActions.forEach(ca => {
+                    const b = document.createElement('button');
+                    b.className = `btn ${ca.c}`;
+                    b.innerText = ca.t;
+                    b.onclick = new Function(ca.f);
+                    a.appendChild(b);
+                });
+            } else if (isReload) {
+                a.innerHTML = `<button class="btn btn-o" onclick="closePop()">Later</button><button class="btn btn-p" onclick="window.top.location.reload()">Reload</button>`;
+            } else {
+                a.innerHTML = `<button class="btn btn-p" onclick="closePop()">OK</button>`;
+            }
+            document.getElementById('pop-o').style.display = 'flex';
+        }
+
+        function closePop() { document.getElementById('pop-o').style.display = 'none'; }
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        window.onclick = (e) => {
+            if (e.target == document.getElementById('modal')) closeModal();
+            if (e.target == document.getElementById('customModal')) closeCustomModal();
+            if (!e.target.closest('.menu-container') && !e.target.closest('.dropdown')) {
+                document.getElementById('dropdown').style.display = 'none';
+            }
+        };
+
+        // Prevent body scroll when modal is open on mobile
+        document.addEventListener('touchmove', function (e) {
+            if (document.getElementById('modal').style.display === 'flex' ||
+                document.getElementById('customModal').style.display === 'flex' ||
+                document.getElementById('pop-o').style.display === 'flex') {
+                if (!e.target.closest('.modal-b')) {
+                    e.preventDefault();
+                }
+            }
+        }, { passive: false });
+
+        load();
+    </script>
+</body>
+
+</html>
