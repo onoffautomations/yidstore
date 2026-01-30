@@ -1,0 +1,2 @@
+# yidstore
+Hassio Integration Store
