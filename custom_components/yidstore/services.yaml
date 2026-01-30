@@ -1,0 +1,175 @@
+install:
+  name: Install (Generic)
+  description: Install an integration, Lovelace plugin, or blueprints from Gitea (asset zip or repo zipball).
+  fields:
+    owner:
+      name: Owner/Org
+      description: Gitea owner/org (if omitted uses the integration config default).
+      required: false
+      selector:
+        text:
+    repo:
+      name: Repo
+      description: Repository name (required).
+      required: true
+      selector:
+        text:
+    type:
+      name: Type
+      description: What to install.
+      required: true
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - integration
+            - lovelace
+            - blueprints
+    mode:
+      name: Mode
+      description: asset = release zipfile, zipball = repo snapshot zip (no asset required).
+      required: false
+      default: asset
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - asset
+            - zipball
+    tag:
+      name: Tag
+      description: Release tag to install (if omitted uses latest release).
+      required: false
+      selector:
+        text:
+    asset_name:
+      name: Asset Name
+      description: Release asset filename (only for mode=asset). If omitted, auto-picks a single .zip.
+      required: false
+      selector:
+        text:
+
+install_integration:
+  name: Install Integration
+  description: Install a Home Assistant integration into /config/custom_components/ from Gitea.
+  fields:
+    owner:
+      name: Owner/Org
+      description: Gitea owner/org (if omitted uses the integration config default).
+      required: false
+      selector:
+        text:
+    repo:
+      name: Repo
+      description: Repository name (required).
+      required: true
+      selector:
+        text:
+    mode:
+      name: Mode
+      description: asset = release zipfile, zipball = repo snapshot zip (default).
+      required: false
+      default: zipball
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - zipball
+            - asset
+    tag:
+      name: Tag
+      description: Release tag (if omitted uses latest release).
+      required: false
+      selector:
+        text:
+    asset_name:
+      name: Asset Name
+      description: Release asset filename (only for mode=asset).
+      required: false
+      selector:
+        text:
+
+install_lovelace:
+  name: Install Lovelace
+  description: Install a Lovelace card/plugin into /config/www/community/<repo>/ from Gitea.
+  fields:
+    owner:
+      name: Owner/Org
+      description: Gitea owner/org (if omitted uses the integration config default).
+      required: false
+      selector:
+        text:
+    repo:
+      name: Repo
+      description: Repository name (required).
+      required: true
+      selector:
+        text:
+    mode:
+      name: Mode
+      description: asset = release zipfile (recommended), zipball = repo snapshot zip.
+      required: false
+      default: asset
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - asset
+            - zipball
+    tag:
+      name: Tag
+      description: Release tag (if omitted uses latest release).
+      required: false
+      selector:
+        text:
+    asset_name:
+      name: Asset Name
+      description: Release asset filename (only for mode=asset).
+      required: false
+      selector:
+        text:
+
+install_blueprints:
+  name: Install Blueprints
+  description: Install blueprints into /config/blueprints/ from Gitea (expects repo has top-level blueprints/ folder).
+  fields:
+    owner:
+      name: Owner/Org
+      description: Gitea owner/org (if omitted uses the integration config default).
+      required: false
+      selector:
+        text:
+    repo:
+      name: Repo
+      description: Repository name (required).
+      required: true
+      selector:
+        text:
+    mode:
+      name: Mode
+      description: asset = release zipfile, zipball = repo snapshot zip (default).
+      required: false
+      default: zipball
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - zipball
+            - asset
+    tag:
+      name: Tag
+      description: Release tag (if omitted uses latest release).
+      required: false
+      selector:
+        text:
+    asset_name:
+      name: Asset Name
+      description: Release asset filename (only for mode=asset).
+      required: false
+      selector:
+        text:
+
+check_updates:
+  name: Check for Updates
+  description: Manually check for updates for all tracked packages.
+  fields: {}

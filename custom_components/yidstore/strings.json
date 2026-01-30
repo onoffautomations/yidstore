@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "YidStore",
+        "description": "Setup YidStore - Your Integration Store",
+        "data": {
+          "side_panel": "Show Store in Sidebar (Admins Only)"
+        }
+      },
+      "store_selection": {
+        "title": "Install from Store",
+        "description": "Select packages to install from the store",
+        "data": {
+          "packages": "Packages"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure YidStore",
+        "description": "Update your settings",
+        "data": {
+          "use_token": "Use Access Token",
+          "token": "Access Token",
+          "side_panel": "Show Store in Sidebar (Admins Only)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Gitea",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error occurred",
+      "install_failed": "Failed to install one or more packages",
+      "no_selection": "Please select at least one package"
+    },
+    "abort": {
+      "already_configured": "YidStore is already configured",
+      "install_complete": "Setup complete! Packages installed successfully.",
+      "setup_complete": "Setup complete!",
+      "no_packages": "Store list is empty",
+      "no_valid_packages": "No valid packages in store",
+      "reconfigure_successful": "Reconfiguration successful",
+      "cannot_reconfigure": "Reconfiguration is not possible at this time",
+      "unknown": "An unexpected error occurred. Check logs for details."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage YidStore",
+        "description": "Manage settings. To install or uninstall integrations/cards, please use YidStore in the sidebar.",
+        "data": {
+          "use_token": "Use Access Token",
+          "token": "Access Token",
+          "side_panel": "Show Store in Sidebar (Admins Only)"
+        }
+      }
+    },
+    "error": {
+      "install_failed": "Failed to install one or more packages"
+    },
+    "abort": {
+      "no_packages_in_store": "No packages available in store list"
+    }
+  },
+  "issues": {
+    "integration_restart_required": {
+      "title": "Restart required",
+      "description": "Restart of Home Assistant is required to finish download/update of **{integration_name}**, click submit to restart now.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Restart Home Assistant",
+            "description": "Restart of Home Assistant is required to finish download/update of **{integration_name}**, click submit to restart now."
+          }
+        }
+      }
+    },
+    "setup_restart_required": {
+      "title": "Restart required",
+      "description": "One or more integrations have been installed during setup. Home Assistant must be restarted for the changes to take effect.\n\nGo to Settings → System → Restart to restart Home Assistant."
+    }
+  }
+}
