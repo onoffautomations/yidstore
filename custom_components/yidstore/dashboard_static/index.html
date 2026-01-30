@@ -570,6 +570,43 @@
             -webkit-overflow-scrolling: touch;
         }
 
+        .modal-b::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .modal-b::-webkit-scrollbar-track {
+            background: transparent;
+            border-radius: 12px;
+        }
+
+        .modal-b::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-radius: 12px;
+        }
+
+        .modal-b {
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+        }
+
+        .modal-b.scrolling::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .modal-b.scrolling::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #00d2ff, #3a7bd5);
+        }
+
+        .modal-b.scrolling {
+            scrollbar-color: #3a7bd5 rgba(255, 255, 255, 0.06);
+        }
+
+        .modal-b::-webkit-scrollbar-button {
+            display: none;
+            width: 0;
+            height: 0;
+        }
+
         .modal-f {
             padding: 1rem 1.2rem;
             border-top: 1px solid #334155;
@@ -578,6 +615,53 @@
             gap: 0.8rem;
             flex-shrink: 0;
             flex-wrap: wrap;
+        }
+
+        .version-wrap {
+            width: 100%;
+        }
+
+        .version-select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #fff;
+            font-size: 0.95rem;
+        }
+
+        .modal-logo {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 0.9rem;
+        }
+
+        .modal-logo img {
+            max-height: 110px;
+            max-width: 360px;
+            object-fit: contain;
+        }
+
+        .modal-f {
+            align-items: center;
+        }
+
+        .version-wrap {
+            width: auto;
+            min-width: 360px;
+            flex: 1 1 auto;
+        }
+
+        .version-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .version-select {
+            min-width: 360px;
         }
 
         .form-group {
@@ -809,7 +893,6 @@
             </div>
             <div class="powered-by">
                 Powered by: <strong><a href="https://onoffautmations.com" style="color: inherit; text-decoration: none;">OnOff Automations</a></strong><br>
-                <a href="mailto:info@onoffautomations.com">info@onoffautomations.com</a> | (845) 400-8149
             </div>
             <div class="controls">
                 <div class="search-box">
@@ -869,13 +952,6 @@
 
     <div id="modal">
         <div class="modal-c">
-            <div class="modal-h">
-                <div style="flex:1; min-width:0;">
-                    <h2 id="mt"></h2>
-                    <p id="ms" style="color:var(--dim); font-size:0.8rem;"></p>
-                </div>
-                <div style="font-size:1.8rem; cursor:pointer; padding:0.5rem;" onclick="closeModal()">&times;</div>
-            </div>
             <div class="modal-b md" id="mb"></div>
             <div class="modal-f" id="mf"></div>
         </div>
@@ -892,6 +968,25 @@
                 <div id="customReposList" style="margin-bottom: 1.5rem;"></div>
                 <div style="border-top: 1px solid #334155; padding-top: 1rem; margin-top: 1rem;">
                     <h3 style="font-size: 1rem; margin-bottom: 1rem; color: var(--text);">Add New Repository</h3>
+                    <div class="form-group" style="display:flex; align-items:center; gap:0.6rem;">
+                        <input type="checkbox" id="customIsGithub" onchange="toggleCustomRepoFields()" style="width:auto;">
+                        <label for="customIsGithub" style="margin:0;">This repo is on GitHub</label>
+                    </div>
+                    <div id="customGithubFields" style="display:none;">
+                        <div class="form-group">
+                            <label>GitHub Repository URL</label>
+                            <input type="text" id="customGithubUrl" placeholder="https://github.com/onoffautomations/yidstore">
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="customGithubType">
+                                <option value="integration">Integration</option>
+                                <option value="lovelace">Lovelace Card</option>
+                                <option value="blueprints">Blueprint</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="customGiteaFields">
                     <div class="form-group">
                         <label>Owner / Organization</label>
                         <input type="text" id="customOwner" placeholder="e.g. Zing">
@@ -899,6 +994,7 @@
                     <div class="form-group">
                         <label>Repository Name</label>
                         <input type="text" id="customRepo" placeholder="e.g. my-integration">
+                    </div>
                     </div>
                 </div>
             </div>
@@ -1296,7 +1392,7 @@
                 for (const id of ids) {
                     const [o, r] = id.split('/');
                     const item = items.find(x => x.owner === o && x.repo_name === r);
-                    await executeInstDirect(o, r, item.type, item.mode, item.asset_name);
+                    await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
                 }
                 pop('Complete', 'Installation complete. Check logs for details.', 'mdi-check-circle', false);
                 load();
@@ -1334,11 +1430,15 @@
             apply();
         }
 
-        async function executeInstDirect(o, r, t, mode, asset_name) {
+        async function executeInstDirect(o, r, t, mode, asset_name, item) {
             try {
                 const body = { owner: o, repo: r, type: t };
                 if (mode) body.mode = mode;
                 if (asset_name) body.asset_name = asset_name;
+                if (item && item.source === 'github') {
+                    body.source = 'github';
+                    if (item.repo_url) body.repo_url = item.repo_url;
+                }
                 await fetch('/api/onoff_store/install', {
                     method: 'POST',
                     body: JSON.stringify(body),
@@ -1350,8 +1450,6 @@
         async function openDet(o, r, e) {
             if (e) e.stopPropagation();
             const item = items.find(x => x.owner === o && x.repo_name === r);
-            document.getElementById('mt').innerText = formatName(item.repo_name);
-            document.getElementById('ms').innerText = `by ${item.owner_display_name || item.owner}`;
             const body = document.getElementById('mb');
             body.innerHTML = '<center style="padding:3rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2.5rem;"></i><br><br>Loading...</center>';
             document.getElementById('modal').style.display = 'flex';
@@ -1375,22 +1473,28 @@
                 // Get older releases (skip the first/latest one since it's shown as "Latest")
                 const olderReleases = releases.slice(1);
                 versionSelector = `
-                    <div style="margin-bottom: 1rem;">
-                        <label style="display: block; margin-bottom: 0.5rem; color: var(--dim); font-size: 0.85rem;">Version:</label>
-                        <select id="versionSelect" style="width: 100%; padding: 0.7rem; border-radius: 10px; background: #0f172a; border: 1px solid #334155; color: #fff; font-size: 0.9rem;">
+                    <div class="version-wrap">
+                        <div class="version-row">
+                            <label style="color: var(--dim); font-size: 0.85rem; white-space: nowrap;">Version:</label>
+                            <select id="versionSelect" class="version-select">
                             <option value="">Latest (${releases[0]?.tag_name || 'default'})</option>
                             ${olderReleases.map(rel => `<option value="${rel.tag_name}">${rel.tag_name}${rel.name ? ' - ' + rel.name : ''}</option>`).join('')}
-                        </select>
+                            </select>
+                        </div>
                     </div>
                 `;
             }
 
             const btnTxt = item.update_available ? 'Update' : (item.is_installed ? 'Reinstall' : 'Install');
             foot.innerHTML = `
-                ${versionSelector}
-                <div style="display: flex; gap: 0.8rem; justify-content: flex-end; width: 100%;">
-                    <button class="btn btn-o" onclick="closeModal()">Close</button>
-                    <button class="btn btn-p" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                <div style="display: flex; gap: 0.8rem; justify-content: space-between; width: 100%; flex-wrap: wrap; align-items: center;">
+                    <div style="display:flex; align-items:center; gap:0.8rem;">
+                        ${versionSelector || ''}
+                    </div>
+                    <div style="display: flex; gap: 0.8rem; justify-content: flex-end;">
+                        <button class="btn btn-o" onclick="closeModal()">Close</button>
+                        <button class="btn btn-p" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                    </div>
                 </div>
             `;
 
@@ -1399,8 +1503,72 @@
                 let md = '';
                 if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
                 md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
-                body.innerHTML = marked.parse(md);
+                const logoMarkup = buildModalLogo(item);
+                const titleMarkup = `<div style="margin-bottom: 0.6rem;">
+                    <div style="font-size: 1.2rem; font-weight: 700; color: #fff;">${formatName(item.repo_name)}</div>
+                    <div style="color: var(--dim); font-size: 0.85rem;">by ${item.owner_display_name || item.owner}</div>
+                </div>`;
+                body.innerHTML = `${logoMarkup}${titleMarkup}${marked.parse(md)}`;
+                initModalLogo();
+                setupModalScroll();
             } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
+        }
+
+        function buildModalLogo(item) {
+            const domain = (item.repo_name || '').toLowerCase().replace(/-/g, '_');
+            const candidates = [];
+
+            if (item.icon_url) {
+                candidates.push(item.icon_url.replace('/icons/icon.png', '/icons/dark_logo.png'));
+                candidates.push(item.icon_url.replace('/icons/icon.png', '/icons/logo.png'));
+                candidates.push(item.icon_url.replace('/icons/icon.png', '/icons/logo.svg'));
+            }
+
+            candidates.push(`/api/onoff_store/brands/${domain}/dark_logo.png`);
+            candidates.push(`/api/onoff_store/brands/${domain}/logo.png`);
+            candidates.push(`/api/onoff_store/brands/${domain}/logo.svg`);
+
+            const dataAttr = candidates.filter(Boolean).join('|');
+            return `
+                <div class="modal-logo" id="modalLogo" data-candidates="${dataAttr}">
+                    <img id="modalLogoImg" alt="">
+                </div>
+            `;
+        }
+
+        function initModalLogo() {
+            const wrap = document.getElementById('modalLogo');
+            const img = document.getElementById('modalLogoImg');
+            if (!wrap || !img) return;
+            const candidates = (wrap.getAttribute('data-candidates') || '').split('|').filter(Boolean);
+            if (candidates.length === 0) return;
+
+            let idx = 0;
+            const tryNext = () => {
+                if (idx >= candidates.length) return;
+                const url = candidates[idx++];
+                img.onload = () => { wrap.style.display = 'flex'; };
+                img.onerror = () => { tryNext(); };
+                img.src = url;
+            };
+            tryNext();
+        }
+
+        function setupModalScroll() {
+            const body = document.getElementById('mb');
+            if (!body) return;
+            let timer = null;
+
+            const onScroll = () => {
+                body.classList.add('scrolling');
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => {
+                    body.classList.remove('scrolling');
+                }, 600);
+            };
+
+            body.removeEventListener('scroll', onScroll);
+            body.addEventListener('scroll', onScroll, { passive: true });
         }
 
         function confirmInstWithVersion(o, r, t) {
@@ -1423,6 +1591,10 @@
                 if (item.mode) body.mode = item.mode;
                 if (item.asset_name) body.asset_name = item.asset_name;
                 if (version) body.version = version;
+                if (item.source === 'github') {
+                    body.source = 'github';
+                    if (item.repo_url) body.repo_url = item.repo_url;
+                }
 
                 const res = await fetch('/api/onoff_store/install', {
                     method: 'POST',
@@ -1450,6 +1622,7 @@
         async function openCustomModal() {
             document.getElementById('dropdown').style.display = 'none';
             document.getElementById('customModal').style.display = 'flex';
+            toggleCustomRepoFields();
             await loadCustomRepos();
         }
 
@@ -1471,6 +1644,7 @@
                                 <div>
                                     <span style="color: var(--text); font-weight: 600;">${r.repo}</span>
                                     <span style="color: var(--dim); font-size: 0.85rem;"> by ${r.owner}</span>
+                                    ${r.source === 'github' ? '<span style="color: var(--dim); font-size: 0.75rem; margin-left:0.4rem;">(GitHub)</span>' : ''}
                                 </div>
                                 <button class="action-btn" onclick="removeCustomRepo('${r.owner}', '${r.repo}')" title="Remove" style="color: var(--danger);">
                                     <i class="mdi mdi-trash-can-outline"></i>
@@ -1503,22 +1677,45 @@
         function closeCustomModal() { document.getElementById('customModal').style.display = 'none'; }
 
         async function addCustomRepo() {
+            const isGithub = document.getElementById('customIsGithub').checked;
             const owner = document.getElementById('customOwner').value.trim();
             const repo = document.getElementById('customRepo').value.trim();
-            if (!owner || !repo) { pop('Error', 'Please fill in both fields.', 'mdi-alert', false); return; }
+            const githubUrl = document.getElementById('customGithubUrl').value.trim();
+            const githubType = document.getElementById('customGithubType').value;
+
+            if (isGithub) {
+                if (!githubUrl) { pop('Error', 'Please enter a GitHub URL.', 'mdi-alert', false); return; }
+            } else {
+                if (!owner || !repo) { pop('Error', 'Please fill in both fields.', 'mdi-alert', false); return; }
+            }
 
             try {
+                const body = isGithub
+                    ? { source: 'github', url: githubUrl, type: githubType }
+                    : { owner, repo };
+
                 await fetch('/api/onoff_store/custom/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ owner, repo })
+                    body: JSON.stringify(body)
                 });
                 document.getElementById('customOwner').value = '';
                 document.getElementById('customRepo').value = '';
+                document.getElementById('customGithubUrl').value = '';
+                document.getElementById('customGithubType').value = 'integration';
+                document.getElementById('customIsGithub').checked = false;
+                toggleCustomRepoFields();
                 await loadCustomRepos(); // Refresh list in modal
                 load(); // Refresh main list
-                pop('Added', `${repo} added to store.`, 'mdi-check-circle', false);
+                const nameText = isGithub ? githubUrl : repo;
+                pop('Added', `${nameText} added to store.`, 'mdi-check-circle', false);
             } catch (e) { pop('Error', 'Failed to add repository.', 'mdi-alert', false); }
+        }
+
+        function toggleCustomRepoFields() {
+            const isGithub = document.getElementById('customIsGithub').checked;
+            document.getElementById('customGithubFields').style.display = isGithub ? 'block' : 'none';
+            document.getElementById('customGiteaFields').style.display = isGithub ? 'none' : 'block';
         }
 
         function toggleView() {
@@ -1582,6 +1779,10 @@
                 const body = { owner: o, repo: r, type: t };
                 if (item.mode) body.mode = item.mode;
                 if (item.asset_name) body.asset_name = item.asset_name;
+                if (item.source === 'github') {
+                    body.source = 'github';
+                    if (item.repo_url) body.repo_url = item.repo_url;
+                }
 
                 const res = await fetch('/api/onoff_store/install', {
                     method: 'POST',
