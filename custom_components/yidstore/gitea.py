@@ -157,6 +157,21 @@ class GiteaClient:
             _LOGGER.debug("Failed to fetch releases for %s/%s: %s", owner, repo, e)
         return []
 
+    async def get_file_content(self, owner: str, repo: str, file_path: str, branch: str = "main") -> str | None:
+        """Fetch content of a specific file."""
+        sess = async_get_clientsession(self.hass)
+        url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={branch}"
+        try:
+            async with sess.get(url, headers=self._headers(), timeout=20) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    import base64
+                    content = base64.b64decode(data["content"]).decode("utf-8")
+                    return content
+        except Exception:
+            pass
+        return None
+
     async def get_readme(self, owner: str, repo: str) -> str | None:
         """Fetch the README content for a repository."""
         sess = async_get_clientsession(self.hass)
@@ -233,7 +248,7 @@ class GiteaClient:
             _LOGGER.debug("Failed to search repos: %s", e)
         return []
 
-    async def get_icon_url(self, owner: str, repo: str) -> str | None:
+    async def get_icon_url(self, owner: str, repo: str, branch: str = "main") -> str | None:
         """Get the URL for the repo's icon if it exists."""
         sess = async_get_clientsession(self.hass)
         # Try different icon paths
@@ -246,12 +261,12 @@ class GiteaClient:
         ]
 
         for path in icon_paths:
-            url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}"
+            url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}?ref={branch}"
             try:
                 async with sess.get(url, headers=self._headers(), timeout=10) as resp:
                     if resp.status == 200:
                         # Return the raw download URL
-                        return f"{self.base_url}/{owner}/{repo}/raw/branch/main/{path}"
+                        return f"{self.base_url}/{owner}/{repo}/raw/branch/{branch}/{path}"
             except Exception:
                 continue
 

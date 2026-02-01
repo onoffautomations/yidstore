@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+import asyncio
 from pathlib import Path
 from aiohttp import web
 
@@ -309,16 +310,25 @@ class OnOffStoreReposView(HomeAssistantView):
             # A. Load from store_list.yaml first (Ensures these are ALWAYS visible)
             yaml_items = await hass.async_add_executor_job(load_store_list, hass)
             
-            # 1. Fetch custom repos FIRST to ensure they bypass filters
+            # 1. Fetch custom repos FIRST (will be processed at end if missed)
             custom_repos_to_fetch = coordinator.custom_repos
             
-            resp_data = []
+            # State for collecting unique repos
+            seen_repos = set()
+            tasks = []
+            
+            def add_repo_task(repo_obj, bypass=False, auth=False):
+                full_name = repo_obj.get("full_name")
+                if not full_name: return
+                if full_name in seen_repos: return
+                seen_repos.add(full_name)
+                tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth))
             
             for y in yaml_items:
                 try:
                     # Fetch full info from Gitea for the YAML item
                     r = await client.get_repo(y["owner"], y["repo"])
-                    if r: self._fill(resp_data, r, coordinator, yaml_items=yaml_items, bypass_filter=True, is_authenticated=is_authenticated)
+                    if r: add_repo_task(r, bypass=True, auth=is_authenticated)
                 except Exception:
                     pass
 
@@ -347,7 +357,7 @@ class OnOffStoreReposView(HomeAssistantView):
                     repos = await client.get_org_repos(o)
                     if isinstance(repos, list):
                         for r in repos:
-                            self._fill(resp_data, r, coordinator, yaml_items=yaml_items, is_authenticated=is_authenticated)
+                            add_repo_task(r, auth=is_authenticated)
 
                     # When authenticated, also get org members to fetch their personal repos
                     if is_authenticated:
@@ -364,7 +374,7 @@ class OnOffStoreReposView(HomeAssistantView):
 
             # C. Fetch from Individual Users
             # Default public users (always fetched) - add any public users you want to include
-            default_users = []  # Add usernames here if needed, e.g., ["publicuser1", "publicuser2"]
+            default_users = []  # Add usernames here if needed
 
             users_to_fetch = set(default_users)
 
@@ -390,7 +400,7 @@ class OnOffStoreReposView(HomeAssistantView):
                     repos = await client.get_user_repos(u)
                     if isinstance(repos, list):
                         for r in repos:
-                            self._fill(resp_data, r, coordinator, yaml_items=yaml_items, is_authenticated=is_authenticated)
+                            add_repo_task(r, auth=is_authenticated)
                 except Exception as e:
                     _LOGGER.debug("Store: User %s error: %s", u, e)
 
@@ -404,7 +414,7 @@ class OnOffStoreReposView(HomeAssistantView):
                             u_repos = await resp.json()
                             if isinstance(u_repos, list):
                                 for repo in u_repos:
-                                    self._fill(resp_data, repo, coordinator, yaml_items=yaml_items, bypass_filter=True, is_authenticated=True)
+                                    add_repo_task(repo, bypass=True, auth=True)
                 except Exception:
                     pass
 
@@ -414,9 +424,13 @@ class OnOffStoreReposView(HomeAssistantView):
                 search_repos = await client.search_repos(limit=200)
                 if isinstance(search_repos, list):
                     for repo in search_repos:
-                        self._fill(resp_data, repo, coordinator, yaml_items=yaml_items, is_authenticated=is_authenticated)
+                        add_repo_task(repo, auth=is_authenticated)
             except Exception as e:
                 _LOGGER.debug("Store: Search repos error: %s", e)
+
+            # Execute all collected tasks in parallel
+            processed_results = await asyncio.gather(*tasks)
+            resp_data = [res for res in processed_results if res is not None]
 
             # F. Explicitly fetch custom repos if they weren't in organizations or users
             for cr in custom_repos_to_fetch:
@@ -453,8 +467,12 @@ class OnOffStoreReposView(HomeAssistantView):
                         })
                     else:
                         try:
+                            # Manually fetch missed Gitea custom repo
                             r = await client.get_repo(owner, repo)
-                            if r: self._fill(resp_data, r, coordinator, yaml_items=yaml_items, bypass_filter=True, is_authenticated=is_authenticated)
+                            if r:
+                                item = await self._process_repo(r, coordinator, yaml_items, bypass=True, auth=is_authenticated)
+                                if item:
+                                    resp_data.append(item)
                         except Exception:
                             pass
 
@@ -462,29 +480,32 @@ class OnOffStoreReposView(HomeAssistantView):
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
-    def _fill(self, data_list, r, coord, yaml_items=None, bypass_filter=False, is_authenticated=False):
+    async def _process_repo(self, r, coord, yaml_items=None, bypass=False, auth=False):
         name = r.get("full_name")
-        if not name or any(x["name"] == name for x in data_list):
-            return
-        
+        # Dupe check handled by caller
+
         owner = r.get("owner", {}).get("login", "Unknown")
         rn = r.get("name", "Unknown")
+
+        # Skip if archived
+        if r.get("archived", False):
+            return None
 
         # Skip if MANUALLY hidden (unless we are showing hidden ones - logic will be in UI)
         is_hidden = coord.is_hidden_repo(owner, rn)
 
         # NEW FILTERING LOGIC:
         # 1. Hide integrations starting with 'x-' unless authenticated or custom repo
-        if not bypass_filter and not is_authenticated and rn.lower().startswith("x-") and not coord.is_custom_repo(owner, rn):
-            return
+        if not bypass and not auth and rn.lower().startswith("x-") and not coord.is_custom_repo(owner, rn):
+            return None
         
         # 2. Hide repos from "xshow" org unless authenticated
-        if not bypass_filter and not is_authenticated and owner.lower() == "xshow":
-            return
+        if not bypass and not auth and owner.lower() == "xshow":
+            return None
         
         # 3. Hide repos from any org starting with "private" unless authenticated
-        if not bypass_filter and not is_authenticated and owner.lower().startswith("private"):
-            return
+        if not bypass and not auth and owner.lower().startswith("private"):
+            return None
 
         p = coord.get_package_by_repo(owner, rn)
         
@@ -511,12 +532,32 @@ class OnOffStoreReposView(HomeAssistantView):
         owner_obj = r.get("owner", {})
         owner_display_name = owner_obj.get("full_name") or owner_obj.get("username") or owner
 
-        # Generate potential icon URL (frontend will try to load it)
+        # Generate potential icon URL with fallback to Brands
         default_branch = r.get("default_branch", "main")
-        base_url = r.get("html_url", "").rsplit("/", 2)[0] if r.get("html_url") else ""
-        icon_url = f"{base_url}/{owner}/{rn}/raw/branch/{default_branch}/icons/icon.png" if base_url else None
+        if pkg_type == "lovelace":
+            # Never show icon for cards
+            icon_url = None
+        else:
+            try:
+                # Check Gitea for icon
+                icon_url = await coord.client.get_icon_url(owner, rn, branch=default_branch)
+            except Exception:
+                pass
 
-        data_list.append({
+        # If integration and no icon, try to get domain from manifest
+        domain_from_manifest = None
+        if pkg_type == "integration" and not icon_url:
+            try:
+                # Fetch manifest.json to get the domain
+                manifest_content = await coord.client.get_file_content(owner, rn, "manifest.json", branch=default_branch)
+                if manifest_content:
+                    import json
+                    manifest = json.loads(manifest_content)
+                    domain_from_manifest = manifest.get("domain")
+            except Exception:
+                pass
+
+        return {
             "name": name,
             "repo_name": rn,
             "owner": owner,
@@ -532,9 +573,10 @@ class OnOffStoreReposView(HomeAssistantView):
             "release_notes": p.get("release_notes") if p else None,
             "is_hidden": is_hidden,
             "icon_url": icon_url,
+            "domain": domain_from_manifest,
             "default_branch": default_branch,
             "source": p.get("source", "gitea") if p else "gitea",
-        })
+        }
 
 
 class OnOffStoreInstallView(HomeAssistantView):
