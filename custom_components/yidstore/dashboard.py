@@ -527,6 +527,18 @@ class OnOffStoreReposView(HomeAssistantView):
             pkg_type = "lovelace"
         elif "blueprint" in rn.lower() or "blueprint" in desc:
             pkg_type = "blueprints"
+        
+        # If still determined as integration (default), check for JS file in root
+        if pkg_type == "integration" and not p and coord.client:
+            try:
+                default_branch = r.get("default_branch", "main")
+                contents = await coord.client.get_directory_contents(owner, rn, branch=default_branch)
+                for c in contents:
+                    if c.get("name", "").lower().endswith(".js"):
+                        pkg_type = "lovelace"
+                        break
+            except Exception:
+                pass
 
         # Get display name from owner object if available
         owner_obj = r.get("owner", {})

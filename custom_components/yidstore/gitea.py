@@ -172,6 +172,20 @@ class GiteaClient:
             pass
         return None
 
+    async def get_directory_contents(self, owner: str, repo: str, path: str = "", branch: str = "main") -> list[dict]:
+        """Fetch contents of a directory."""
+        sess = async_get_clientsession(self.hass)
+        url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}?ref={branch}"
+        try:
+            async with sess.get(url, headers=self._headers(), timeout=20) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, list):
+                        return data
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch directory contents: %s", e)
+        return []
+
     async def get_readme(self, owner: str, repo: str) -> str | None:
         """Fetch the README content for a repository."""
         sess = async_get_clientsession(self.hass)
