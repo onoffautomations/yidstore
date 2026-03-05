@@ -95,6 +95,12 @@
             margin-bottom: 1.5rem;
             flex-wrap: wrap;
             gap: 0.8rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--bg);
+            padding: 0.5rem 0;
+            margin: -0.5rem 0 1rem 0;
         }
 
         .logo-section {
@@ -511,6 +517,87 @@
             display: block;
         }
 
+        /* Select mode styles */
+        .select-checkbox {
+            position: absolute;
+            top: 0.8rem;
+            left: 0.8rem;
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            background: var(--card);
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            transition: 0.2s;
+        }
+
+        .select-checkbox:hover {
+            border-color: var(--primary);
+        }
+
+        .select-checkbox.checked {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .select-checkbox.checked::after {
+            content: '\F012C';
+            font-family: 'Material Design Icons';
+            color: #000;
+            font-size: 14px;
+        }
+
+        body.select-mode .select-checkbox {
+            display: flex;
+        }
+
+        body.select-mode .card-check {
+            display: none !important;
+        }
+
+        /* List row select checkbox */
+        .list-select-checkbox {
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            background: var(--card);
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: 0.2s;
+        }
+
+        .list-select-checkbox:hover {
+            border-color: var(--primary);
+        }
+
+        .list-select-checkbox.checked {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .list-select-checkbox.checked::after {
+            content: '\F012C';
+            font-family: 'Material Design Icons';
+            color: #000;
+            font-size: 14px;
+        }
+
+        body.select-mode .list-select-checkbox {
+            display: flex;
+        }
+
+        body.select-mode .list-row {
+            grid-template-columns: 22px 48px minmax(0, 1fr) auto;
+        }
+
         .type-tag {
             padding: 0.25rem 0.5rem;
             border-radius: 6px;
@@ -557,6 +644,12 @@
             border-color: rgba(34, 197, 94, 0.2);
         }
 
+        .badge-restart {
+            background: rgba(249, 115, 22, 0.1);
+            color: #f97316;
+            border-color: rgba(249, 115, 22, 0.2);
+        }
+
         .card-title {
             font-size: 1.1rem;
             font-weight: 700;
@@ -590,6 +683,7 @@
             justify-content: space-between;
             align-items: center;
             padding-top: 0.8rem;
+            margin-top: auto;
             border-top: 1px solid var(--divider);
         }
 
@@ -1163,9 +1257,6 @@
                     <i class="mdi mdi-magnify"></i>
                     <input type="text" id="q" placeholder="Search..." oninput="apply()">
                 </div>
-                <button class="btn btn-o btn-refresh" onclick="checkUpdates()" id="refreshBtn">
-                    <i class="mdi mdi-sync"></i> Refresh
-                </button>
                 <select id="filterF" onchange="apply()" title="Filter">
                     <option value="all">Filter: All</option>
                     <option value="integration">Filter: Integrations</option>
@@ -1186,11 +1277,12 @@
                     <option value="author">Sort: Author</option>
                 </select>
                 <div class="menu-container">
+                    <button class="btn-icon" onclick="toggleSelectMode()" title="Select Multiple" id="selectModeBtn"><i
+                            class="mdi mdi-checkbox-multiple-marked-outline"></i></button>
                     <button class="btn-icon" onclick="toggleView()" title="Toggle View" id="viewToggleBtn"><i
                             class="mdi mdi-format-list-bulleted"></i></button>
                     <button class="btn-icon" onclick="toggleMenu()"><i class="mdi mdi-dots-vertical"></i></button>
                     <div id="dropdown" class="dropdown">
-                        <div onclick="checkUpdates()"><i class="mdi mdi-sync"></i> Refresh Updates</div>
                         <div id="addCustomBtn" onclick="openCustomModal()"><i class="mdi mdi-folder-plus-outline"></i>
                             Custom Repos
                         </div>
@@ -1209,7 +1301,7 @@
                                 <span class="thumb"></span>
                             </button>
                         </div>
-                        <div onclick="load()"><i class="mdi mdi-refresh"></i> Full Reload</div>
+                        <div onclick="fullReload()"><i class="mdi mdi-refresh"></i> Full Reload</div>
                     </div>
                 </div>
             </div>
@@ -1297,6 +1389,219 @@
     <script>
         let items = [];
         const THEME_KEY = 'yidstore_theme';
+        const CACHE_KEY = 'yidstore_cache';
+        const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+        const LIVE_SYNC_INTERVAL = 15 * 1000; // lightweight status sync
+        const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
+
+        function formatReleaseDate(dateString) {
+            if (!dateString) return '';
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) return '';
+                return date.toLocaleDateString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function getCachedData() {
+            try {
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (!cached) return null;
+                const { data, timestamp } = JSON.parse(cached);
+                const age = Date.now() - timestamp;
+                if (age > CACHE_DURATION) {
+                    localStorage.removeItem(CACHE_KEY);
+                    return null;
+                }
+                return { data, age };
+            } catch (e) {
+                localStorage.removeItem(CACHE_KEY);
+                return null;
+            }
+        }
+
+        function setCachedData(data) {
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({
+                    data: data,
+                    timestamp: Date.now()
+                }));
+            } catch (e) {
+                // Ignore storage errors
+            }
+        }
+
+        function getCacheAgeText(ageMs) {
+            const minutes = Math.floor(ageMs / 60000);
+            if (minutes < 1) return 'just now';
+            if (minutes < 60) return `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m ago`;
+        }
+
+        function getInstalledBadge(installSource, needsRestart = false, itemType = 'integration') {
+            // Only integrations need restart - cards and blueprints just need reload
+            if (needsRestart && itemType === 'integration') {
+                return '<span class="badge badge-restart">Restart Required</span>';
+            }
+            switch (installSource) {
+                case 'hacs':
+                    return '<span class="badge badge-inst">Installed by HACS</span>';
+                case 'manual':
+                    return '<span class="badge badge-inst">Manually installed</span>';
+                case 'yidstore':
+                default:
+                    return '<span class="badge badge-inst">Installed</span>';
+            }
+        }
+
+        // Requires restart tracking (server-driven)
+        let requiresRestartSet = new Set();
+        let optimisticRestartUntil = new Map();
+        let autoReloadInterval = null;
+        let liveSyncInterval = null;
+        let hasCompletedInitialLoad = false;
+
+        // Normalize key for restart set comparison (handle dashes vs underscores)
+        function normalizeRestartKey(key) {
+            return key.toLowerCase().replace(/-/g, '_');
+        }
+
+        function needsRestart(owner, repo) {
+            const key = normalizeRestartKey(`${owner}/${repo}`);
+            // 1) Server/sensor truth
+            for (const k of requiresRestartSet) {
+                if (normalizeRestartKey(k) === key) return true;
+            }
+            // 2) Short-lived optimistic state right after install/update
+            const expiry = optimisticRestartUntil.get(key) || 0;
+            if (expiry > Date.now()) return true;
+            if (expiry > 0) optimisticRestartUntil.delete(key);
+            return false;
+        }
+
+        function loadRestartSet() {
+            requiresRestartSet = new Set();
+        }
+
+        function saveRestartSet() {
+            // No-op: restart state is owned by backend status API.
+        }
+
+        function addToRestartSet(owner, repo) {
+            optimisticRestartUntil.set(
+                normalizeRestartKey(`${owner}/${repo}`),
+                Date.now() + OPTIMISTIC_RESTART_MS
+            );
+            saveRestartSet();
+        }
+
+        async function refreshDashboard() {
+            // Quick sync with integration - just update status without full reload
+            try {
+                const res = await fetch('/api/yidstore/status');
+                if (!res.ok) {
+                    console.log('Status API failed:', res.status);
+                    // Even if status fails, still apply with current data
+                    apply();
+                    return;
+                }
+                const data = await res.json();
+                // Server is source of truth for restart status.
+                requiresRestartSet = new Set(data.requires_restart_list || []);
+                // If server confirms restart-needed, clear optimistic override for that repo.
+                for (const k of requiresRestartSet) {
+                    optimisticRestartUntil.delete(normalizeRestartKey(k));
+                }
+
+                // Update items with new status from server
+                for (const [key, status] of Object.entries(data.status || {})) {
+                    const [owner, repo] = key.split('/');
+                    // Normalize for matching (handle dashes vs underscores)
+                    const normalizedOwner = owner.toLowerCase().replace(/-/g, '_');
+                    const normalizedRepo = repo.toLowerCase().replace(/-/g, '_');
+                    const item = items.find(x =>
+                        x.owner.toLowerCase().replace(/-/g, '_') === normalizedOwner &&
+                        x.repo_name.toLowerCase().replace(/-/g, '_') === normalizedRepo
+                    );
+                    if (item) {
+                        item.is_installed = status.is_installed;
+                        item.install_source = status.install_source;
+                        // Only update update_available if server says it's not installed or has update
+                        // This prevents losing the "no update" state we set locally after installing
+                        if (status.update_available !== undefined) {
+                            item.update_available = status.update_available;
+                        }
+                    }
+                }
+
+                // Update cache with current items
+                setCachedData(items);
+                apply();
+
+                // Update modal restart badge if modal is open
+                updateModalRestartBadge();
+            } catch (e) {
+                console.log('Refresh failed:', e);
+                // Still apply current state
+                apply();
+            }
+        }
+
+        function updateModalRestartBadge() {
+            const modalTop = document.querySelector('.modal-top[data-owner][data-repo]');
+            const badge = document.getElementById('modalRestartBadge');
+            if (!modalTop || !badge) return;
+
+            const owner = modalTop.dataset.owner;
+            const repo = modalTop.dataset.repo;
+            const type = modalTop.dataset.type;
+            const restartNeeded = type === 'integration' && needsRestart(owner, repo);
+
+            if (restartNeeded) {
+                badge.className = 'badge badge-restart';
+                badge.style.display = '';
+                badge.style.marginLeft = '0.5rem';
+                badge.textContent = 'Restart Required';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        function startAutoReload() {
+            if (autoReloadInterval) clearInterval(autoReloadInterval);
+            // Full reload every 2 hours
+            autoReloadInterval = setInterval(() => {
+                fullReload();
+            }, CACHE_DURATION);
+        }
+
+        function stopAutoReload() {
+            if (autoReloadInterval) {
+                clearInterval(autoReloadInterval);
+                autoReloadInterval = null;
+            }
+        }
+
+        function startLiveSync() {
+            if (liveSyncInterval) clearInterval(liveSyncInterval);
+            liveSyncInterval = setInterval(() => {
+                if (document.visibilityState === 'visible') refreshDashboard();
+            }, LIVE_SYNC_INTERVAL);
+        }
+
+        function stopLiveSync() {
+            if (liveSyncInterval) {
+                clearInterval(liveSyncInterval);
+                liveSyncInterval = null;
+            }
+        }
 
         function getSavedTheme() {
             const t = (localStorage.getItem(THEME_KEY) || 'dark').toLowerCase();
@@ -1393,7 +1698,7 @@
 
         function haBrandUrl(domain, file) {
             const d = encodeURIComponent(domain || '');
-            return `https://brands.home-assistant.io/${d}/${file}`;
+            return `/api/yidstore/brands/${d}/${file}`;
         }
 
         function getBrandCandidates(domain, kind, fallbackUrl) {
@@ -1408,8 +1713,25 @@
 
             const candidates = [];
 
-            // 0) Prefer the repo-provided/local fallback URL if available
-            if (fallbackUrl) candidates.push(fallbackUrl);
+            // 0) If fallback URL is a GitHub raw URL, generate theme-aware variants
+            if (fallbackUrl && fallbackUrl.includes('raw.githubusercontent.com')) {
+                const baseUrl = fallbackUrl.replace(/\/[^\/]+\.png$/, '/');
+                if (kind === 'logo') {
+                    candidates.push(baseUrl + logoPrimary);
+                    candidates.push(baseUrl + logoSecondary);
+                } else {
+                    candidates.push(baseUrl + iconPrimary);
+                    candidates.push(baseUrl + iconSecondary);
+                }
+                // Also try the direct icon.png without brand folder for some repos
+                const altBaseUrl = fallbackUrl.replace('/brand/icon.png', '/').replace('/brand/', '/');
+                if (altBaseUrl !== baseUrl) {
+                    candidates.push(altBaseUrl + 'icon.png');
+                }
+            } else if (fallbackUrl) {
+                // Non-GitHub fallback URL
+                candidates.push(fallbackUrl);
+            }
 
             if (kind === 'logo') {
                 // 1) Brand logo files
@@ -1493,9 +1815,24 @@
         let selectedIds = new Set();
         let showHidden = false;
         let viewMode = 'grid';
+        let selectMode = false;
         let lastFiltered = [];
         let collapsedSections = new Set();
         const grid = document.getElementById('grid');
+
+        function toggleSelectMode() {
+            selectMode = !selectMode;
+            document.body.classList.toggle('select-mode', selectMode);
+            const btn = document.getElementById('selectModeBtn');
+            if (btn) {
+                btn.style.background = selectMode ? 'var(--primary)' : '';
+                btn.style.color = selectMode ? '#000' : '';
+            }
+            if (!selectMode) {
+                clearSelection();
+            }
+            apply();
+        }
 
         function isOverlayOpen() {
             const modal = document.getElementById('modal');
@@ -1518,13 +1855,70 @@
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
 
-        async function load() {
+        async function load(forceRefresh = false) {
+            // Check cache first (unless forcing refresh)
+            if (!forceRefresh) {
+                const cached = getCachedData();
+                if (cached) {
+                    items = cached.data;
+                    // Also fetch requires_restart status
+                    try {
+                        const statusRes = await fetch('/api/yidstore/status');
+                        if (statusRes.ok) {
+                            const statusData = await statusRes.json();
+                            requiresRestartSet = new Set(statusData.requires_restart_list || []);
+                        }
+                    } catch (e) {}
+                    apply();
+                    updateCacheIndicator(cached.age);
+                    startAutoReload();
+                    startLiveSync();
+                    hasCompletedInitialLoad = true;
+                    return;
+                }
+            }
+
             grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
             try {
                 const r = await fetch('/api/yidstore/repos');
                 items = await r.json();
-                apply(); // This will call populateAuthorFilter with visible items
+                // Also fetch requires_restart status
+                try {
+                    const statusRes = await fetch('/api/yidstore/status');
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        requiresRestartSet = new Set(statusData.requires_restart_list || []);
+                    }
+                } catch (e) {}
+                setCachedData(items);
+                hasCompletedInitialLoad = true;
+                apply();
+                updateCacheIndicator(0);
+                startAutoReload();
+                startLiveSync();
             } catch (e) { grid.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--dim);">Error loading store.</div>'; }
+        }
+
+        async function fullReload() {
+            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+            // Trigger backend refresh to check for updates from Gitea
+            try {
+                await fetch('/api/yidstore/refresh', { method: 'POST' });
+            } catch (e) {}
+            // Clear cache and force fresh data
+            localStorage.removeItem(CACHE_KEY);
+            load(true);
+        }
+
+        function triggerAutoFullReload() {
+            fullReload();
+        }
+
+        function updateCacheIndicator(ageMs) {
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (!refreshBtn) return;
+            refreshBtn.innerHTML = '<i class="mdi mdi-sync"></i> Refresh';
+            refreshBtn.title = 'Sync dashboard with integration';
         }
 
         function populateAuthorFilter(visibleItems = null) {
@@ -1568,10 +1962,8 @@
         }
 
         async function checkUpdates() {
-            try {
-                await fetch('/api/yidstore/refresh', { method: 'POST' });
-                load();
-            } catch (e) { }
+            // Quick refresh - sync with integration status
+            await refreshDashboard();
         }
 
         function apply() {
@@ -1678,12 +2070,13 @@
             }
 
             card.innerHTML = `
+            <div class="select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
             <i class="mdi mdi-check-circle card-check"></i>
             <div class="card-head">
                 <div class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</div>
                 <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
                      ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : (i.source === 'hacs' ? '<span class="badge badge-inst">Installed by HACS</span>' : '<span class="badge badge-inst">Installed</span>')) : ''}
+                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                 </div>
             </div>
             <div style="display: flex; gap: 0.8rem; align-items: flex-start;">
@@ -1703,7 +2096,7 @@
                 </div>
             </div>
             <div class="card-foot">
-                <div style="color:var(--dim); font-size:0.75rem;">${authorDisplay}</div>
+                <div style="color:var(--dim); font-size:0.75rem;">${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
                 <button class="btn btn-p" onclick="openDet('${i.owner}','${i.repo_name}',event)">View <i class="mdi mdi-chevron-right"></i></button>
             </div>
         `;
@@ -1767,6 +2160,7 @@
             const actionLabel = i.update_available ? 'Update' : (i.is_installed ? 'Reinstall' : 'Install');
 
             row.innerHTML = `
+                <div class="list-select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
                 <div style="display:flex; align-items:center; justify-content:center;">
                     ${iconHtml}
                 </div>
@@ -1775,9 +2169,9 @@
                         <span class="title-text">${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : (i.source === 'hacs' ? '<span class="badge badge-inst">Installed by HACS</span>' : '<span class="badge badge-inst">Installed</span>')) : ''}
+                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
-                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''}</div>
+                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
                 </div>
                 <div class="list-actions">
                     <button class="btn btn-p" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
@@ -1826,6 +2220,10 @@
             grid.classList.toggle('list-view', viewMode === 'list');
 
             if (data.length === 0) {
+                if (!hasCompletedInitialLoad) {
+                    grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+                    return;
+                }
                 grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-package-variant" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> No items found</div>';
                 return;
             }
@@ -1916,23 +2314,57 @@
 
         function clearSelection() {
             selectedIds.clear();
+            // Exit select mode when clearing selection
+            if (selectMode) {
+                selectMode = false;
+                document.body.classList.remove('select-mode');
+                const btn = document.getElementById('selectModeBtn');
+                if (btn) {
+                    btn.style.background = '';
+                    btn.style.color = '';
+                }
+            }
             updateBulkBar();
             apply();
         }
 
-        async function bulkAction(act) {
+        function bulkAction(act) {
             if (act === 'install') {
-                if (!confirm(`Install ${selectedIds.size} components?`)) return;
-                const ids = Array.from(selectedIds);
-                clearSelection();
-                pop('Installing', `Installing ${ids.length} packages...`, 'mdi-download-network', false);
-                for (const id of ids) {
-                    const [o, r] = id.split('/');
-                    const item = items.find(x => x.owner === o && x.repo_name === r);
+                const count = selectedIds.size;
+                pop('Confirm Install', `Install <strong>${count}</strong> component${count > 1 ? 's' : ''}?`, 'mdi-download-multiple', false, [
+                    { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                    { t: 'Install All', c: 'btn-p', f: 'executeBulkInstall()' }
+                ]);
+            }
+        }
+
+        async function executeBulkInstall() {
+            closePop();
+            const ids = Array.from(selectedIds);
+            clearSelection();
+            let hasCards = false;
+            let installedCount = 0;
+            for (const id of ids) {
+                const [o, r] = id.split('/');
+                const item = items.find(x => x.owner === o && x.repo_name === r);
+                if (item) {
                     await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
+                    item.is_installed = true;
+                    item.install_source = 'yidstore';
+                    item.update_available = false;
+                    installedCount++;
+                    if (item.type === 'integration') {
+                        addToRestartSet(o, r);
+                    } else {
+                        hasCards = true;
+                    }
                 }
-                pop('Complete', 'Installation complete. Check logs for details.', 'mdi-check-circle', false);
-                load();
+            }
+            await refreshDashboard();
+            if (hasCards) {
+                pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed. Reload to see card changes.`, 'mdi-check-circle', true);
+            } else if (installedCount > 0) {
+                pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed successfully.`, 'mdi-check-circle', false);
             }
         }
 
@@ -1998,7 +2430,8 @@
             // Fetch available releases for version selection
             let releases = [];
             try {
-                const relResp = await fetch(`/api/yidstore/releases/${o}/${r}`);
+                const sourceParam = item.source === 'github' ? '?source=github' : '';
+                const relResp = await fetch(`/api/yidstore/releases/${o}/${r}${sourceParam}`);
                 if (relResp.ok) {
                     releases = await relResp.json();
                 }
@@ -2011,13 +2444,18 @@
             if (releases && releases.length > 0) {
                 // Get older releases (skip the first/latest one since it's shown as "Latest")
                 const olderReleases = releases.slice(1);
+                const latestDate = formatReleaseDate(releases[0]?.published_at || releases[0]?.created_at);
                 versionSelector = `
                     <div class="version-wrap">
                         <div class="version-row">
                             <label style="color: var(--dim); font-size: 0.85rem; white-space: nowrap;">Version:</label>
                             <select id="versionSelect" class="version-select">
-                            <option value="">Latest (${releases[0]?.tag_name || 'default'})</option>
-                            ${olderReleases.map(rel => `<option value="${rel.tag_name}">${rel.tag_name}${rel.name ? ' - ' + rel.name : ''}</option>`).join('')}
+                            <option value="">Latest (${releases[0]?.tag_name || 'default'})${latestDate ? ' - ' + latestDate : ''}</option>
+                            ${olderReleases.map(rel => {
+                                const relDate = formatReleaseDate(rel.published_at || rel.created_at);
+                                const dateStr = relDate ? ' - ' + relDate : '';
+                                return `<option value="${rel.tag_name}">${rel.tag_name}${rel.name ? ' - ' + rel.name : ''}${dateStr}</option>`;
+                            }).join('')}
                             </select>
                         </div>
                     </div>
@@ -2038,17 +2476,20 @@
             `;
 
             try {
-                const resp = await fetch(`/api/yidstore/readme/${o}/${r}`);
+                const sourceParam = item.source === 'github' ? '?source=github' : '';
+                const resp = await fetch(`/api/yidstore/readme/${o}/${r}${sourceParam}`);
                 let md = '';
                 if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
                 md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
                 const logoMarkup = buildModalLogo(item);
+                const itemNeedsRestart = item.type === 'integration' && needsRestart(item.owner, item.repo_name);
+                const restartBadge = itemNeedsRestart ? '<span class="badge badge-restart" id="modalRestartBadge" style="margin-left: 0.5rem;">Restart Required</span>' : '<span id="modalRestartBadge" style="display:none;"></span>';
                 const headerMarkup = `
-                    <div class="modal-top">
+                    <div class="modal-top" data-owner="${item.owner}" data-repo="${item.repo_name}" data-type="${item.type}">
                         <div class="modal-top-row">
                             ${logoMarkup}
                             <div class="modal-top-text">
-                                <div class="modal-top-title">${formatName(item.repo_name)}</div>
+                                <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
                                 <div class="modal-top-author">by ${item.owner_display_name || item.owner}</div>
                             </div>
                         </div>
@@ -2063,10 +2504,12 @@
         function buildModalLogo(item) {
             const domain = getDomainFromItem(item);
 
-            // Fallbacks from item.icon_url (if it follows /icons/icon.png pattern)
+            // Fallbacks from item.icon_url (prefer /brand/*, keep legacy /icons/* mapping)
             let fallbackLogo = '';
             if (item.icon_url) {
                 fallbackLogo = item.icon_url
+                    .replace('/brand/dark_icon.png', '/brand/dark_logo.png')
+                    .replace('/brand/icon.png', '/brand/logo.png')
                     .replace('/icons/dark_icon.png', '/icons/dark_logo.png')
                     .replace('/icons/icon.png', '/icons/logo.png');
             }
@@ -2130,10 +2573,10 @@
 
             try {
                 const body = { owner: o, repo: r, type: t };
-                if (item.mode) body.mode = item.mode;
-                if (item.asset_name) body.asset_name = item.asset_name;
+                if (item && item.mode) body.mode = item.mode;
+                if (item && item.asset_name) body.asset_name = item.asset_name;
                 if (version) body.version = version;
-                if (item.source === 'github') {
+                if (item && item.source === 'github') {
                     body.source = 'github';
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
@@ -2146,12 +2589,21 @@
                 const data = await res.json();
                 if (data.success) {
                     closeModal();
-                    if (t === 'lovelace') {
-                        pop('Installed', 'Card installed. Reload Home Assistant.', 'mdi-refresh', true);
-                    } else {
-                        pop('Restart Required', 'Integration installed. Restart Home Assistant.', 'mdi-restart', false);
+                    // Update item locally - mark as installed and remove from updates
+                    if (item) {
+                        item.is_installed = true;
+                        item.install_source = 'yidstore';
+                        item.update_available = false;
                     }
-                    load();
+                    // Only integrations need restart - cards/blueprints need reload
+                    if (t === 'integration') {
+                        addToRestartSet(o, r);
+                        await refreshDashboard();
+                    } else {
+                        // Cards and blueprints - show reload popup
+                        await refreshDashboard();
+                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
+                    }
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
         }
@@ -2323,9 +2775,9 @@
 
             try {
                 const body = { owner: o, repo: r, type: t };
-                if (item.mode) body.mode = item.mode;
-                if (item.asset_name) body.asset_name = item.asset_name;
-                if (item.source === 'github') {
+                if (item && item.mode) body.mode = item.mode;
+                if (item && item.asset_name) body.asset_name = item.asset_name;
+                if (item && item.source === 'github') {
                     body.source = 'github';
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
@@ -2338,12 +2790,21 @@
                 const data = await res.json();
                 if (data.success) {
                     closeModal();
-                    if (t === 'lovelace') {
-                        pop('Installed', 'Card installed. Reload Home Assistant.', 'mdi-refresh', true);
-                    } else {
-                        pop('Restart Required', 'Integration installed. Restart Home Assistant.', 'mdi-restart', false);
+                    // Update item locally - mark as installed and remove from updates
+                    if (item) {
+                        item.is_installed = true;
+                        item.install_source = 'yidstore';
+                        item.update_available = false;
                     }
-                    load();
+                    // Only integrations need restart - cards/blueprints need reload
+                    if (t === 'integration') {
+                        addToRestartSet(o, r);
+                        await refreshDashboard();
+                    } else {
+                        // Cards and blueprints - show reload popup
+                        await refreshDashboard();
+                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
+                    }
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
         }
@@ -2401,7 +2862,22 @@
         }, { passive: false });
 
         initTheme();
-        load();
+        loadRestartSet();
+        triggerAutoFullReload();
+
+        // Start live sync immediately on page load and do initial refresh
+        startLiveSync();
+        // Immediate status check after a short delay to allow initial load to complete
+        setTimeout(() => refreshDashboard(), 1000);
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                refreshDashboard();
+                startLiveSync();
+            } else {
+                stopLiveSync();
+            }
+        });
     </script>
 </body>
 
