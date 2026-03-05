@@ -172,20 +172,6 @@ class GiteaClient:
             pass
         return None
 
-    async def get_directory_contents(self, owner: str, repo: str, path: str = "", branch: str = "main") -> list[dict]:
-        """Fetch contents of a directory."""
-        sess = async_get_clientsession(self.hass)
-        url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}?ref={branch}"
-        try:
-            async with sess.get(url, headers=self._headers(), timeout=20) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if isinstance(data, list):
-                        return data
-        except Exception as e:
-            _LOGGER.debug("Failed to fetch directory contents: %s", e)
-        return []
-
     async def get_readme(self, owner: str, repo: str) -> str | None:
         """Fetch the README content for a repository."""
         sess = async_get_clientsession(self.hass)
@@ -265,14 +251,29 @@ class GiteaClient:
     async def get_icon_url(self, owner: str, repo: str, branch: str = "main") -> str | None:
         """Get the URL for the repo's icon if it exists."""
         sess = async_get_clientsession(self.hass)
-        # Try different icon paths
-        icon_paths = [
-            "icons/icon.png",
-            "icons/icon@2x.png",
-            "Icons/icon.png",
-            "Icons/icon@2x.png",
-            "icon.png",
-        ]
+        # Prefer new integration-local branding first, then legacy icon locations.
+        icon_paths: list[str] = []
+        try:
+            domains = await self.get_integration_domains(owner, repo, branch=branch)
+            for domain in domains:
+                icon_paths.extend(
+                    [
+                        f"custom_components/{domain}/brand/icon.png",
+                        f"custom_components/{domain}/brand/icon.svg",
+                        f"custom_components/{domain}/icon.png",
+                    ]
+                )
+        except Exception:
+            pass
+        icon_paths.extend(
+            [
+                "icons/icon.png",
+                "icons/icon@2x.png",
+                "Icons/icon.png",
+                "Icons/icon@2x.png",
+                "icon.png",
+            ]
+        )
 
         for path in icon_paths:
             url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}?ref={branch}"
@@ -289,3 +290,33 @@ class GiteaClient:
     def get_raw_icon_url(self, owner: str, repo: str, branch: str = "main") -> str:
         """Get the raw URL for potential icon files."""
         return f"{self.base_url}/{owner}/{repo}/raw/branch/{branch}/icons/icon.png"
+
+
+    async def list_dir(self, owner: str, repo: str, path: str, branch: str = "main") -> list[dict]:
+        """List a directory in a repo using the Gitea contents API.
+
+        Returns a list of entries with keys like: name, path, type ('file'/'dir').
+        """
+        sess = async_get_clientsession(self.hass)
+        p = path.strip("/")
+
+        url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{p}?ref={branch}"
+        try:
+            async with sess.get(url, headers=self._headers(), timeout=15) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    async def get_integration_domains(self, owner: str, repo: str, branch: str = "main") -> list[str]:
+        """Return possible integration domain folder(s) under custom_components/."""
+        entries = await self.list_dir(owner, repo, "custom_components", branch=branch)
+        domains: list[str] = []
+        for e in entries:
+            if (e or {}).get("type") == "dir":
+                name = (e.get("name") or "").strip()
+                if name and not name.startswith("."):
+                    domains.append(name)
+        return domains

@@ -37,7 +37,7 @@ def _extract_zip_bytes(zip_bytes: bytes, extract_to: Path) -> None:
         zf.extractall(extract_to)
 
 
-def _install_integration_from_extracted(extracted_root: Path, ha_custom_components: Path, ha_brands_path: Path = None) -> None:
+def _install_integration_from_extracted(extracted_root: Path, ha_custom_components: Path) -> None:
     import logging
     _LOGGER = logging.getLogger(__name__)
 
@@ -55,8 +55,11 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
             shutil.rmtree(target)
         shutil.copytree(domain_dir, target)
 
-        # Look for icons in common locations and sync to brands + integration folder
+        # Look for branding files in common locations and store them under
+        # custom_components/<domain>/brand for Home Assistant branding pickup.
         icons_folders = [
+            domain_dir / "brand",
+            domain_dir / "Brand",
             extracted_root / "icons",
             extracted_root / "Icons",
             domain_dir / "icons",
@@ -89,43 +92,30 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
                     if main_icon is None:
                         main_icon = icon_file
 
-            # Copy to brands directory for HA brands system
-            if ha_brands_path:
-                brand_target = ha_brands_path / domain_dir.name
-                brand_target.mkdir(parents=True, exist_ok=True)
-
-                for icon_file in icon_files:
-                    dest_file = brand_target / icon_file.name
-                    shutil.copy2(icon_file, dest_file)
-                    _LOGGER.info("Copied to brands: %s", icon_file.name)
-
-                if main_icon and main_icon.name.lower() != 'icon.png':
-                    dest_icon = brand_target / "icon.png"
-                    shutil.copy2(main_icon, dest_icon)
-                    _LOGGER.info("Created icon.png in brands from %s", main_icon.name)
-
-            # Copy to the integration folder for HA 2023.2+ local icons
+            # Copy to custom_components/<domain>/brand.
+            brand_target = target / "brand"
+            brand_target.mkdir(parents=True, exist_ok=True)
             for icon_file in icon_files:
-                dest_file = target / icon_file.name
+                dest_file = brand_target / icon_file.name
                 shutil.copy2(icon_file, dest_file)
 
             if main_icon:
-                dest_icon = target / "icon.png"
+                dest_icon = brand_target / "icon.png"
                 if not dest_icon.exists() or main_icon.name.lower() != 'icon.png':
                     shutil.copy2(main_icon, dest_icon)
-                    _LOGGER.info("Created icon.png in integration from %s", main_icon.name)
+                    _LOGGER.info("Created brand/icon.png from %s", main_icon.name)
 
             if icon_2x:
-                dest_icon_2x = target / "icon@2x.png"
+                dest_icon_2x = brand_target / "icon@2x.png"
                 if not dest_icon_2x.exists():
                     shutil.copy2(icon_2x, dest_icon_2x)
-                    _LOGGER.info("Created icon@2x.png in integration")
+                    _LOGGER.info("Created brand/icon@2x.png")
 
             if logo:
-                dest_logo = target / "logo.png"
+                dest_logo = brand_target / "logo.png"
                 if not dest_logo.exists():
                     shutil.copy2(logo, dest_logo)
-                    _LOGGER.info("Created logo.png in integration")
+                    _LOGGER.info("Created brand/logo.png")
 
             _LOGGER.info("Icons installed for %s", domain_dir.name)
 
@@ -242,9 +232,6 @@ async def install_package(
     ha_custom_components = Path(hass.config.path("custom_components"))
     ha_www_community = Path(hass.config.path("www", "community"))
     ha_blueprints_root = Path(hass.config.path("blueprints"))
-    # Brands directory for custom integration icons
-    ha_brands = Path(hass.config.path("www", "brands"))
-
     def _work() -> dict:
         with tempfile.TemporaryDirectory(prefix="yidstore_") as td:
             extract_dir = Path(td)
@@ -252,7 +239,7 @@ async def install_package(
             root = _detect_single_top_folder(extract_dir)
 
             if package_type == "integration":
-                _install_integration_from_extracted(root, ha_custom_components, ha_brands)
+                _install_integration_from_extracted(root, ha_custom_components)
                 return {}
 
             if package_type == "lovelace":

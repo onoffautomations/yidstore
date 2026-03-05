@@ -529,39 +529,6 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
     _LOGGER.info("=" * 80)
     _LOGGER.info("")
 
-    # Send persistent notification
-    try:
-        card_name = base_url.split('/')[-1]
-        if reload_success:
-            message = (
-                f"✓ **{card_name}** installed successfully!\n\n"
-                f"**Resource is now available!**\n"
-                f"Go to Settings → Dashboards → Resources to verify.\n\n"
-                f"**Device created** with update tracking sensors.\n\n"
-                f"Hard refresh your browser (Ctrl+F5) to load the card."
-            )
-        else:
-            message = (
-                f"⚠ **{card_name}** saved to storage!\n\n"
-                f"**RESTART HOME ASSISTANT REQUIRED**\n"
-                f"The resource was saved but needs a restart to load.\n\n"
-                f"After restart, hard refresh your browser (Ctrl+F5)."
-            )
-
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "YidStore - Card Installed",
-                "message": message,
-                "notification_id": f"yidstore_{timestamp}"
-            },
-            blocking=False
-        )
-        _LOGGER.info("✓ Sent user notification")
-    except Exception as e:
-        _LOGGER.debug("Could not send notification: %s", e)
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
