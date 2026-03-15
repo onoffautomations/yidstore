@@ -624,6 +624,11 @@
             color: #ec4899;
         }
 
+        .tag-audio {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+
         .badge {
             font-size: 0.6rem;
             padding: 0.2rem 0.5rem;
@@ -1262,6 +1267,7 @@
                     <option value="integration">Filter: Integrations</option>
                     <option value="lovelace">Filter: Cards</option>
                     <option value="blueprints">Filter: Blueprints</option>
+                    <option value="audio">Filter: Audio</option>
                     <option value="installed">Filter: Installed</option>
                     <option value="not_installed">Filter: Not Installed</option>
                     <option value="updates">Filter: Updates</option>
@@ -1355,10 +1361,20 @@
                                 <option value="integration">Integration</option>
                                 <option value="lovelace">Lovelace Card</option>
                                 <option value="blueprints">Blueprint</option>
+                                <option value="audio">Audio</option>
                             </select>
                         </div>
                     </div>
                     <div id="customGiteaFields">
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="customGiteaType">
+                                <option value="integration">Integration</option>
+                                <option value="lovelace">Lovelace Card</option>
+                                <option value="blueprints">Blueprint</option>
+                                <option value="audio">Audio</option>
+                            </select>
+                        </div>
                         <div class="form-group">
                             <label>Owner / Organization</label>
                             <input type="text" id="customOwner" placeholder="e.g. Zing">
@@ -1978,7 +1994,7 @@
                 const matchQ = i.repo_name.toLowerCase().includes(q) || i.description.toLowerCase().includes(q);
                 const matchFilter =
                     filterVal === 'all' ||
-                    (['integration', 'lovelace', 'blueprints'].includes(filterVal) && i.type === filterVal) ||
+                    (['integration', 'lovelace', 'blueprints', 'audio'].includes(filterVal) && i.type === filterVal) ||
                     (filterVal === 'installed' && i.is_installed) ||
                     (filterVal === 'not_installed' && !i.is_installed) ||
                     (filterVal === 'updates' && i.update_available);
@@ -2003,7 +2019,7 @@
                     return a.repo_name.localeCompare(b.repo_name);
                 }
                 if (s === 'type') {
-                    const typeOrder = { 'integration': 0, 'lovelace': 1, 'blueprints': 2 };
+                    const typeOrder = { 'integration': 0, 'lovelace': 1, 'blueprints': 2, 'audio': 3 };
                     const diff = (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
                     return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
                 }
@@ -2031,11 +2047,17 @@
             const id = `${i.owner}/${i.repo_name}`;
             const card = document.createElement('div');
             card.className = `card ${selectedIds.has(id) ? 'selected' : ''}`;
-            const typeIcon = i.type === 'lovelace' ? 'mdi-view-dashboard' : (i.type === 'blueprints' ? 'mdi-file-document-outline' : 'mdi-puzzle');
-            const typeClass = i.type === 'lovelace' ? 'tag-card' : (i.type === 'blueprints' ? 'tag-blue' : 'tag-int');
+            const typeIcon = i.type === 'lovelace'
+                ? 'mdi-view-dashboard'
+                : (i.type === 'blueprints' ? 'mdi-file-document-outline' : (i.type === 'audio' ? 'mdi-music-note' : 'mdi-puzzle'));
+            const typeClass = i.type === 'lovelace'
+                ? 'tag-card'
+                : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
             const displayTitle = formatName(i.repo_name);
             const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
-            const typeLabel = i.type === 'lovelace' ? 'Card' : (i.type === 'blueprints' ? 'Blueprint' : 'Integration');
+            const typeLabel = i.type === 'lovelace'
+                ? 'Card'
+                : (i.type === 'blueprints' ? 'Blueprint' : (i.type === 'audio' ? 'Audio' : 'Integration'));
 
             // Build description: "Integration by: Author" + actual description if any
             let descContent = `<span style="color: var(--primary);">${typeLabel} by:</span> ${authorDisplay}`;
@@ -2045,7 +2067,7 @@
 
             // Icon handling - prefer Home Assistant brands by domain (theme-aware) with fallbacks
             let iconHtml;
-            if (i.type === 'lovelace') {
+            if (i.type === 'lovelace' || i.type === 'audio') {
                 iconHtml = `
                 <div class="card-icon-fallback" style="display: flex; width: 40px; height: 40px; border-radius: 8px; background: rgba(168, 85, 247, 0.1); align-items: center; justify-content: center;">
                     <i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: #a855f7;"></i>
@@ -2114,13 +2136,17 @@
             const id = `${i.owner}/${i.repo_name}`;
             const row = document.createElement('div');
             row.className = `list-row ${selectedIds.has(id) ? 'selected' : ''}`;
-            const typeIcon = i.type === 'lovelace' ? 'mdi-view-dashboard' : (i.type === 'blueprints' ? 'mdi-file-document-outline' : 'mdi-puzzle');
-            const typeClass = i.type === 'lovelace' ? 'tag-card' : (i.type === 'blueprints' ? 'tag-blue' : 'tag-int');
+            const typeIcon = i.type === 'lovelace'
+                ? 'mdi-view-dashboard'
+                : (i.type === 'blueprints' ? 'mdi-file-document-outline' : (i.type === 'audio' ? 'mdi-music-note' : 'mdi-puzzle'));
+            const typeClass = i.type === 'lovelace'
+                ? 'tag-card'
+                : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
             const displayTitle = formatName(i.repo_name);
             const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
 
             let iconHtml;
-            if (i.type === 'lovelace') {
+            if (i.type === 'lovelace' || i.type === 'audio') {
                 iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(168, 85, 247, 0.1); display: flex; align-items: center; justify-content: center;">
                        <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: #a855f7;"></i>
                    </div>`;
@@ -2243,9 +2269,9 @@
             // Render remaining items based on sort mode
             if (s === 'type' && nonUpdatesItems.length > 0) {
                 // Group by type
-                const types = ['integration', 'lovelace', 'blueprints'];
-                const typeLabels = { 'integration': 'Integrations', 'lovelace': 'Lovelace Cards', 'blueprints': 'Blueprints' };
-                const typeIcons = { 'integration': 'mdi-puzzle', 'lovelace': 'mdi-view-dashboard', 'blueprints': 'mdi-file-document-outline' };
+                const types = ['integration', 'lovelace', 'blueprints', 'audio'];
+                const typeLabels = { 'integration': 'Integrations', 'lovelace': 'Lovelace Cards', 'blueprints': 'Blueprints', 'audio': 'Audio' };
+                const typeIcons = { 'integration': 'mdi-puzzle', 'lovelace': 'mdi-view-dashboard', 'blueprints': 'mdi-file-document-outline', 'audio': 'mdi-music-note' };
 
                 types.forEach(type => {
                     const typeItems = nonUpdatesItems.filter(i => i.type === type);
@@ -2595,12 +2621,12 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Only integrations need restart - cards/blueprints need reload
+                    // Only integrations need restart - cards/blueprints/audio need reload
                     if (t === 'integration') {
                         addToRestartSet(o, r);
                         await refreshDashboard();
                     } else {
-                        // Cards and blueprints - show reload popup
+                        // Cards, blueprints, and audio - show reload popup
                         await refreshDashboard();
                         pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
                     }
@@ -2680,6 +2706,7 @@
             const repo = document.getElementById('customRepo').value.trim();
             const githubUrl = document.getElementById('customGithubUrl').value.trim();
             const githubType = document.getElementById('customGithubType').value;
+            const giteaType = document.getElementById('customGiteaType').value;
 
             if (isGithub) {
                 if (!githubUrl) { pop('Error', 'Please enter a GitHub URL.', 'mdi-alert', false); return; }
@@ -2690,7 +2717,7 @@
             try {
                 const body = isGithub
                     ? { source: 'github', url: githubUrl, type: githubType }
-                    : { owner, repo };
+                    : { owner, repo, type: giteaType };
 
                 await fetch('/api/yidstore/custom/add', {
                     method: 'POST',
@@ -2701,6 +2728,7 @@
                 document.getElementById('customRepo').value = '';
                 document.getElementById('customGithubUrl').value = '';
                 document.getElementById('customGithubType').value = 'integration';
+                document.getElementById('customGiteaType').value = 'integration';
                 document.getElementById('customIsGithub').checked = false;
                 toggleCustomRepoFields();
                 await loadCustomRepos(); // Refresh list in modal
@@ -2796,12 +2824,12 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Only integrations need restart - cards/blueprints need reload
+                    // Only integrations need restart - cards/blueprints/audio need reload
                     if (t === 'integration') {
                         addToRestartSet(o, r);
                         await refreshDashboard();
                     } else {
-                        // Cards and blueprints - show reload popup
+                        // Cards, blueprints, and audio - show reload popup
                         await refreshDashboard();
                         pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
                     }
