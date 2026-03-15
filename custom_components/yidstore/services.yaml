@@ -1,6 +1,6 @@
 install:
   name: Install (Generic)
-  description: Install an integration, Lovelace plugin, or blueprints from Gitea (asset zip or repo zipball).
+  description: Install an integration, Lovelace plugin, blueprints, or audio package from Gitea (asset zip or repo zipball).
   fields:
     owner:
       name: Owner/Org
@@ -25,6 +25,7 @@ install:
             - integration
             - lovelace
             - blueprints
+            - audio
     mode:
       name: Mode
       description: asset = release zipfile, zipball = repo snapshot zip (no asset required).

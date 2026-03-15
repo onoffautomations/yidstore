@@ -274,6 +274,7 @@ class PackageTypeSensor(SensorEntity):
             'integration': 'mdi:puzzle',
             'lovelace': 'mdi:view-dashboard',
             'blueprints': 'mdi:file-document-outline',
+            'audio': 'mdi:music-note',
         }
         return icon_map.get(package_type, 'mdi:package-variant-closed')
 

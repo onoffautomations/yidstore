@@ -9,7 +9,7 @@ from pathlib import Path
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import LOVELACE_VENDOR_FOLDER
+from .const import AUDIO_VENDOR_FOLDER, LOVELACE_VENDOR_FOLDER
 
 
 def _detect_single_top_folder(extract_dir: Path) -> Path:
@@ -197,6 +197,56 @@ def _install_blueprints_from_extracted(extracted_root: Path, ha_blueprints_root:
     _copytree_merge(bp, ha_blueprints_root)
 
 
+def _is_audio_file(path: Path) -> bool:
+    audio_exts = {
+        ".mp3",
+        ".wav",
+        ".ogg",
+        ".m4a",
+        ".flac",
+        ".aac",
+        ".opus",
+        ".webm",
+    }
+    return path.suffix.lower() in audio_exts
+
+
+def _install_audio_from_extracted(
+    extracted_root: Path,
+    ha_www_root: Path,
+    owner: str,
+    repo_name: str,
+) -> dict:
+    """Install audio files under /config/www/audio/<owner>/<repo>/ preserving repo paths."""
+    import logging
+
+    _LOGGER = logging.getLogger(__name__)
+    owner_slug = (owner or "").strip()
+    if not owner_slug:
+        raise RuntimeError("Audio install requires a repository owner.")
+
+    dest = ha_www_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for src in extracted_root.rglob("*"):
+        if not src.is_file() or not _is_audio_file(src):
+            continue
+        rel = src.relative_to(extracted_root)
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
+        copied += 1
+
+    if copied == 0:
+        raise RuntimeError("Audio install: no audio files were found in the repository.")
+
+    _LOGGER.info("Installed %d audio files to %s", copied, dest)
+    return {"files_copied": copied, "dest_path": str(dest)}
+
+
 async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> bytes:
     sess = async_get_clientsession(hass)
 
@@ -228,9 +278,11 @@ async def install_package(
     zip_bytes: bytes,
     package_type: str,
     repo_name: str,
+    owner: str | None = None,
 ) -> dict:
     ha_custom_components = Path(hass.config.path("custom_components"))
     ha_www_community = Path(hass.config.path("www", "community"))
+    ha_www_root = Path(hass.config.path("www"))
     ha_blueprints_root = Path(hass.config.path("blueprints"))
     def _work() -> dict:
         with tempfile.TemporaryDirectory(prefix="yidstore_") as td:
@@ -255,7 +307,10 @@ async def install_package(
                 _install_blueprints_from_extracted(root, ha_blueprints_root)
                 return {}
 
-            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints.")
+            if package_type == "audio":
+                return _install_audio_from_extracted(root, ha_www_root, owner or "", repo_name)
+
+            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio.")
 
     return await hass.async_add_executor_job(_work)
 
@@ -267,12 +322,19 @@ async def download_and_install(
     headers: dict,
     package_type: str,
     repo_name: str,
+    owner: str | None = None,
 ) -> dict:
     zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
-    return await install_package(hass, zip_bytes=zip_bytes, package_type=package_type, repo_name=repo_name)
+    return await install_package(
+        hass,
+        zip_bytes=zip_bytes,
+        package_type=package_type,
+        repo_name=repo_name,
+        owner=owner,
+    )
 
 
-def uninstall_package(hass: HomeAssistant, package_type: str, repo_name: str) -> None:
+def uninstall_package(hass: HomeAssistant, package_type: str, repo_name: str, owner: str | None = None) -> None:
     """Best effort uninstall of a package by deleting its folder."""
     import logging
     _LOGGER = logging.getLogger(__name__)
@@ -281,6 +343,15 @@ def uninstall_package(hass: HomeAssistant, package_type: str, repo_name: str) ->
         dest = Path(hass.config.path("www", "community", LOVELACE_VENDOR_FOLDER, repo_name))
         if dest.exists():
             _LOGGER.info("Uninstalling Lovelace card: %s", dest)
+            shutil.rmtree(dest)
+
+    elif package_type == "audio":
+        if not owner:
+            _LOGGER.warning("Audio uninstall skipped: missing owner for repo %s", repo_name)
+            return
+        dest = Path(hass.config.path("www", AUDIO_VENDOR_FOLDER, owner, repo_name))
+        if dest.exists():
+            _LOGGER.info("Uninstalling audio package: %s", dest)
             shutil.rmtree(dest)
             
     elif package_type == "integration":

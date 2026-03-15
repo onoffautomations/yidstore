@@ -234,6 +234,7 @@ def _collect_local_installed_sync(config_path: str) -> dict:
 
     domains: set[str] = set()
     community: set[str] = set()
+    audio_paths: set[str] = set()
     hacs_domains: set[str] = set()
     hacs_repos: set[str] = set()
 
@@ -244,6 +245,23 @@ def _collect_local_installed_sync(config_path: str) -> dict:
             for p in cc_path.iterdir():
                 if p.is_dir() and (p / "manifest.json").is_file():
                     domains.add(_normalize_slug(p.name))
+    except Exception:
+        pass
+
+    # B2) Installed audio packages in /www/audio/<owner>/<repo>/
+    try:
+        audio_root = Path(config_path) / "www" / "audio"
+        if audio_root.is_dir():
+            for owner_dir in audio_root.iterdir():
+                if not owner_dir.is_dir():
+                    continue
+                owner_slug = _normalize_slug(owner_dir.name)
+                for repo_dir in owner_dir.iterdir():
+                    if not repo_dir.is_dir():
+                        continue
+                    repo_slug = _normalize_slug(repo_dir.name)
+                    if owner_slug and repo_slug:
+                        audio_paths.add(f"{owner_slug}/{repo_slug}")
     except Exception:
         pass
 
@@ -279,6 +297,7 @@ def _collect_local_installed_sync(config_path: str) -> dict:
     return {
         "domains": domains,
         "community": community,
+        "audio_paths": audio_paths,
         "hacs_domains": hacs_domains,
         "hacs_repos": hacs_repos,
     }
@@ -323,6 +342,7 @@ def _get_install_info(
     """
     domains = local_state.get("domains", set()) if isinstance(local_state, dict) else set()
     community = local_state.get("community", set()) if isinstance(local_state, dict) else set()
+    audio_paths = local_state.get("audio_paths", set()) if isinstance(local_state, dict) else set()
     hacs_domains = local_state.get("hacs_domains", set()) if isinstance(local_state, dict) else set()
     hacs_repos = local_state.get("hacs_repos", set()) if isinstance(local_state, dict) else set()
 
@@ -340,6 +360,13 @@ def _get_install_info(
         # Fallback: repo name often equals folder name
         if rn and rn in domains:
             return (True, "hacs" if is_hacs else "manual")
+        return (False, None)
+
+    if pkg_type == "audio":
+        owner_slug = _normalize_slug(owner or "")
+        full_slug = f"{owner_slug}/{rn}" if owner_slug and rn else ""
+        if full_slug and full_slug in audio_paths:
+            return (True, "manual")
         return (False, None)
 
     # Lovelace / themes / blueprints: best-effort via www/community folder
@@ -789,7 +816,7 @@ class OnOffStoreReposView(HomeAssistantView):
 
                 if not any(x["owner"].lower() == owner.lower() and x["repo_name"].lower() == repo.lower() for x in resp_data):
                     if source == "github":
-                        repo_type = cr.get("type") or "integration"
+                        repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
                         repo_url = cr.get("url")
                         # Best-effort domain resolution (repo_name != domain for many integrations)
                         domain = None
@@ -898,24 +925,52 @@ class OnOffStoreReposView(HomeAssistantView):
                 y_mode = y_pkg.get("mode")
                 y_asset = y_pkg.get("asset_name")
 
+        default_branch = r.get("default_branch", "main")
+
         # Better type detection
         pkg_type = "integration"
         desc = (r.get("description") or "").lower()
         if p:
             pkg_type = p.get("package_type", "integration")
+        elif owner.lower() == "audio":
+            pkg_type = "audio"
         elif "card" in rn.lower() or "lovelace" in rn.lower() or "card" in desc or "theme" in desc:
             pkg_type = "lovelace"
         elif "blueprint" in rn.lower() or "blueprint" in desc:
             pkg_type = "blueprints"
+        else:
+            # Repo layout-based detection for better card/integration classification.
+            try:
+                root_entries = await coord.client.list_dir(owner, rn, path="", branch=default_branch)
+                if isinstance(root_entries, list):
+                    has_custom_components = any(
+                        isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "custom_components"
+                        for e in root_entries
+                    )
+                    has_blueprints = any(
+                        isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "blueprints"
+                        for e in root_entries
+                    )
+                    has_root_js = any(
+                        isinstance(e, dict)
+                        and e.get("type") == "file"
+                        and str(e.get("name") or "").lower().endswith(".js")
+                        for e in root_entries
+                    )
+                    if has_blueprints:
+                        pkg_type = "blueprints"
+                    elif has_root_js and not has_custom_components:
+                        pkg_type = "lovelace"
+            except Exception:
+                pass
 
         # Get display name from owner object if available
         owner_obj = r.get("owner", {})
         owner_display_name = owner_obj.get("full_name") or owner_obj.get("username") or owner
 
         # Generate potential icon URL with fallback to Brands
-        default_branch = r.get("default_branch", "main")
-        if pkg_type == "lovelace":
-            # Never show icon for cards
+        if pkg_type in ("lovelace", "audio"):
+            # Never show integration/brands icon for cards or audio packs.
             icon_url = None
         else:
             icon_url = None
@@ -1248,7 +1303,7 @@ class OnOffStoreAddCustomView(HomeAssistantView):
         try:
             body = await request.json()
             source = body.get("source", "gitea")
-            repo_type = body.get("type") or "integration"
+            repo_type = body.get("type") or ("audio" if str(body.get("owner", "")).strip().lower() == "audio" else "integration")
             repo_url = body.get("url")
             o, r = body.get("owner"), body.get("repo")
 
@@ -1259,6 +1314,8 @@ class OnOffStoreAddCustomView(HomeAssistantView):
                 if not parsed:
                     return web.json_response({"error": "Invalid GitHub URL"}, status=400)
                 o, r = parsed
+                if not body.get("type") and o.lower() == "audio":
+                    repo_type = "audio"
             elif not o or not r:
                 return web.json_response({"error": "Missing params"}, status=400)
             
@@ -1426,7 +1483,7 @@ class OnOffStoreUninstallView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 # 1. Delete folder
-                await hass.async_add_executor_job(uninstall_package, hass, t, r)
+                await hass.async_add_executor_job(uninstall_package, hass, t, r, o)
                 # 2. Remove tracking
                 await coordinator.async_remove_package(o, r)
 

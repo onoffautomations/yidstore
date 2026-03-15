@@ -93,6 +93,8 @@ class PackageUpdateButton(ButtonEntity):
             service_name = "install_lovelace"
         elif package_type == "blueprints":
             service_name = "install_blueprints"
+        elif package_type == "audio":
+            service_name = "install"
         else:
             _LOGGER.error("Unknown package type: %s", package_type)
             return
@@ -102,6 +104,8 @@ class PackageUpdateButton(ButtonEntity):
             "owner": owner,
             "repo": repo_name,
         }
+        if service_name == "install":
+            service_data["type"] = package_type
 
         if mode:
             service_data["mode"] = mode

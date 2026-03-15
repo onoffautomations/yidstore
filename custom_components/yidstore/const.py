@@ -12,9 +12,13 @@ MODE_ZIPBALL = "zipball"
 TYPE_INTEGRATION = "integration"
 TYPE_LOVELACE = "lovelace"
 TYPE_BLUEPRINTS = "blueprints"
+TYPE_AUDIO = "audio"
 
 # /config/www/community/onoff/<repo>  ->  /local/community/onoff/<repo>
 LOVELACE_VENDOR_FOLDER = "onoff"
+
+# /config/www/audio/<owner>/<repo>/...
+AUDIO_VENDOR_FOLDER = "audio"
 
 # Update check interval (2 hours)
 UPDATE_CHECK_INTERVAL = 7200  # seconds

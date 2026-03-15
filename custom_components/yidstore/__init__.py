@@ -25,6 +25,7 @@ from .const import (
     TYPE_INTEGRATION,
     TYPE_LOVELACE,
     TYPE_BLUEPRINTS,
+    TYPE_AUDIO,
 )
 from .gitea import GiteaClient
 from .installer import download_and_install, uninstall_package
@@ -36,7 +37,7 @@ SERVICE_SCHEMA_GENERIC = vol.Schema(
     {
         vol.Optional("owner"): str,
         vol.Required("repo"): str,
-        vol.Required("type"): vol.In([TYPE_INTEGRATION, TYPE_LOVELACE, TYPE_BLUEPRINTS]),
+        vol.Required("type"): vol.In([TYPE_INTEGRATION, TYPE_LOVELACE, TYPE_BLUEPRINTS, TYPE_AUDIO]),
         vol.Optional("mode", default=MODE_ASSET): vol.In([MODE_ASSET, MODE_ZIPBALL]),
         vol.Optional("tag"): str,
         vol.Optional("asset_name"): str,
@@ -636,6 +637,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         service_name = "install_lovelace"
                     elif pkg_type == "blueprints":
                         service_name = "install_blueprints"
+                    elif pkg_type == "audio":
+                        service_name = SERVICE_INSTALL
                     else:
                         _LOGGER.error("Unknown package type: %s", pkg_type)
                         continue
@@ -645,6 +648,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         "owner": owner,
                         "repo": repo,
                     }
+                    if service_name == SERVICE_INSTALL:
+                        service_data["type"] = pkg_type
                     if mode:
                         service_data["mode"] = mode
                     if asset_name:
@@ -833,6 +838,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 headers=download_headers,
                 package_type=package_type,
                 repo_name=repo,
+                owner=owner,
             )
 
             # Create repair issue for integration installs (requires restart)
