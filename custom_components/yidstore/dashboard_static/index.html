@@ -1307,6 +1307,9 @@
                                 <span class="thumb"></span>
                             </button>
                         </div>
+                        <div id="audioLocationToggle" onclick="toggleAudioInstallLocation()">
+                            <i class="mdi mdi-music-note"></i> Audio Download: WWW/audio
+                        </div>
                         <div onclick="fullReload()"><i class="mdi mdi-refresh"></i> Full Reload</div>
                     </div>
                 </div>
@@ -1406,6 +1409,7 @@
         let items = [];
         const THEME_KEY = 'yidstore_theme';
         const CACHE_KEY = 'yidstore_cache';
+        const AUDIO_LOCATION_KEY = 'yidstore_audio_location';
         const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
         const LIVE_SYNC_INTERVAL = 15 * 1000; // lightweight status sync
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
@@ -1461,6 +1465,30 @@
             return `${hours}h ${minutes % 60}m ago`;
         }
 
+        function getAudioInstallLocation() {
+            const saved = (localStorage.getItem(AUDIO_LOCATION_KEY) || 'www').toLowerCase();
+            return saved === 'media' ? 'media' : 'www';
+        }
+
+        function setAudioInstallLocation(location) {
+            const normalized = location === 'media' ? 'media' : 'www';
+            localStorage.setItem(AUDIO_LOCATION_KEY, normalized);
+            updateAudioLocationToggleLabel();
+        }
+
+        function toggleAudioInstallLocation() {
+            const current = getAudioInstallLocation();
+            setAudioInstallLocation(current === 'www' ? 'media' : 'www');
+        }
+
+        function updateAudioLocationToggleLabel() {
+            const el = document.getElementById('audioLocationToggle');
+            if (!el) return;
+            const location = getAudioInstallLocation();
+            const label = location === 'media' ? 'Media/audio' : 'WWW/audio';
+            el.innerHTML = `<i class="mdi mdi-music-note"></i> Audio Download: ${label}`;
+        }
+
         function getInstalledBadge(installSource, needsRestart = false, itemType = 'integration') {
             // Only integrations need restart - cards and blueprints just need reload
             if (needsRestart && itemType === 'integration') {
@@ -1490,6 +1518,8 @@
         }
 
         function needsRestart(owner, repo) {
+            const item = findItemByRepo(owner, repo);
+            if (item && item.requires_restart === true) return true;
             const key = normalizeRestartKey(`${owner}/${repo}`);
             // 1) Server/sensor truth
             for (const k of requiresRestartSet) {
@@ -1518,6 +1548,34 @@
             saveRestartSet();
         }
 
+        function findItemByRepo(owner, repo) {
+            const normalizedOwner = (owner || '').toLowerCase().replace(/-/g, '_');
+            const normalizedRepo = (repo || '').toLowerCase().replace(/-/g, '_');
+            return items.find(x =>
+                (x.owner || '').toLowerCase().replace(/-/g, '_') === normalizedOwner &&
+                (x.repo_name || '').toLowerCase().replace(/-/g, '_') === normalizedRepo
+            );
+        }
+
+        function applyLiveStatus(data) {
+            requiresRestartSet = new Set(data.requires_restart_list || []);
+            for (const k of requiresRestartSet) {
+                optimisticRestartUntil.delete(normalizeRestartKey(k));
+            }
+
+            for (const [key, status] of Object.entries(data.status || {})) {
+                const [owner, repo] = key.split('/');
+                const item = findItemByRepo(owner, repo);
+                if (!item) continue;
+                item.is_installed = !!status.is_installed;
+                item.install_source = status.install_source || null;
+                item.requires_restart = !!status.requires_restart;
+                if (status.update_available !== undefined) {
+                    item.update_available = !!status.update_available;
+                }
+            }
+        }
+
         async function refreshDashboard() {
             // Quick sync with integration - just update status without full reload
             try {
@@ -1529,37 +1587,13 @@
                     return;
                 }
                 const data = await res.json();
-                // Server is source of truth for restart status.
-                requiresRestartSet = new Set(data.requires_restart_list || []);
-                // If server confirms restart-needed, clear optimistic override for that repo.
-                for (const k of requiresRestartSet) {
-                    optimisticRestartUntil.delete(normalizeRestartKey(k));
-                }
-
-                // Update items with new status from server
-                for (const [key, status] of Object.entries(data.status || {})) {
-                    const [owner, repo] = key.split('/');
-                    // Normalize for matching (handle dashes vs underscores)
-                    const normalizedOwner = owner.toLowerCase().replace(/-/g, '_');
-                    const normalizedRepo = repo.toLowerCase().replace(/-/g, '_');
-                    const item = items.find(x =>
-                        x.owner.toLowerCase().replace(/-/g, '_') === normalizedOwner &&
-                        x.repo_name.toLowerCase().replace(/-/g, '_') === normalizedRepo
-                    );
-                    if (item) {
-                        item.is_installed = status.is_installed;
-                        item.install_source = status.install_source;
-                        // Only update update_available if server says it's not installed or has update
-                        // This prevents losing the "no update" state we set locally after installing
-                        if (status.update_available !== undefined) {
-                            item.update_available = status.update_available;
-                        }
-                    }
-                }
+                applyLiveStatus(data);
 
                 // Update cache with current items
                 setCachedData(items);
-                apply();
+                if (!isOverlayOpen()) {
+                    apply();
+                }
 
                 // Update modal restart badge if modal is open
                 updateModalRestartBadge();
@@ -1568,6 +1602,15 @@
                 // Still apply current state
                 apply();
             }
+        }
+
+        async function syncBackendAfterAction() {
+            try {
+                await fetch('/api/yidstore/refresh', { method: 'POST' });
+            } catch (e) {
+                console.log('Backend refresh failed:', e);
+            }
+            await refreshDashboard();
         }
 
         function updateModalRestartBadge() {
@@ -1834,6 +1877,7 @@
         let selectMode = false;
         let lastFiltered = [];
         let collapsedSections = new Set();
+        let detailReturnScrollY = 0;
         const grid = document.getElementById('grid');
 
         function toggleSelectMode() {
@@ -1871,7 +1915,7 @@
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
 
-        async function load(forceRefresh = false) {
+        async function load(forceRefresh = false, showLoader = true) {
             // Check cache first (unless forcing refresh)
             if (!forceRefresh) {
                 const cached = getCachedData();
@@ -1882,7 +1926,7 @@
                         const statusRes = await fetch('/api/yidstore/status');
                         if (statusRes.ok) {
                             const statusData = await statusRes.json();
-                            requiresRestartSet = new Set(statusData.requires_restart_list || []);
+                            applyLiveStatus(statusData);
                         }
                     } catch (e) {}
                     apply();
@@ -1894,7 +1938,9 @@
                 }
             }
 
-            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+            if (showLoader) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+            }
             try {
                 const r = await fetch('/api/yidstore/repos');
                 items = await r.json();
@@ -1903,7 +1949,7 @@
                     const statusRes = await fetch('/api/yidstore/status');
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
-                        requiresRestartSet = new Set(statusData.requires_restart_list || []);
+                        applyLiveStatus(statusData);
                     }
                 } catch (e) {}
                 setCachedData(items);
@@ -1915,19 +1961,29 @@
             } catch (e) { grid.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--dim);">Error loading store.</div>'; }
         }
 
-        async function fullReload() {
-            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
-            // Trigger backend refresh to check for updates from Gitea
-            try {
-                await fetch('/api/yidstore/refresh', { method: 'POST' });
-            } catch (e) {}
-            // Clear cache and force fresh data
+        async function fullReload(showLoader = true, triggerBackendRefresh = true) {
+            if (showLoader) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
+            }
+            if (triggerBackendRefresh) {
+                try {
+                    await fetch('/api/yidstore/refresh', { method: 'POST' });
+                } catch (e) {}
+            }
+            const keepCurrentView = !showLoader && items.length > 0;
             localStorage.removeItem(CACHE_KEY);
-            load(true);
+            await load(true, !keepCurrentView);
         }
 
         function triggerAutoFullReload() {
-            fullReload();
+            // Use cached data for fast startup, then refresh once in the background.
+            const cached = getCachedData();
+            load(false);
+            if (cached) {
+                setTimeout(() => {
+                    fullReload(false, true);
+                }, 300);
+            }
         }
 
         function updateCacheIndicator(ageMs) {
@@ -1979,7 +2035,7 @@
 
         async function checkUpdates() {
             // Quick refresh - sync with integration status
-            await refreshDashboard();
+            await syncBackendAfterAction();
         }
 
         function apply() {
@@ -2032,7 +2088,11 @@
                 return 0;
             });
             lastFiltered = filtered;
+            const previousScrollY = window.scrollY || document.documentElement.scrollTop || 0;
             render(filtered);
+            if (!isOverlayOpen()) {
+                requestAnimationFrame(() => window.scrollTo(0, previousScrollY));
+            }
         }
 
         function getDisplayAuthor(owner, displayName) {
@@ -2386,7 +2446,7 @@
                     }
                 }
             }
-            await refreshDashboard();
+            await syncBackendAfterAction();
             if (hasCards) {
                 pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed. Reload to see card changes.`, 'mdi-check-circle', true);
             } else if (installedCount > 0) {
@@ -2428,6 +2488,7 @@
         async function executeInstDirect(o, r, t, mode, asset_name, item) {
             try {
                 const body = { owner: o, repo: r, type: t };
+                if (t === 'audio') body.audio_location = getAudioInstallLocation();
                 if (mode) body.mode = mode;
                 if (asset_name) body.asset_name = asset_name;
                 if (item && item.source === 'github') {
@@ -2445,6 +2506,7 @@
 
         async function openDet(o, r, e) {
             if (e) e.stopPropagation();
+            detailReturnScrollY = window.scrollY || document.documentElement.scrollTop || 0;
             const item = items.find(x => x.owner === o && x.repo_name === r);
             const body = document.getElementById('mb');
             body.innerHTML = '<center style="padding:3rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2.5rem;"></i><br><br>Loading...</center>';
@@ -2599,6 +2661,7 @@
 
             try {
                 const body = { owner: o, repo: r, type: t };
+                if (t === 'audio') body.audio_location = getAudioInstallLocation();
                 if (item && item.mode) body.mode = item.mode;
                 if (item && item.asset_name) body.asset_name = item.asset_name;
                 if (version) body.version = version;
@@ -2621,13 +2684,16 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Only integrations need restart - cards/blueprints/audio need reload
+                    // Integrations need restart; cards/blueprints may need a UI reload.
                     if (t === 'integration') {
                         addToRestartSet(o, r);
-                        await refreshDashboard();
+                        await syncBackendAfterAction();
+                    } else if (t === 'audio') {
+                        await syncBackendAfterAction();
+                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
                     } else {
-                        // Cards, blueprints, and audio - show reload popup
-                        await refreshDashboard();
+                        // Cards and blueprints - show reload popup
+                        await syncBackendAfterAction();
                         pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
                     }
                 } else pop('Error', data.error, 'mdi-alert', false);
@@ -2787,11 +2853,11 @@
                 const data = await res.json();
                 if (data.success) {
                     if (t === 'lovelace') {
-                        pop('Removed', 'Card deleted. Reloading...', 'mdi-check-circle', false);
-                        setTimeout(() => window.top.location.reload(), 1500);
+                        await syncBackendAfterAction();
+                        pop('Removed', 'Card deleted. Reload to finish frontend changes if needed.', 'mdi-check-circle', true);
                     } else {
+                        await syncBackendAfterAction();
                         pop('Deleted', 'Files removed. Restart Home Assistant.', 'mdi-restart', false);
-                        load();
                     }
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Removal failed', 'mdi-alert', false); }
@@ -2803,6 +2869,7 @@
 
             try {
                 const body = { owner: o, repo: r, type: t };
+                if (t === 'audio') body.audio_location = getAudioInstallLocation();
                 if (item && item.mode) body.mode = item.mode;
                 if (item && item.asset_name) body.asset_name = item.asset_name;
                 if (item && item.source === 'github') {
@@ -2824,13 +2891,16 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Only integrations need restart - cards/blueprints/audio need reload
+                    // Integrations need restart; cards/blueprints may need a UI reload.
                     if (t === 'integration') {
                         addToRestartSet(o, r);
-                        await refreshDashboard();
+                        await syncBackendAfterAction();
+                    } else if (t === 'audio') {
+                        await syncBackendAfterAction();
+                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
                     } else {
-                        // Cards, blueprints, and audio - show reload popup
-                        await refreshDashboard();
+                        // Cards and blueprints - show reload popup
+                        await syncBackendAfterAction();
                         pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
                     }
                 } else pop('Error', data.error, 'mdi-alert', false);
@@ -2868,6 +2938,7 @@
         function closeModal() {
             document.getElementById('modal').style.display = 'none';
             updateScrollLock();
+            requestAnimationFrame(() => window.scrollTo(0, detailReturnScrollY));
         }
 
         window.onclick = (e) => {
@@ -2890,13 +2961,9 @@
         }, { passive: false });
 
         initTheme();
+        updateAudioLocationToggleLabel();
         loadRestartSet();
         triggerAutoFullReload();
-
-        // Start live sync immediately on page load and do initial refresh
-        startLiveSync();
-        // Immediate status check after a short delay to allow initial load to complete
-        setTimeout(() => refreshDashboard(), 1000);
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
