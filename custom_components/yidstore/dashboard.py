@@ -118,6 +118,28 @@ def _repo_slug(text: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", (text or "").strip().lower().replace("-", "_")).strip("_")
 
 
+def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict | None) -> bool:
+    """Return restart-needed flag from tracked package data."""
+    if not isinstance(package_data, dict):
+        return False
+
+    last_update_str = package_data.get("last_update")
+    if not last_update_str:
+        return False
+
+    try:
+        last_update = datetime.fromisoformat(last_update_str)
+    except Exception as e:
+        _LOGGER.debug("Invalid last_update for %s: %s", package_data.get("repo_name"), e)
+        return False
+
+    ha_start_time = hass.data.get("homeassistant_start_time")
+    if not ha_start_time:
+        return False
+
+    return last_update > ha_start_time
+
+
 def _waiting_restart_from_sensor(hass: HomeAssistant, repo: str) -> bool:
     """Return restart-needed flag from the integration Waiting Restart sensor."""
     slug = _repo_slug(repo)
@@ -235,6 +257,7 @@ def _collect_local_installed_sync(config_path: str) -> dict:
     domains: set[str] = set()
     community: set[str] = set()
     audio_paths: set[str] = set()
+    media_audio_paths: set[str] = set()
     hacs_domains: set[str] = set()
     hacs_repos: set[str] = set()
 
@@ -265,6 +288,23 @@ def _collect_local_installed_sync(config_path: str) -> dict:
     except Exception:
         pass
 
+    # B3) Installed audio packages in /media/audio/<owner>/<repo>/
+    try:
+        media_audio_root = Path(config_path) / "media" / "audio"
+        if media_audio_root.is_dir():
+            for owner_dir in media_audio_root.iterdir():
+                if not owner_dir.is_dir():
+                    continue
+                owner_slug = _normalize_slug(owner_dir.name)
+                for repo_dir in owner_dir.iterdir():
+                    if not repo_dir.is_dir():
+                        continue
+                    repo_slug = _normalize_slug(repo_dir.name)
+                    if owner_slug and repo_slug:
+                        media_audio_paths.add(f"{owner_slug}/{repo_slug}")
+    except Exception:
+        pass
+
     # B) Installed frontend/community content (HACS typically puts cards/themes here)
     try:
         comm_path = Path(config_path) / "www" / "community"
@@ -272,6 +312,11 @@ def _collect_local_installed_sync(config_path: str) -> dict:
             for p in comm_path.iterdir():
                 if p.is_dir():
                     community.add(_normalize_slug(p.name))
+                    # YidStore installs cards under /www/community/<vendor>/<repo>/.
+                    # Include one nested level so those repos are detected as installed.
+                    for child in p.iterdir():
+                        if child.is_dir():
+                            community.add(_normalize_slug(child.name))
     except Exception:
         pass
 
@@ -298,6 +343,7 @@ def _collect_local_installed_sync(config_path: str) -> dict:
         "domains": domains,
         "community": community,
         "audio_paths": audio_paths,
+        "media_audio_paths": media_audio_paths,
         "hacs_domains": hacs_domains,
         "hacs_repos": hacs_repos,
     }
@@ -343,6 +389,7 @@ def _get_install_info(
     domains = local_state.get("domains", set()) if isinstance(local_state, dict) else set()
     community = local_state.get("community", set()) if isinstance(local_state, dict) else set()
     audio_paths = local_state.get("audio_paths", set()) if isinstance(local_state, dict) else set()
+    media_audio_paths = local_state.get("media_audio_paths", set()) if isinstance(local_state, dict) else set()
     hacs_domains = local_state.get("hacs_domains", set()) if isinstance(local_state, dict) else set()
     hacs_repos = local_state.get("hacs_repos", set()) if isinstance(local_state, dict) else set()
 
@@ -365,7 +412,7 @@ def _get_install_info(
     if pkg_type == "audio":
         owner_slug = _normalize_slug(owner or "")
         full_slug = f"{owner_slug}/{rn}" if owner_slug and rn else ""
-        if full_slug and full_slug in audio_paths:
+        if full_slug and (full_slug in audio_paths or full_slug in media_audio_paths):
             return (True, "manual")
         return (False, None)
 
@@ -1091,6 +1138,7 @@ class OnOffStoreInstallView(HomeAssistantView):
             repo_url = body.get("repo_url")
             mode = body.get("mode")
             asset_name = body.get("asset_name")
+            audio_location = (body.get("audio_location") or "www").strip().lower()
             
             if not o or not r:
                 return web.json_response({"error": "Missing params"}, status=400)
@@ -1107,6 +1155,10 @@ class OnOffStoreInstallView(HomeAssistantView):
                 svc_data["repo_url"] = repo_url
             if mode: svc_data["mode"] = mode
             if asset_name: svc_data["asset_name"] = asset_name
+            if t == "audio":
+                if audio_location not in {"www", "media"}:
+                    return web.json_response({"error": "Invalid audio_location. Use 'www' or 'media'."}, status=400)
+                svc_data["audio_location"] = audio_location
             
             # Support for installing specific versions (passed as tag to service)
             version = body.get("version")
@@ -1482,8 +1534,10 @@ class OnOffStoreUninstallView(HomeAssistantView):
 
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
+                tracked_pkg = coordinator.get_package_by_repo(o, r) or {}
+                domain = tracked_pkg.get("domain")
                 # 1. Delete folder
-                await hass.async_add_executor_job(uninstall_package, hass, t, r, o)
+                await hass.async_add_executor_job(uninstall_package, hass, t, r, o, domain)
                 # 2. Remove tracking
                 await coordinator.async_remove_package(o, r)
 
@@ -1548,18 +1602,22 @@ class OnOffStoreStatusView(HomeAssistantView):
                 key = f"{owner}/{repo}".lower()
                 needs_restart = False
                 if pkg_type == "integration":
-                    # Source of truth: per-package Waiting Restart sensor state.
-                    needs_restart = _waiting_restart_from_sensor(hass, repo)
+                    # Prefer direct computation from tracked package data so status
+                    # updates immediately after install/update, even before the
+                    # entity state machine catches up.
+                    needs_restart = _waiting_restart_from_package_data(hass, pkg_data)
+                    if not needs_restart:
+                        needs_restart = _waiting_restart_from_sensor(hass, repo)
                     _LOGGER.debug("Status API: package %s needs_restart=%s", pkg_id, needs_restart)
                 if needs_restart:
                     restart_list.append(key)
                     _LOGGER.info("Status API: adding %s to restart_list", key)
 
                 status[key] = {
-                    "is_installed": True,  # Tracked by coordinator
-                    "install_source": "yidstore",
+                    "is_installed": disk_installed,
+                    "install_source": "yidstore" if disk_installed else None,
                     "requires_restart": needs_restart,
-                    "update_available": pkg_data.get("update_available", False),
+                    "update_available": pkg_data.get("update_available", False) if disk_installed else False,
                 }
 
             return web.json_response({

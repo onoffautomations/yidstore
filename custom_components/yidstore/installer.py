@@ -37,7 +37,7 @@ def _extract_zip_bytes(zip_bytes: bytes, extract_to: Path) -> None:
         zf.extractall(extract_to)
 
 
-def _install_integration_from_extracted(extracted_root: Path, ha_custom_components: Path) -> None:
+def _install_integration_from_extracted(extracted_root: Path, ha_custom_components: Path) -> list[str]:
     import logging
     _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +47,8 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
 
     ha_custom_components.mkdir(parents=True, exist_ok=True)
 
+    installed_domains: list[str] = []
+
     for domain_dir in cc.iterdir():
         if not domain_dir.is_dir():
             continue
@@ -54,6 +56,7 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(domain_dir, target)
+        installed_domains.append(domain_dir.name)
 
         # Look for branding files in common locations and store them under
         # custom_components/<domain>/brand for Home Assistant branding pickup.
@@ -64,13 +67,17 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
             extracted_root / "Icons",
             domain_dir / "icons",
             domain_dir / "Icons",
-            domain_dir,
         ]
 
         icon_files = []
         for folder in icons_folders:
             if folder.exists() and folder.is_dir():
-                icon_files.extend([p for p in folder.iterdir() if p.is_file()])
+                icon_files.extend(
+                    [
+                        p for p in folder.iterdir()
+                        if p.is_file() and p.suffix.lower() in {".png", ".svg", ".jpg", ".jpeg", ".webp"}
+                    ]
+                )
 
         if icon_files:
             _LOGGER.info("Found %d icon files for %s", len(icon_files), domain_dir.name)
@@ -118,6 +125,8 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
                     _LOGGER.info("Created brand/logo.png")
 
             _LOGGER.info("Icons installed for %s", domain_dir.name)
+
+    return installed_domains
 
 
 def _find_main_js(dest: Path, repo_name: str) -> str | None:
@@ -214,10 +223,12 @@ def _is_audio_file(path: Path) -> bool:
 def _install_audio_from_extracted(
     extracted_root: Path,
     ha_www_root: Path,
+    ha_media_root: Path,
     owner: str,
     repo_name: str,
+    audio_location: str = "www",
 ) -> dict:
-    """Install audio files under /config/www/audio/<owner>/<repo>/ preserving repo paths."""
+    """Install audio files under /config/www/audio/... or /config/media/audio/... preserving repo paths."""
     import logging
 
     _LOGGER = logging.getLogger(__name__)
@@ -225,7 +236,12 @@ def _install_audio_from_extracted(
     if not owner_slug:
         raise RuntimeError("Audio install requires a repository owner.")
 
-    dest = ha_www_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
+    location = (audio_location or "www").strip().lower()
+    if location == "media":
+        dest = ha_media_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
+    else:
+        dest = ha_www_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
+
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -244,7 +260,7 @@ def _install_audio_from_extracted(
         raise RuntimeError("Audio install: no audio files were found in the repository.")
 
     _LOGGER.info("Installed %d audio files to %s", copied, dest)
-    return {"files_copied": copied, "dest_path": str(dest)}
+    return {"files_copied": copied, "dest_path": str(dest), "audio_location": location}
 
 
 async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> bytes:
@@ -279,10 +295,12 @@ async def install_package(
     package_type: str,
     repo_name: str,
     owner: str | None = None,
+    audio_location: str = "www",
 ) -> dict:
     ha_custom_components = Path(hass.config.path("custom_components"))
     ha_www_community = Path(hass.config.path("www", "community"))
     ha_www_root = Path(hass.config.path("www"))
+    ha_media_root = Path(hass.config.path("media"))
     ha_blueprints_root = Path(hass.config.path("blueprints"))
     def _work() -> dict:
         with tempfile.TemporaryDirectory(prefix="yidstore_") as td:
@@ -291,8 +309,8 @@ async def install_package(
             root = _detect_single_top_folder(extract_dir)
 
             if package_type == "integration":
-                _install_integration_from_extracted(root, ha_custom_components)
-                return {}
+                installed_domains = _install_integration_from_extracted(root, ha_custom_components)
+                return {"domains": installed_domains}
 
             if package_type == "lovelace":
                 main_js = _install_lovelace_from_extracted(root, ha_www_community, repo_name)
@@ -308,7 +326,14 @@ async def install_package(
                 return {}
 
             if package_type == "audio":
-                return _install_audio_from_extracted(root, ha_www_root, owner or "", repo_name)
+                return _install_audio_from_extracted(
+                    root,
+                    ha_www_root,
+                    ha_media_root,
+                    owner or "",
+                    repo_name,
+                    audio_location=audio_location,
+                )
 
             raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio.")
 
@@ -323,6 +348,7 @@ async def download_and_install(
     package_type: str,
     repo_name: str,
     owner: str | None = None,
+    audio_location: str = "www",
 ) -> dict:
     zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
     return await install_package(
@@ -331,10 +357,17 @@ async def download_and_install(
         package_type=package_type,
         repo_name=repo_name,
         owner=owner,
+        audio_location=audio_location,
     )
 
 
-def uninstall_package(hass: HomeAssistant, package_type: str, repo_name: str, owner: str | None = None) -> None:
+def uninstall_package(
+    hass: HomeAssistant,
+    package_type: str,
+    repo_name: str,
+    owner: str | None = None,
+    domain: str | None = None,
+) -> None:
     """Best effort uninstall of a package by deleting its folder."""
     import logging
     _LOGGER = logging.getLogger(__name__)
@@ -349,18 +382,29 @@ def uninstall_package(hass: HomeAssistant, package_type: str, repo_name: str, ow
         if not owner:
             _LOGGER.warning("Audio uninstall skipped: missing owner for repo %s", repo_name)
             return
-        dest = Path(hass.config.path("www", AUDIO_VENDOR_FOLDER, owner, repo_name))
-        if dest.exists():
-            _LOGGER.info("Uninstalling audio package: %s", dest)
-            shutil.rmtree(dest)
+        dest_www = Path(hass.config.path("www", AUDIO_VENDOR_FOLDER, owner, repo_name))
+        if dest_www.exists():
+            _LOGGER.info("Uninstalling audio package: %s", dest_www)
+            shutil.rmtree(dest_www)
+        dest_media = Path(hass.config.path("media", AUDIO_VENDOR_FOLDER, owner, repo_name))
+        if dest_media.exists():
+            _LOGGER.info("Uninstalling audio package: %s", dest_media)
+            shutil.rmtree(dest_media)
             
     elif package_type == "integration":
-        # Best effort: domain name is often repo name or underscore version
-        domains = [repo_name.lower(), repo_name.lower().replace("-", "_")]
+        domains: list[str] = []
+        if domain:
+            domains.append(domain.lower())
+            domains.append(domain.lower().replace("-", "_"))
+        domains.append(repo_name.lower())
+        domains.append(repo_name.lower().replace("-", "_"))
+        seen: set[str] = set()
         cc_root = Path(hass.config.path("custom_components"))
         for dom in domains:
+            if not dom or dom in seen:
+                continue
+            seen.add(dom)
             dest = cc_root / dom
             if dest.exists():
                 _LOGGER.info("Uninstalling integration: %s", dest)
                 shutil.rmtree(dest)
-                break

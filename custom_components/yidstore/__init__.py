@@ -43,6 +43,7 @@ SERVICE_SCHEMA_GENERIC = vol.Schema(
         vol.Optional("asset_name"): str,
         vol.Optional("source"): str,
         vol.Optional("repo_url"): str,
+        vol.Optional("audio_location"): vol.In(["www", "media"]),
     }
 )
 
@@ -55,6 +56,7 @@ SERVICE_SCHEMA_SIMPLE = vol.Schema(
         vol.Optional("asset_name"): str,
         vol.Optional("source"): str,
         vol.Optional("repo_url"): str,
+        vol.Optional("audio_location"): vol.In(["www", "media"]),
     }
 )
 
@@ -208,6 +210,7 @@ async def _sync_preinstalled_integrations(
                 pkg.get("mode"),
                 pkg.get("asset_name"),
                 source,
+                match_domain,
             )
         )
 
@@ -235,6 +238,7 @@ async def _sync_preinstalled_integrations(
                 None,
                 None,
                 source,
+                match_domain,
             )
         )
 
@@ -242,7 +246,7 @@ async def _sync_preinstalled_integrations(
         return
 
     _LOGGER.info("Tracking %d pre-installed custom_components integrations", len(to_track))
-    for owner, repo, version, mode, asset_name, source in to_track:
+    for owner, repo, version, mode, asset_name, source, domain in to_track:
         await coordinator.async_add_or_update_package(
             repo_name=repo,
             owner=owner,
@@ -251,6 +255,7 @@ async def _sync_preinstalled_integrations(
             mode=mode,
             asset_name=asset_name,
             source=source,
+            domain=domain,
         )
 
 
@@ -809,6 +814,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             tag = call.data.get("tag")
 
             source = call.data.get("source")
+            audio_location = (call.data.get("audio_location") or "www").strip().lower()
             url, version = await _download_url_for_call(owner, repo, mode, tag, asset_name, source)
             _LOGGER.info("")
             _LOGGER.info("=" * 60)
@@ -839,7 +845,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 package_type=package_type,
                 repo_name=repo,
                 owner=owner,
+                audio_location=audio_location,
             )
+
+            installed_domain = None
+            if package_type == TYPE_INTEGRATION:
+                domains = result.get("domains") or []
+                if domains:
+                    installed_domain = domains[0]
 
             # Create repair issue for integration installs (requires restart)
             if package_type == TYPE_INTEGRATION:
@@ -912,6 +925,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 mode=mode,
                 asset_name=asset_name,
                 source=source or "gitea",
+                domain=installed_domain,
             )
 
             _LOGGER.info("✓ Package registered with ID: %s", package_id)

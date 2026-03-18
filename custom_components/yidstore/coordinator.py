@@ -80,6 +80,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         mode: str = None,
         asset_name: str = None,
         source: str = "gitea",
+        domain: str | None = None,
     ) -> str:
         """Add or update a tracked package."""
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
@@ -104,6 +105,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             "mode": mode,
             "asset_name": asset_name,
             "source": source or existing_data.get("source", "gitea"),
+            "domain": domain or existing_data.get("domain"),
         }
 
         _LOGGER.info("Package data for %s: installed=%s, latest=%s, update_available=%s",
