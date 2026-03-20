@@ -764,6 +764,11 @@
             color: #fff;
         }
 
+        .btn-sm {
+            padding: 0.35rem 0.6rem;
+            font-size: 0.8rem;
+        }
+
         .btn-refresh {
             padding: 0.5rem 0.8rem;
             font-size: 0.75rem;
@@ -1239,6 +1244,491 @@
                 width: 100%;
             }
         }
+
+        /* View Tabs */
+        .view-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+
+        .view-tab {
+            padding: 0.6rem 1.2rem;
+            background: transparent;
+            border: none;
+            color: var(--dim);
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .view-tab:hover {
+            color: var(--text);
+            background: var(--soft);
+        }
+
+        .view-tab.active {
+            color: var(--primary);
+            background: var(--soft);
+            border-bottom: 2px solid var(--primary);
+        }
+
+        .beta-chip {
+            font-size: 0.6rem;
+            padding: 2px 5px;
+            border-radius: 4px;
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #fff;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        /* Documentation Section */
+        #docsView {
+            display: none;
+        }
+
+        #docsView.active {
+            display: block;
+        }
+
+        #storeView.hidden {
+            display: none;
+        }
+
+        .docs-container {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 1rem;
+            min-height: 60vh;
+        }
+
+        @media (max-width: 768px) {
+            .docs-container {
+                grid-template-columns: 1fr;
+            }
+
+            .docs-sidebar {
+                max-height: 300px;
+                overflow-y: auto;
+            }
+        }
+
+        .docs-sidebar {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            height: fit-content;
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+
+        .docs-sidebar h3 {
+            font-size: 0.9rem;
+            color: var(--dim);
+            margin-bottom: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .docs-folder {
+            margin-bottom: 0.5rem;
+        }
+
+        .docs-folder-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .docs-folder-header:hover {
+            background: var(--soft);
+        }
+
+        .docs-folder-header i {
+            color: var(--primary);
+            font-size: 1.1rem;
+        }
+
+        .docs-folder-items {
+            margin-left: 1.2rem;
+            display: none;
+        }
+
+        .docs-folder.open > .docs-folder-items {
+            display: block;
+        }
+
+        /* Audio repo items */
+        .audio-repo-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-bottom: 0.25rem;
+        }
+
+        .audio-repo-item:hover {
+            background: var(--soft);
+        }
+
+        .audio-repo-item.active {
+            background: var(--soft);
+            border-left: 3px solid var(--primary);
+        }
+
+        .audio-repo-item > i {
+            font-size: 1.5rem;
+            color: var(--primary);
+        }
+
+        .audio-repo-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            overflow: hidden;
+        }
+
+        .audio-repo-name {
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        .audio-repo-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .docs-file {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            color: var(--dim);
+            font-size: 0.9rem;
+        }
+
+        .docs-file:hover {
+            background: var(--soft);
+            color: var(--text);
+        }
+
+        .docs-file.active {
+            background: var(--soft);
+            color: var(--primary);
+        }
+
+        .docs-file i {
+            font-size: 1rem;
+        }
+
+        .docs-content {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            min-height: 400px;
+        }
+
+        .docs-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            color: var(--dim);
+            flex-wrap: wrap;
+        }
+
+        .docs-breadcrumb a {
+            color: var(--primary);
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .docs-breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .docs-meta {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.8rem 1rem;
+            background: var(--soft);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            color: var(--dim);
+            flex-wrap: wrap;
+        }
+
+        .docs-meta i {
+            margin-right: 0.3rem;
+        }
+
+        .docs-body {
+            line-height: 1.7;
+        }
+
+        .docs-body h1, .docs-body h2, .docs-body h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.8rem;
+            color: var(--text);
+        }
+
+        .docs-body h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        .docs-body h2 { font-size: 1.4rem; }
+        .docs-body h3 { font-size: 1.2rem; }
+
+        .docs-body p { margin-bottom: 1rem; }
+
+        .docs-body code {
+            background: var(--code-bg);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        .docs-body pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .docs-body pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .docs-body ul, .docs-body ol {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .docs-body a {
+            color: var(--primary);
+        }
+
+        .docs-body img {
+            max-width: 100%;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .docs-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .docs-body th, .docs-body td {
+            padding: 0.6rem;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+
+        .docs-body th {
+            background: var(--soft);
+            font-weight: 600;
+        }
+
+        .docs-empty {
+            text-align: center;
+            padding: 3rem;
+            color: var(--dim);
+        }
+
+        .docs-empty i {
+            font-size: 3rem;
+            display: block;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .docs-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            color: var(--dim);
+        }
+
+        .docs-loading i {
+            font-size: 2rem;
+            margin-right: 0.8rem;
+        }
+
+        /* Automations, Dashboards, Helpers, Audio and Blueprints Views */
+        #automationsView, #dashboardsView, #helpersView, #audioView, #blueprintsView {
+            display: none;
+        }
+
+        #automationsView.active, #dashboardsView.active, #helpersView.active, #audioView.active, #blueprintsView.active {
+            display: block;
+        }
+
+        /* Error state */
+        .docs-error {
+            text-align: center;
+            padding: 3rem;
+            color: var(--danger);
+        }
+
+        .docs-error i {
+            font-size: 3rem;
+            display: block;
+            margin-bottom: 1rem;
+            opacity: 0.7;
+        }
+
+        .docs-error p {
+            margin-bottom: 1rem;
+        }
+
+        .docs-error button {
+            margin-top: 1rem;
+        }
+
+        /* Coming soon state */
+        .docs-coming-soon {
+            text-align: center;
+            padding: 3rem;
+            color: var(--dim);
+        }
+
+        .docs-coming-soon i {
+            font-size: 3rem;
+            display: block;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+            color: var(--primary);
+        }
+
+        .docs-coming-soon h3 {
+            color: var(--text);
+            margin-bottom: 0.5rem;
+        }
+
+        /* YAML Code Display */
+        .yaml-code {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            white-space: pre;
+            color: var(--text);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Action buttons for YAML files */
+        .yaml-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin: 1rem 0;
+            flex-wrap: wrap;
+        }
+
+        .yaml-actions .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        /* Instructions section */
+        .instructions-section {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .instructions-section h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            color: var(--text);
+        }
+
+        .no-instructions {
+            padding: 1rem;
+            background: var(--soft);
+            border-radius: 8px;
+            color: var(--dim);
+            text-align: center;
+            font-style: italic;
+        }
+
+        .instructions-iframe {
+            width: 100%;
+            min-height: 200px;
+            border: none;
+            border-radius: 8px;
+            background: var(--card);
+        }
+
+        /* YAML file item in sidebar */
+        .yaml-file {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            color: var(--dim);
+            font-size: 0.9rem;
+        }
+
+        .yaml-file:hover {
+            background: var(--soft);
+            color: var(--text);
+        }
+
+        .yaml-file.active {
+            background: var(--soft);
+            color: var(--primary);
+        }
+
+        .yaml-file i {
+            font-size: 1rem;
+            color: var(--warning);
+        }
     </style>
 </head>
 
@@ -1316,17 +1806,249 @@
             </div>
         </header>
 
-        <div id="bulkBar" class="bulk-bar">
-            <span id="bulkText">0 selected</span>
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
-                <button class="btn btn-dark" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
-                    Install</button>
-                <button class="btn btn-o" onclick="clearSelection()"
-                    style="border-color:#000; color:#000;">Cancel</button>
+        <!-- View Tabs -->
+        <div class="view-tabs">
+            <button class="view-tab active" id="storeTab" onclick="switchView('store')">
+                <i class="mdi mdi-storefront"></i> Store
+            </button>
+            <button class="view-tab" id="docsTab" onclick="switchView('docs')">
+                <i class="mdi mdi-book-open-page-variant"></i> Documentation <span class="beta-chip">BETA</span>
+            </button>
+            <button class="view-tab" id="automationsTab" onclick="switchView('automations')">
+                <i class="mdi mdi-robot"></i> Automations <span class="beta-chip">BETA</span>
+            </button>
+            <button class="view-tab" id="dashboardsTab" onclick="switchView('dashboards')">
+                <i class="mdi mdi-view-dashboard"></i> Dashboards <span class="beta-chip">BETA</span>
+            </button>
+            <button class="view-tab" id="helpersTab" onclick="switchView('helpers')">
+                <i class="mdi mdi-toggle-switch"></i> Helpers <span class="beta-chip">BETA</span>
+            </button>
+            <button class="view-tab" id="audioTab" onclick="switchView('audio')">
+                <i class="mdi mdi-music-note"></i> Audio <span class="beta-chip">BETA</span>
+            </button>
+            <button class="view-tab" id="blueprintsTab" onclick="switchView('blueprints')">
+                <i class="mdi mdi-file-document-outline"></i> Blueprints <span class="beta-chip">BETA</span>
+            </button>
+        </div>
+
+        <!-- Store View -->
+        <div id="storeView">
+            <div id="bulkBar" class="bulk-bar">
+                <span id="bulkText">0 selected</span>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
+                    <button class="btn btn-dark" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
+                        Install</button>
+                    <button class="btn btn-o" onclick="clearSelection()"
+                        style="border-color:#000; color:#000;">Cancel</button>
+                </div>
+            </div>
+
+            <div id="grid" class="grid"></div>
+        </div>
+
+        <!-- Documentation View -->
+        <div id="docsView">
+            <!-- Docs Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="docsSearch" placeholder="Search docs..." oninput="filterDocs()">
+                </div>
+                <select id="docsSort" onchange="sortDocs()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Documentation</h3>
+                    <div id="docsSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="docsContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-book-open-page-variant"></i>
+                            <p>Select a document from the sidebar to view its contents</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div id="grid" class="grid"></div>
+        <!-- Automations View -->
+        <div id="automationsView">
+            <!-- Automations Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="automationsSearch" placeholder="Search automations..." oninput="filterAutomations()">
+                </div>
+                <select id="automationsSort" onchange="sortAutomations()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Automations YAML</h3>
+                    <div id="automationsSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="automationsContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-robot"></i>
+                            <p>Select an automation from the sidebar to view its contents</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboards View -->
+        <div id="dashboardsView">
+            <!-- Dashboards Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="dashboardsSearch" placeholder="Search dashboards..." oninput="filterDashboards()">
+                </div>
+                <select id="dashboardsSort" onchange="sortDashboards()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Dashboards YAML</h3>
+                    <div id="dashboardsSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="dashboardsContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-view-dashboard"></i>
+                            <p>Select a dashboard from the sidebar to view its contents</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Helpers View -->
+        <div id="helpersView">
+            <!-- Helpers Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="helpersSearch" placeholder="Search helpers..." oninput="filterHelpers()">
+                </div>
+                <select id="helpersSort" onchange="sortHelpers()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Helpers YAML</h3>
+                    <div id="helpersSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="helpersContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-toggle-switch"></i>
+                            <p>Select a helper from the sidebar to view its contents</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio View -->
+        <div id="audioView">
+            <!-- Audio Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="audioSearch" placeholder="Search audio..." oninput="filterAudio()">
+                </div>
+                <select id="audioSort" onchange="sortAudio()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Audio Packs</h3>
+                    <div id="audioSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="audioContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-music-box-multiple"></i>
+                            <p>Select an audio pack from the sidebar to install and play audio files</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Blueprints View -->
+        <div id="blueprintsView">
+            <!-- Blueprints Controls -->
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="blueprintsSearch" placeholder="Search blueprints..." oninput="filterBlueprints()">
+                </div>
+                <select id="blueprintsSort" onchange="sortBlueprints()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                    <option value="author">Sort: Author</option>
+                </select>
+            </div>
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <h3>Blueprints YAML</h3>
+                    <div id="blueprintsSidebar">
+                        <div class="docs-loading">
+                            <i class="mdi mdi-loading mdi-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+                <div class="docs-content">
+                    <div id="blueprintsContent">
+                        <div class="docs-empty">
+                            <i class="mdi mdi-file-document-outline"></i>
+                            <p>Select a blueprint from the sidebar to view its contents</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="modal">
@@ -2098,8 +2820,8 @@
         function getDisplayAuthor(owner, displayName) {
             const o = (owner || '').toString().toLowerCase();
             const d = (displayName || '').toString().toLowerCase();
-            // Map admin to Joel Weiss
-            if (o === 'admin' || d === 'admin') return 'Joel Weiss';
+            // Map admin to Joel - OnOff Automations
+            if (o === 'admin' || d === 'admin') return 'Joel - OnOff Automations';
             return displayName || owner;
         }
 
@@ -2959,6 +3681,1654 @@
                 }
             }
         }, { passive: false });
+
+        // ========== Documentation, Automations, Dashboards, Helpers, Audio & Blueprints Section ==========
+        let docsRepos = [];
+        let automationsRepos = [];
+        let dashboardsRepos = [];
+        let helpersRepos = [];
+        let audioRepos = [];
+        let blueprintsRepos = [];
+        let currentDocsView = 'store';
+        let docsCache = {};
+
+        // Track which beta sections have shown the popup this session
+        const betaPopupShown = new Set();
+
+        function switchView(view) {
+            currentDocsView = view;
+
+            // Update tabs
+            document.getElementById('storeTab').classList.toggle('active', view === 'store');
+            document.getElementById('docsTab').classList.toggle('active', view === 'docs');
+            document.getElementById('automationsTab').classList.toggle('active', view === 'automations');
+            document.getElementById('dashboardsTab').classList.toggle('active', view === 'dashboards');
+            document.getElementById('helpersTab').classList.toggle('active', view === 'helpers');
+            document.getElementById('audioTab').classList.toggle('active', view === 'audio');
+            document.getElementById('blueprintsTab').classList.toggle('active', view === 'blueprints');
+
+            // Update views
+            document.getElementById('storeView').classList.toggle('hidden', view !== 'store');
+            document.getElementById('docsView').classList.toggle('active', view === 'docs');
+            document.getElementById('automationsView').classList.toggle('active', view === 'automations');
+            document.getElementById('dashboardsView').classList.toggle('active', view === 'dashboards');
+            document.getElementById('helpersView').classList.toggle('active', view === 'helpers');
+            document.getElementById('audioView').classList.toggle('active', view === 'audio');
+            document.getElementById('blueprintsView').classList.toggle('active', view === 'blueprints');
+
+            // Hide store controls when not in store view
+            const controls = document.querySelector('.controls');
+            if (controls) {
+                controls.style.display = view === 'store' ? 'flex' : 'none';
+            }
+
+            // Show beta popup for non-store sections (once per session per section)
+            const betaSections = ['docs', 'automations', 'dashboards', 'helpers', 'audio', 'blueprints'];
+            if (betaSections.includes(view) && !betaPopupShown.has(view)) {
+                betaPopupShown.add(view);
+                pop('Beta Feature', `
+                    <p style="text-align: center;">
+                        <i class="mdi mdi-flask" style="font-size: 2rem; color: #f59e0b;"></i>
+                    </p>
+                    <p style="text-align: center; margin-top: 0.5rem;">This section is in <strong>test mode</strong>.</p>
+                    <p style="text-align: center; color: var(--dim); font-size: 0.85rem; margin-top: 0.5rem;">Some features may not work as expected.</p>
+                `, 'mdi-flask', false, [
+                    { t: 'Got it', c: 'btn-p', f: 'closePop()' }
+                ]);
+            }
+
+            if (view === 'docs') {
+                loadDocsRepos();
+            } else if (view === 'automations') {
+                loadAutomationsRepos();
+            } else if (view === 'dashboards') {
+                loadDashboardsRepos();
+            } else if (view === 'helpers') {
+                loadHelpersRepos();
+            } else if (view === 'audio') {
+                loadAudioRepos();
+            } else if (view === 'blueprints') {
+                loadBlueprintsRepos();
+            }
+        }
+
+        // ========== Error & Empty State Helpers ==========
+        function showError(containerId, message) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `
+                <div class="docs-error">
+                    <i class="mdi mdi-server-off"></i>
+                    <p>${message || 'Server is not reachable. Please check your connection.'}</p>
+                    <button class="btn btn-o" onclick="retryLoad('${containerId}')">
+                        <i class="mdi mdi-refresh"></i> Retry
+                    </button>
+                </div>
+            `;
+        }
+
+        function showComingSoon(containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `
+                <div class="docs-coming-soon">
+                    <i class="mdi mdi-clock-outline"></i>
+                    <h3>Coming Soon</h3>
+                    <p>Documents are being prepared and will be available shortly.</p>
+                </div>
+            `;
+        }
+
+        function retryLoad(containerId) {
+            if (containerId === 'docsSidebar') loadDocsRepos();
+            else if (containerId === 'automationsSidebar') loadAutomationsRepos();
+            else if (containerId === 'dashboardsSidebar') loadDashboardsRepos();
+        }
+
+        // ========== Documentation Functions ==========
+        async function loadDocsRepos() {
+            const sidebar = document.getElementById('docsSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/docs');
+                if (!res.ok) throw new Error('Server error');
+                docsRepos = await res.json();
+
+                if (docsRepos.error) {
+                    showError('docsSidebar', docsRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(docsRepos) || docsRepos.length === 0) {
+                    showComingSoon('docsSidebar');
+                    return;
+                }
+
+                renderDocsSidebar();
+            } catch (e) {
+                showError('docsSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderDocsSidebar() {
+            const sidebar = document.getElementById('docsSidebar');
+            const searchQuery = (document.getElementById('docsSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('docsSort')?.value || 'name';
+
+            let filteredRepos = docsRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            // Sort repos
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') {
+                    return new Date(b.updated_at) - new Date(a.updated_at);
+                } else if (sortBy === 'author') {
+                    return a.owner.localeCompare(b.owner);
+                }
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No documents found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `docs-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="docs-folder" id="${repoId}">
+                        <div class="docs-folder-header" onclick="toggleDocsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                            <i class="mdi mdi-folder"></i>
+                            <span>${formatName(repo.repo_name)}</span>
+                        </div>
+                        <div class="docs-folder-items" id="${repoId}-items">
+                            <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterDocs() { renderDocsSidebar(); }
+        function sortDocs() { renderDocsSidebar(); }
+
+        async function toggleDocsFolder(folderId, owner, repo, branch) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadDocsFolderContents(folderId, owner, repo, branch, '');
+        }
+
+        async function loadDocsFolderContents(folderId, owner, repo, branch, path) {
+            const itemsContainer = document.getElementById(`${folderId}-items`);
+            itemsContainer.innerHTML = '<div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>';
+
+            try {
+                const url = `/api/yidstore/docs/${owner}/${repo}/files?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const files = await res.json();
+
+                if (!Array.isArray(files) || files.length === 0) {
+                    itemsContainer.innerHTML = '<div class="docs-coming-soon" style="padding: 0.5rem; font-size: 0.85rem;"><i class="mdi mdi-file-document-outline" style="font-size: 1.5rem;"></i><p>Documents coming soon</p></div>';
+                    return;
+                }
+
+                let html = '';
+                files.sort((a, b) => {
+                    if (a.type === 'dir' && b.type !== 'dir') return -1;
+                    if (a.type !== 'dir' && b.type === 'dir') return 1;
+                    return a.name.localeCompare(b.name);
+                });
+
+                files.forEach(file => {
+                    if (file.type === 'dir') {
+                        const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                        html += `
+                            <div class="docs-folder" id="${subFolderId}">
+                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'docs')">
+                                    <i class="mdi mdi-folder"></i>
+                                    <span>${file.name}</span>
+                                </div>
+                                <div class="docs-folder-items" id="${subFolderId}-items"></div>
+                            </div>
+                        `;
+                    } else {
+                        const icon = getDocIcon(file.name);
+                        html += `
+                            <div class="docs-file" onclick="loadDocContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                                <i class="mdi ${icon}"></i>
+                                <span>${file.name}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                itemsContainer.innerHTML = html;
+            } catch (e) {
+                itemsContainer.innerHTML = '<div class="docs-error" style="padding: 0.5rem;"><i class="mdi mdi-alert" style="font-size: 1.5rem;"></i><p>Failed to load</p></div>';
+            }
+        }
+
+        async function toggleSubFolder(folderId, owner, repo, branch, path, type) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            if (type === 'docs') {
+                await loadDocsFolderContents(folderId, owner, repo, branch, path);
+            } else if (type === 'automations') {
+                await loadAutomationsFolderContents(folderId, owner, repo, branch, path);
+            } else if (type === 'dashboards') {
+                await loadDashboardsFolderContents(folderId, owner, repo, branch, path);
+            }
+        }
+
+        function getDocIcon(filename) {
+            const lower = filename.toLowerCase();
+            if (lower.endsWith('.md')) return 'mdi-language-markdown';
+            if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'mdi-language-html5';
+            if (lower.endsWith('.txt')) return 'mdi-file-document-outline';
+            if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'mdi-file-code';
+            return 'mdi-file-document';
+        }
+
+        async function loadDocContent(owner, repo, path, branch) {
+            const contentEl = document.getElementById('docsContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading document...</div>';
+
+            document.querySelectorAll('#docsView .docs-file').forEach(el => el.classList.remove('active'));
+            event?.target?.closest('.docs-file')?.classList.add('active');
+
+            try {
+                const url = `/api/yidstore/docs/${owner}/${repo}/content?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const pathParts = path.split('/').filter(Boolean);
+                let breadcrumbHtml = `<a onclick="switchView('docs')">Documentation</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadDocsRepos()">${formatName(repo)}</a>`;
+                pathParts.forEach((part, idx) => {
+                    if (idx < pathParts.length - 1) {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                    } else {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                    }
+                });
+
+                let metaHtml = '';
+                if (data.last_modified_by || data.last_modified_at) {
+                    metaHtml = '<div class="docs-meta">';
+                    if (data.last_modified_by) {
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                    }
+                    if (data.last_modified_at) {
+                        const date = new Date(data.last_modified_at);
+                        const formatted = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+                                          ' at ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                        metaHtml += `<span><i class="mdi mdi-clock-outline"></i> ${formatted}</span>`;
+                    }
+                    metaHtml += '</div>';
+                }
+
+                let bodyHtml = '';
+                const lowerPath = path.toLowerCase();
+                if (lowerPath.endsWith('.md')) {
+                    bodyHtml = marked.parse(data.content || '');
+                } else if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
+                    bodyHtml = data.content || '';
+                } else {
+                    bodyHtml = `<pre>${escapeHtml(data.content || '')}</pre>`;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    ${metaHtml}
+                    <div class="docs-body">${bodyHtml}</div>
+                `;
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable. Please check your connection.</p></div>';
+            }
+        }
+
+        // ========== Automations Functions ==========
+        async function loadAutomationsRepos() {
+            const sidebar = document.getElementById('automationsSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/automations');
+                if (!res.ok) throw new Error('Server error');
+                automationsRepos = await res.json();
+
+                if (automationsRepos.error) {
+                    showError('automationsSidebar', automationsRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(automationsRepos) || automationsRepos.length === 0) {
+                    showComingSoon('automationsSidebar');
+                    return;
+                }
+
+                renderAutomationsSidebar();
+            } catch (e) {
+                showError('automationsSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderAutomationsSidebar() {
+            const sidebar = document.getElementById('automationsSidebar');
+            const searchQuery = (document.getElementById('automationsSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('automationsSort')?.value || 'name';
+
+            let filteredRepos = automationsRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (sortBy === 'author') return a.owner.localeCompare(b.owner);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No automations found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `automations-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="docs-folder" id="${repoId}">
+                        <div class="docs-folder-header" onclick="toggleAutomationsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                            <i class="mdi mdi-folder"></i>
+                            <span>${formatName(repo.repo_name)}</span>
+                        </div>
+                        <div class="docs-folder-items" id="${repoId}-items">
+                            <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterAutomations() { renderAutomationsSidebar(); }
+        function sortAutomations() { renderAutomationsSidebar(); }
+
+        async function toggleAutomationsFolder(folderId, owner, repo, branch) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadAutomationsFolderContents(folderId, owner, repo, branch, '');
+        }
+
+        async function loadAutomationsFolderContents(folderId, owner, repo, branch, path) {
+            const itemsContainer = document.getElementById(`${folderId}-items`);
+            itemsContainer.innerHTML = '<div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>';
+
+            try {
+                const url = `/api/yidstore/automations/${owner}/${repo}/files?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const files = await res.json();
+
+                // Filter to show only YAML files (not instruction files)
+                const yamlFiles = files.filter(f => f.type === 'dir' || (f.type === 'file' && (f.name.toLowerCase().endsWith('.yaml') || f.name.toLowerCase().endsWith('.yml'))));
+
+                if (yamlFiles.length === 0) {
+                    itemsContainer.innerHTML = '<div class="docs-coming-soon" style="padding: 0.5rem; font-size: 0.85rem;"><i class="mdi mdi-robot" style="font-size: 1.5rem;"></i><p>Automations coming soon</p></div>';
+                    return;
+                }
+
+                let html = '';
+                yamlFiles.sort((a, b) => {
+                    if (a.type === 'dir' && b.type !== 'dir') return -1;
+                    if (a.type !== 'dir' && b.type === 'dir') return 1;
+                    return a.name.localeCompare(b.name);
+                });
+
+                yamlFiles.forEach(file => {
+                    if (file.type === 'dir') {
+                        const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                        html += `
+                            <div class="docs-folder" id="${subFolderId}">
+                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'automations')">
+                                    <i class="mdi mdi-folder"></i>
+                                    <span>${file.name}</span>
+                                </div>
+                                <div class="docs-folder-items" id="${subFolderId}-items"></div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="yaml-file" onclick="loadAutomationContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                                <i class="mdi mdi-robot"></i>
+                                <span>${file.name.replace(/\.(yaml|yml)$/i, '')}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                itemsContainer.innerHTML = html;
+            } catch (e) {
+                itemsContainer.innerHTML = '<div class="docs-error" style="padding: 0.5rem;"><i class="mdi mdi-alert" style="font-size: 1.5rem;"></i><p>Failed to load</p></div>';
+            }
+        }
+
+        async function loadAutomationContent(owner, repo, path, branch) {
+            const contentEl = document.getElementById('automationsContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading automation...</div>';
+
+            document.querySelectorAll('#automationsView .yaml-file').forEach(el => el.classList.remove('active'));
+            event?.target?.closest('.yaml-file')?.classList.add('active');
+
+            try {
+                const url = `/api/yidstore/automations/${owner}/${repo}/content?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
+                const pathParts = path.split('/').filter(Boolean);
+                let breadcrumbHtml = `<a onclick="switchView('automations')">Automations</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadAutomationsRepos()">${formatName(repo)}</a>`;
+                pathParts.forEach((part, idx) => {
+                    if (idx < pathParts.length - 1) {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                    } else {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                    }
+                });
+
+                let metaHtml = '';
+                if (data.last_modified_by || data.last_modified_at) {
+                    metaHtml = '<div class="docs-meta">';
+                    if (data.last_modified_by) {
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                    }
+                    if (data.last_modified_at) {
+                        const date = new Date(data.last_modified_at);
+                        const formatted = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+                                          ' at ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                        metaHtml += `<span><i class="mdi mdi-clock-outline"></i> ${formatted}</span>`;
+                    }
+                    metaHtml += '</div>';
+                }
+
+                // Store YAML for use with open button
+                const yamlContent = data.content || '';
+                const yamlEncoded = btoa(encodeURIComponent(yamlContent));
+
+                // Instructions section
+                let instructionsHtml = '';
+                const iframeId = 'instr_' + Date.now();
+                if (data.instructions) {
+                    const instrPath = (data.instructions_path || '').toLowerCase();
+                    if (instrPath.endsWith('.md')) {
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                            </div>
+                        `;
+                    } else {
+                        // HTML content - render in sandboxed iframe to prevent layout issues
+                        const htmlContent = data.instructions;
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <iframe id="${iframeId}" class="instructions-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(htmlContent).replace(/"/g, '&quot;')}"></iframe>
+                            </div>
+                        `;
+                    }
+                } else {
+                    instructionsHtml = `
+                        <div class="instructions-section">
+                            <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                            <div class="no-instructions">No instructions found for this automation</div>
+                        </div>
+                    `;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    ${metaHtml}
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-robot" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <div class="yaml-actions">
+                        <button class="btn btn-p" onclick="addAutomation('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                            <i class="mdi mdi-plus"></i> Add Automation
+                        </button>
+                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                            <i class="mdi mdi-content-copy"></i> Copy YAML
+                        </button>
+                    </div>
+                    <h4 style="margin: 1rem 0 0.5rem; color: var(--dim);">YAML Code:</h4>
+                    <div class="yaml-code">${escapeHtml(yamlContent)}</div>
+                    ${instructionsHtml}
+                `;
+
+                // Auto-resize iframe after load
+                setTimeout(() => {
+                    const iframe = document.getElementById(iframeId);
+                    if (iframe) {
+                        iframe.onload = () => {
+                            try {
+                                iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
+                            } catch(e) {}
+                        };
+                    }
+                }, 100);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable. Please check your connection.</p></div>';
+            }
+        }
+
+        async function addAutomation(yamlEncoded, automationName) {
+            try {
+                const yaml = decodeURIComponent(atob(yamlEncoded));
+                await navigator.clipboard.writeText(yaml);
+                window.top.location.href = '/config/automation/edit/new';
+            } catch (e) {
+                pop('Error', 'Failed to copy YAML: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        function copyYaml(yamlEncoded) {
+            try {
+                const yaml = decodeURIComponent(atob(yamlEncoded));
+                navigator.clipboard.writeText(yaml).then(() => {
+                    pop('Copied', 'YAML copied to clipboard', 'mdi-check-circle', false);
+                });
+            } catch (e) {
+                pop('Error', 'Failed to copy YAML', 'mdi-alert', false);
+            }
+        }
+
+        // ========== Dashboards Functions ==========
+        async function loadDashboardsRepos() {
+            const sidebar = document.getElementById('dashboardsSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/dashboards');
+                if (!res.ok) throw new Error('Server error');
+                dashboardsRepos = await res.json();
+
+                if (dashboardsRepos.error) {
+                    showError('dashboardsSidebar', dashboardsRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(dashboardsRepos) || dashboardsRepos.length === 0) {
+                    showComingSoon('dashboardsSidebar');
+                    return;
+                }
+
+                renderDashboardsSidebar();
+            } catch (e) {
+                showError('dashboardsSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderDashboardsSidebar() {
+            const sidebar = document.getElementById('dashboardsSidebar');
+            const searchQuery = (document.getElementById('dashboardsSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('dashboardsSort')?.value || 'name';
+
+            let filteredRepos = dashboardsRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (sortBy === 'author') return a.owner.localeCompare(b.owner);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No dashboards found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `dashboards-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="docs-folder" id="${repoId}">
+                        <div class="docs-folder-header" onclick="toggleDashboardsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                            <i class="mdi mdi-folder"></i>
+                            <span>${formatName(repo.repo_name)}</span>
+                        </div>
+                        <div class="docs-folder-items" id="${repoId}-items">
+                            <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterDashboards() { renderDashboardsSidebar(); }
+        function sortDashboards() { renderDashboardsSidebar(); }
+
+        async function toggleDashboardsFolder(folderId, owner, repo, branch) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadDashboardsFolderContents(folderId, owner, repo, branch, '');
+        }
+
+        async function loadDashboardsFolderContents(folderId, owner, repo, branch, path) {
+            const itemsContainer = document.getElementById(`${folderId}-items`);
+            itemsContainer.innerHTML = '<div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>';
+
+            try {
+                const url = `/api/yidstore/dashboards/${owner}/${repo}/files?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const files = await res.json();
+
+                const yamlFiles = files.filter(f => f.type === 'dir' || (f.type === 'file' && (f.name.toLowerCase().endsWith('.yaml') || f.name.toLowerCase().endsWith('.yml'))));
+
+                if (yamlFiles.length === 0) {
+                    itemsContainer.innerHTML = '<div class="docs-coming-soon" style="padding: 0.5rem; font-size: 0.85rem;"><i class="mdi mdi-view-dashboard" style="font-size: 1.5rem;"></i><p>Dashboards coming soon</p></div>';
+                    return;
+                }
+
+                let html = '';
+                yamlFiles.sort((a, b) => {
+                    if (a.type === 'dir' && b.type !== 'dir') return -1;
+                    if (a.type !== 'dir' && b.type === 'dir') return 1;
+                    return a.name.localeCompare(b.name);
+                });
+
+                yamlFiles.forEach(file => {
+                    if (file.type === 'dir') {
+                        const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                        html += `
+                            <div class="docs-folder" id="${subFolderId}">
+                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'dashboards')">
+                                    <i class="mdi mdi-folder"></i>
+                                    <span>${file.name}</span>
+                                </div>
+                                <div class="docs-folder-items" id="${subFolderId}-items"></div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="yaml-file" onclick="loadDashboardContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                                <i class="mdi mdi-view-dashboard"></i>
+                                <span>${file.name.replace(/\.(yaml|yml)$/i, '')}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                itemsContainer.innerHTML = html;
+            } catch (e) {
+                itemsContainer.innerHTML = '<div class="docs-error" style="padding: 0.5rem;"><i class="mdi mdi-alert" style="font-size: 1.5rem;"></i><p>Failed to load</p></div>';
+            }
+        }
+
+        async function loadDashboardContent(owner, repo, path, branch) {
+            const contentEl = document.getElementById('dashboardsContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading dashboard...</div>';
+
+            document.querySelectorAll('#dashboardsView .yaml-file').forEach(el => el.classList.remove('active'));
+            event?.target?.closest('.yaml-file')?.classList.add('active');
+
+            try {
+                const url = `/api/yidstore/dashboards/${owner}/${repo}/content?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
+                const pathParts = path.split('/').filter(Boolean);
+                let breadcrumbHtml = `<a onclick="switchView('dashboards')">Dashboards</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadDashboardsRepos()">${formatName(repo)}</a>`;
+                pathParts.forEach((part, idx) => {
+                    if (idx < pathParts.length - 1) {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                    } else {
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                    }
+                });
+
+                let metaHtml = '';
+                if (data.last_modified_by || data.last_modified_at) {
+                    metaHtml = '<div class="docs-meta">';
+                    if (data.last_modified_by) {
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                    }
+                    if (data.last_modified_at) {
+                        const date = new Date(data.last_modified_at);
+                        const formatted = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+                                          ' at ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                        metaHtml += `<span><i class="mdi mdi-clock-outline"></i> ${formatted}</span>`;
+                    }
+                    metaHtml += '</div>';
+                }
+
+                const yamlContent = data.content || '';
+                const yamlEncoded = btoa(encodeURIComponent(yamlContent));
+
+                let instructionsHtml = '';
+                const dashIframeId = 'dash_instr_' + Date.now();
+                if (data.instructions) {
+                    const instrPath = (data.instructions_path || '').toLowerCase();
+                    if (instrPath.endsWith('.md')) {
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                            </div>
+                        `;
+                    } else {
+                        // HTML content - render in sandboxed iframe
+                        const htmlContent = data.instructions;
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <iframe id="${dashIframeId}" class="instructions-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(htmlContent).replace(/"/g, '&quot;')}"></iframe>
+                            </div>
+                        `;
+                    }
+                } else {
+                    instructionsHtml = `
+                        <div class="instructions-section">
+                            <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                            <div class="no-instructions">No instructions found for this dashboard</div>
+                        </div>
+                    `;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    ${metaHtml}
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-view-dashboard" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <div class="yaml-actions">
+                        <button class="btn btn-p" onclick="addDashboard('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                            <i class="mdi mdi-plus"></i> Add Dashboard
+                        </button>
+                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                            <i class="mdi mdi-content-copy"></i> Copy YAML
+                        </button>
+                    </div>
+                    <h4 style="margin: 1rem 0 0.5rem; color: var(--dim);">YAML Code:</h4>
+                    <div class="yaml-code">${escapeHtml(yamlContent)}</div>
+                    ${instructionsHtml}
+                `;
+
+                // Auto-resize iframe after load
+                setTimeout(() => {
+                    const iframe = document.getElementById(dashIframeId);
+                    if (iframe) {
+                        iframe.onload = () => {
+                            try {
+                                iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
+                            } catch(e) {}
+                        };
+                    }
+                }, 100);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable. Please check your connection.</p></div>';
+            }
+        }
+
+        async function addDashboard(yamlEncoded, dashboardName) {
+            try {
+                const yaml = decodeURIComponent(atob(yamlEncoded));
+                await navigator.clipboard.writeText(yaml);
+                window.top.location.href = '/config/lovelace/dashboards';
+            } catch (e) {
+                pop('Error', 'Failed to copy YAML: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        // ========== Helpers Functions ==========
+        async function loadHelpersRepos() {
+            const sidebar = document.getElementById('helpersSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/helpers');
+                if (!res.ok) throw new Error('Server error');
+                helpersRepos = await res.json();
+
+                if (helpersRepos.error) {
+                    showError('helpersSidebar', helpersRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(helpersRepos) || helpersRepos.length === 0) {
+                    showComingSoon('helpersSidebar');
+                    return;
+                }
+
+                renderHelpersSidebar();
+            } catch (e) {
+                showError('helpersSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderHelpersSidebar() {
+            const sidebar = document.getElementById('helpersSidebar');
+            const searchQuery = (document.getElementById('helpersSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('helpersSort')?.value || 'name';
+
+            let filteredRepos = helpersRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (sortBy === 'author') return a.owner.localeCompare(b.owner);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No helpers found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `helpers-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="docs-folder" id="${repoId}">
+                        <div class="docs-folder-header" onclick="toggleHelpersFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                            <i class="mdi mdi-folder"></i>
+                            <span>${formatName(repo.repo_name)}</span>
+                        </div>
+                        <div class="docs-folder-items" id="${repoId}-items">
+                            <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterHelpers() { renderHelpersSidebar(); }
+        function sortHelpers() { renderHelpersSidebar(); }
+
+        async function toggleHelpersFolder(folderId, owner, repo, branch) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadHelpersFolderContents(folderId, owner, repo, branch, '');
+        }
+
+        async function loadHelpersFolderContents(folderId, owner, repo, branch, path) {
+            const itemsContainer = document.getElementById(`${folderId}-items`);
+            itemsContainer.innerHTML = '<div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>';
+
+            try {
+                const url = `/api/yidstore/helpers/${owner}/${repo}/files?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const files = await res.json();
+
+                const yamlFiles = files.filter(f => f.type === 'dir' || (f.type === 'file' && (f.name.toLowerCase().endsWith('.yaml') || f.name.toLowerCase().endsWith('.yml'))));
+
+                if (yamlFiles.length === 0) {
+                    itemsContainer.innerHTML = '<div class="docs-coming-soon" style="padding: 0.5rem; font-size: 0.85rem;"><i class="mdi mdi-toggle-switch" style="font-size: 1.5rem;"></i><p>Helpers coming soon</p></div>';
+                    return;
+                }
+
+                let html = '';
+                yamlFiles.forEach(file => {
+                    if (file.type === 'dir') {
+                        const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                        html += `
+                            <div class="docs-folder" id="${subFolderId}">
+                                <div class="docs-folder-header" onclick="toggleHelpersSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}')">
+                                    <i class="mdi mdi-folder"></i>
+                                    <span>${file.name}</span>
+                                </div>
+                                <div class="docs-folder-items" id="${subFolderId}-items"></div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="yaml-file" onclick="loadHelperContent('${owner}', '${repo}', '${branch}', '${file.path}')">
+                                <i class="mdi mdi-file-document-outline"></i>
+                                <span>${file.name}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                itemsContainer.innerHTML = html;
+            } catch (e) {
+                itemsContainer.innerHTML = '<div class="docs-error" style="padding: 0.5rem;"><p>Failed to load files</p></div>';
+            }
+        }
+
+        async function toggleHelpersSubFolder(folderId, owner, repo, branch, path) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadHelpersFolderContents(folderId, owner, repo, branch, path);
+        }
+
+        async function loadHelperContent(owner, repo, branch, filePath) {
+            const contentEl = document.getElementById('helpersContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            // Highlight selected file
+            document.querySelectorAll('#helpersView .yaml-file').forEach(el => el.classList.remove('active'));
+            event.target.closest('.yaml-file')?.classList.add('active');
+
+            try {
+                const res = await fetch(`/api/yidstore/helpers/${owner}/${repo}/content?path=${encodeURIComponent(filePath)}&branch=${branch}`);
+                if (!res.ok) throw new Error('Failed to fetch content');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const fileName = filePath.split('/').pop();
+                let breadcrumbHtml = `<a onclick="switchView('helpers')">Helpers</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadHelpersRepos()">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+
+                // Meta info
+                let metaHtml = '';
+                if (data.last_modified_by || data.last_modified_at) {
+                    metaHtml = '<div class="yaml-meta">';
+                    if (data.last_modified_by) {
+                        const displayAuthor = getDisplayAuthor(data.last_modified_by, data.last_modified_by);
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${displayAuthor}</span>`;
+                    }
+                    if (data.last_modified_at) {
+                        const date = new Date(data.last_modified_at);
+                        const formatted = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        metaHtml += `<span><i class="mdi mdi-clock-outline"></i> ${formatted}</span>`;
+                    }
+                    metaHtml += '</div>';
+                }
+
+                const yamlContent = data.content || '';
+                const yamlEncoded = btoa(encodeURIComponent(yamlContent));
+
+                let instructionsHtml = '';
+                const helperIframeId = 'helper_instr_' + Date.now();
+                if (data.instructions) {
+                    const instrPath = (data.instructions_path || '').toLowerCase();
+                    if (instrPath.endsWith('.md')) {
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                            </div>
+                        `;
+                    } else {
+                        const htmlContent = data.instructions;
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <iframe id="${helperIframeId}" class="instructions-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(htmlContent).replace(/"/g, '&quot;')}"></iframe>
+                            </div>
+                        `;
+                    }
+                } else {
+                    instructionsHtml = `
+                        <div class="instructions-section">
+                            <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                            <div class="no-instructions">No instructions found for this helper</div>
+                        </div>
+                    `;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    ${metaHtml}
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-toggle-switch" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <div class="yaml-actions">
+                        <button class="btn btn-p" onclick="addHelper('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                            <i class="mdi mdi-plus"></i> Add Helper
+                        </button>
+                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                            <i class="mdi mdi-content-copy"></i> Copy YAML
+                        </button>
+                    </div>
+                    <h4 style="margin: 1rem 0 0.5rem; color: var(--dim);">YAML Code:</h4>
+                    <div class="yaml-code">${escapeHtml(yamlContent)}</div>
+                    ${instructionsHtml}
+                `;
+
+                // Auto-resize iframe
+                setTimeout(() => {
+                    const iframe = document.getElementById(helperIframeId);
+                    if (iframe) {
+                        iframe.onload = () => {
+                            try {
+                                iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
+                            } catch(e) {}
+                        };
+                    }
+                }, 100);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable. Please check your connection.</p></div>';
+            }
+        }
+
+        async function addHelper(yamlEncoded, helperName) {
+            try {
+                const yaml = decodeURIComponent(atob(yamlEncoded));
+                await navigator.clipboard.writeText(yaml);
+                window.top.location.href = '/config/helpers';
+            } catch (e) {
+                pop('Error', 'Failed to copy YAML: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        // ========== Audio Functions ==========
+        async function loadAudioRepos() {
+            const sidebar = document.getElementById('audioSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/audio');
+                if (!res.ok) throw new Error('Server error');
+                audioRepos = await res.json();
+
+                if (audioRepos.error) {
+                    showError('audioSidebar', audioRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(audioRepos) || audioRepos.length === 0) {
+                    showComingSoon('audioSidebar');
+                    return;
+                }
+
+                renderAudioSidebar();
+            } catch (e) {
+                showError('audioSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderAudioSidebar() {
+            const sidebar = document.getElementById('audioSidebar');
+            const searchQuery = (document.getElementById('audioSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('audioSort')?.value || 'name';
+
+            let filteredRepos = audioRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (sortBy === 'author') return a.owner.localeCompare(b.owner);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No audio found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `audio-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="audio-repo-item" id="${repoId}" onclick="toggleAudioFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                        <i class="mdi mdi-music-box"></i>
+                        <div class="audio-repo-info">
+                            <span class="audio-repo-name">${formatName(repo.repo_name)}</span>
+                            ${repo.description ? `<span class="audio-repo-desc">${repo.description}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterAudio() { renderAudioSidebar(); }
+        function sortAudio() { renderAudioSidebar(); }
+
+        async function toggleAudioFolder(folderId, owner, repo, branch) {
+            // When clicking on audio repo, load the full repo content view (like store)
+            await loadAudioRepoContent(owner, repo, branch);
+
+            // Highlight the selected item
+            document.querySelectorAll('#audioSidebar .audio-repo-item').forEach(f => f.classList.remove('active'));
+            document.getElementById(folderId)?.classList.add('active');
+        }
+
+        async function loadAudioRepoContent(owner, repo, branch) {
+            const contentEl = document.getElementById('audioContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch(`/api/yidstore/audio/${owner}/${repo}/content?branch=${branch}`);
+                if (!res.ok) throw new Error('Failed to fetch content');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const breadcrumbHtml = `<a onclick="switchView('audio')">Audio</a> <i class="mdi mdi-chevron-right"></i> ${formatName(repo)}`;
+                const isInstalled = data.is_installed;
+                const localFiles = data.local_files || [];
+                const audioFiles = data.audio_files || [];
+                const audioLocation = getAudioInstallLocation();
+
+                let filesHtml = '';
+
+                if (isInstalled && localFiles.length > 0) {
+                    // Show installed local files with audio players
+                    filesHtml = `
+                        <div style="margin-top: 1.5rem;">
+                            <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="mdi mdi-music-box-multiple" style="color: var(--primary);"></i>
+                                Installed Audio Files (${localFiles.length})
+                            </h3>
+                            <div class="audio-files-list">
+                                ${localFiles.map(f => `
+                                    <div class="audio-file-item" style="background: var(--card); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+                                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                            <i class="mdi mdi-music-note" style="color: var(--primary);"></i>
+                                            <strong>${f.name}</strong>
+                                        </div>
+                                        <audio controls style="width: 100%; max-width: 500px;">
+                                            <source src="${f.url}" type="audio/mpeg">
+                                            Your browser does not support the audio element.
+                                        </audio>
+                                        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">
+                                            Path: <code>${f.url}</code>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                } else if (audioFiles.length > 0) {
+                    // Show available audio files from repo (not yet installed)
+                    filesHtml = `
+                        <div style="margin-top: 1.5rem;">
+                            <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="mdi mdi-music-box-multiple" style="color: var(--text-secondary);"></i>
+                                Available Audio Files (${audioFiles.length})
+                            </h3>
+                            <div style="background: var(--card); border-radius: 8px; padding: 1rem;">
+                                ${audioFiles.map(f => `
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+                                        <i class="mdi mdi-music-note" style="color: var(--text-secondary);"></i>
+                                        <span>${f}</span>
+                                    </div>
+                                `).join('')}
+                                <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+                                    <i class="mdi mdi-information-outline"></i> Install this audio pack to play files locally in Home Assistant.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const actionButton = isInstalled
+                    ? `<button class="btn btn-dark" onclick="confirmAudioUninstall('${owner}', '${repo}')">
+                         <i class="mdi mdi-delete"></i> Uninstall
+                       </button>`
+                    : `<button class="btn btn-p" onclick="confirmAudioInstall('${owner}', '${repo}')">
+                         <i class="mdi mdi-download"></i> Install to ${audioLocation === 'media' ? 'Media' : 'WWW'}
+                       </button>`;
+
+                const statusBadge = isInstalled
+                    ? `<span class="badge badge-inst">Installed (${data.install_location})</span>`
+                    : '';
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                        <h2 style="margin: 0;"><i class="mdi mdi-music-box" style="color: var(--primary);"></i> ${formatName(repo)}</h2>
+                        ${statusBadge}
+                    </div>
+                    ${data.description ? `<p style="color: var(--text-secondary); margin-bottom: 1rem;">${data.description}</p>` : ''}
+                    <div class="yaml-actions" style="margin-bottom: 1rem;">
+                        ${actionButton}
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
+                            <span style="font-size: 0.85rem; color: var(--text-secondary);">Install to:</span>
+                            <button class="btn btn-o btn-sm" onclick="toggleAudioInstallLocation(); loadAudioRepoContent('${owner}', '${repo}', '${branch}')">
+                                <i class="mdi mdi-${audioLocation === 'media' ? 'folder-music' : 'web'}"></i>
+                                ${audioLocation === 'media' ? 'Media' : 'WWW'}
+                            </button>
+                        </div>
+                    </div>
+                    ${filesHtml}
+                    ${data.readme ? `
+                        <div style="margin-top: 2rem;">
+                            <h3 style="margin-bottom: 1rem;"><i class="mdi mdi-file-document" style="color: var(--primary);"></i> README</h3>
+                            <div class="docs-body">${marked.parse(data.readme)}</div>
+                        </div>
+                    ` : ''}
+                `;
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable.</p></div>';
+            }
+        }
+
+        function confirmAudioInstall(owner, repo) {
+            const location = getAudioInstallLocation();
+            pop('Confirm Install', `Install audio pack <strong>${formatName(repo)}</strong> to ${location}?`, 'mdi-download', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: 'Install', c: 'btn-p', f: `executeAudioInstall('${owner}','${repo}')` }
+            ]);
+        }
+
+        async function executeAudioInstall(owner, repo) {
+            closePop();
+            try {
+                const body = {
+                    owner: owner,
+                    repo: repo,
+                    type: 'audio',
+                    audio_location: getAudioInstallLocation()
+                };
+
+                const res = await fetch('/api/yidstore/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    pop('Installed', `${formatName(repo)} audio pack installed.`, 'mdi-check-circle', false);
+                    // Reload the audio content to show local files
+                    const repoData = audioRepos.find(r => r.owner === owner && r.repo_name === repo);
+                    const branch = repoData?.default_branch || 'main';
+                    await loadAudioRepoContent(owner, repo, branch);
+                } else {
+                    pop('Error', data.error || 'Install failed', 'mdi-alert', false);
+                }
+            } catch (e) {
+                pop('Error', 'Install failed: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        function confirmAudioUninstall(owner, repo) {
+            pop('Confirm Uninstall', `Remove audio pack <strong>${formatName(repo)}</strong>?`, 'mdi-delete', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: 'Uninstall', c: 'btn-p', f: `executeAudioUninstall('${owner}','${repo}')` }
+            ]);
+        }
+
+        async function executeAudioUninstall(owner, repo) {
+            closePop();
+            try {
+                const res = await fetch('/api/yidstore/uninstall', {
+                    method: 'POST',
+                    body: JSON.stringify({ owner: owner, repo: repo, type: 'audio' }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    pop('Uninstalled', `${formatName(repo)} audio pack removed.`, 'mdi-check-circle', false);
+                    // Reload the audio content
+                    const repoData = audioRepos.find(r => r.owner === owner && r.repo_name === repo);
+                    const branch = repoData?.default_branch || 'main';
+                    await loadAudioRepoContent(owner, repo, branch);
+                } else {
+                    pop('Error', data.error || 'Uninstall failed', 'mdi-alert', false);
+                }
+            } catch (e) {
+                pop('Error', 'Uninstall failed: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        // ========== Blueprints Functions ==========
+        async function loadBlueprintsRepos() {
+            const sidebar = document.getElementById('blueprintsSidebar');
+            sidebar.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            try {
+                const res = await fetch('/api/yidstore/blueprints');
+                if (!res.ok) throw new Error('Server error');
+                blueprintsRepos = await res.json();
+
+                if (blueprintsRepos.error) {
+                    showError('blueprintsSidebar', blueprintsRepos.error);
+                    return;
+                }
+
+                if (!Array.isArray(blueprintsRepos) || blueprintsRepos.length === 0) {
+                    showComingSoon('blueprintsSidebar');
+                    return;
+                }
+
+                renderBlueprintsSidebar();
+            } catch (e) {
+                showError('blueprintsSidebar', 'Server is not reachable. Please check your connection and try again.');
+            }
+        }
+
+        function renderBlueprintsSidebar() {
+            const sidebar = document.getElementById('blueprintsSidebar');
+            const searchQuery = (document.getElementById('blueprintsSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('blueprintsSort')?.value || 'name';
+
+            let filteredRepos = blueprintsRepos.filter(repo => {
+                if (!searchQuery) return true;
+                return repo.repo_name.toLowerCase().includes(searchQuery) ||
+                       (repo.description || '').toLowerCase().includes(searchQuery);
+            });
+
+            filteredRepos.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                if (sortBy === 'author') return a.owner.localeCompare(b.owner);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filteredRepos.length === 0) {
+                sidebar.innerHTML = '<div class="docs-coming-soon" style="padding: 1rem;"><i class="mdi mdi-file-search-outline" style="font-size: 2rem;"></i><p>No blueprints found matching your search</p></div>';
+                return;
+            }
+
+            let html = '';
+            filteredRepos.forEach(repo => {
+                const repoId = `blueprints-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                html += `
+                    <div class="docs-folder" id="${repoId}">
+                        <div class="docs-folder-header" onclick="toggleBlueprintsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                            <i class="mdi mdi-folder"></i>
+                            <span>${formatName(repo.repo_name)}</span>
+                        </div>
+                        <div class="docs-folder-items" id="${repoId}-items">
+                            <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function filterBlueprints() { renderBlueprintsSidebar(); }
+        function sortBlueprints() { renderBlueprintsSidebar(); }
+
+        async function toggleBlueprintsFolder(folderId, owner, repo, branch) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadBlueprintsFolderContents(folderId, owner, repo, branch, '');
+        }
+
+        async function loadBlueprintsFolderContents(folderId, owner, repo, branch, path) {
+            const itemsContainer = document.getElementById(`${folderId}-items`);
+            itemsContainer.innerHTML = '<div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>';
+
+            try {
+                const url = `/api/yidstore/blueprints/${owner}/${repo}/files?path=${encodeURIComponent(path)}&branch=${branch}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Server error');
+                const files = await res.json();
+
+                const yamlFiles = files.filter(f => f.type === 'dir' || (f.type === 'file' && (f.name.toLowerCase().endsWith('.yaml') || f.name.toLowerCase().endsWith('.yml'))));
+
+                if (yamlFiles.length === 0) {
+                    itemsContainer.innerHTML = '<div class="docs-coming-soon" style="padding: 0.5rem; font-size: 0.85rem;"><i class="mdi mdi-file-document-outline" style="font-size: 1.5rem;"></i><p>No blueprints found</p></div>';
+                    return;
+                }
+
+                let html = '';
+                yamlFiles.forEach(file => {
+                    if (file.type === 'dir') {
+                        const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
+                        html += `
+                            <div class="docs-folder" id="${subFolderId}">
+                                <div class="docs-folder-header" onclick="toggleBlueprintsSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}')">
+                                    <i class="mdi mdi-folder"></i>
+                                    <span>${file.name}</span>
+                                </div>
+                                <div class="docs-folder-items" id="${subFolderId}-items"></div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="yaml-file" onclick="loadBlueprintContent('${owner}', '${repo}', '${branch}', '${file.path}')">
+                                <i class="mdi mdi-file-document-outline"></i>
+                                <span>${file.name}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                itemsContainer.innerHTML = html;
+            } catch (e) {
+                itemsContainer.innerHTML = '<div class="docs-error" style="padding: 0.5rem;"><p>Failed to load files</p></div>';
+            }
+        }
+
+        async function toggleBlueprintsSubFolder(folderId, owner, repo, branch, path) {
+            const folder = document.getElementById(folderId);
+            const isOpen = folder.classList.contains('open');
+
+            if (isOpen) {
+                folder.classList.remove('open');
+                folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder';
+                return;
+            }
+
+            folder.classList.add('open');
+            folder.querySelector('.docs-folder-header i').className = 'mdi mdi-folder-open';
+
+            await loadBlueprintsFolderContents(folderId, owner, repo, branch, path);
+        }
+
+        async function loadBlueprintContent(owner, repo, branch, filePath) {
+            const contentEl = document.getElementById('blueprintsContent');
+            contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
+
+            document.querySelectorAll('#blueprintsView .yaml-file').forEach(el => el.classList.remove('active'));
+            event?.target?.closest('.yaml-file')?.classList.add('active');
+
+            try {
+                const res = await fetch(`/api/yidstore/blueprints/${owner}/${repo}/content?path=${encodeURIComponent(filePath)}&branch=${branch}`);
+                if (!res.ok) throw new Error('Failed to fetch content');
+                const data = await res.json();
+
+                if (data.error) {
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    return;
+                }
+
+                const fileName = filePath.split('/').pop();
+                let breadcrumbHtml = `<a onclick="switchView('blueprints')">Blueprints</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadBlueprintsRepos()">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+
+                let metaHtml = '';
+                if (data.last_modified_by || data.last_modified_at) {
+                    metaHtml = '<div class="yaml-meta">';
+                    if (data.last_modified_by) {
+                        const displayAuthor = getDisplayAuthor(data.last_modified_by, data.last_modified_by);
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${displayAuthor}</span>`;
+                    }
+                    if (data.last_modified_at) {
+                        const date = new Date(data.last_modified_at);
+                        const formatted = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        metaHtml += `<span><i class="mdi mdi-clock-outline"></i> ${formatted}</span>`;
+                    }
+                    metaHtml += '</div>';
+                }
+
+                const yamlContent = data.content || '';
+                const yamlEncoded = btoa(encodeURIComponent(yamlContent));
+
+                let instructionsHtml = '';
+                const bpIframeId = 'bp_instr_' + Date.now();
+                if (data.instructions) {
+                    const instrPath = (data.instructions_path || '').toLowerCase();
+                    if (instrPath.endsWith('.md')) {
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                            </div>
+                        `;
+                    } else {
+                        const htmlContent = data.instructions;
+                        instructionsHtml = `
+                            <div class="instructions-section">
+                                <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                                <iframe id="${bpIframeId}" class="instructions-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(htmlContent).replace(/"/g, '&quot;')}"></iframe>
+                            </div>
+                        `;
+                    }
+                } else {
+                    instructionsHtml = `
+                        <div class="instructions-section">
+                            <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
+                            <div class="no-instructions">No instructions found for this blueprint</div>
+                        </div>
+                    `;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="docs-breadcrumb">${breadcrumbHtml}</div>
+                    ${metaHtml}
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-file-document-outline" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <div class="yaml-actions">
+                        <button class="btn btn-p" onclick="addBlueprint('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                            <i class="mdi mdi-plus"></i> Import Blueprint
+                        </button>
+                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                            <i class="mdi mdi-content-copy"></i> Copy YAML
+                        </button>
+                    </div>
+                    <h4 style="margin: 1rem 0 0.5rem; color: var(--dim);">YAML Code:</h4>
+                    <div class="yaml-code">${escapeHtml(yamlContent)}</div>
+                    ${instructionsHtml}
+                `;
+
+                setTimeout(() => {
+                    const iframe = document.getElementById(bpIframeId);
+                    if (iframe) {
+                        iframe.onload = () => {
+                            try {
+                                iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
+                            } catch(e) {}
+                        };
+                    }
+                }, 100);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable.</p></div>';
+            }
+        }
+
+        async function addBlueprint(yamlEncoded, blueprintName) {
+            try {
+                const yaml = decodeURIComponent(atob(yamlEncoded));
+                await navigator.clipboard.writeText(yaml);
+                window.top.location.href = '/config/blueprint/dashboard';
+            } catch (e) {
+                pop('Error', 'Failed to copy YAML: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
 
         initTheme();
         updateAudioLocationToggleLabel();
