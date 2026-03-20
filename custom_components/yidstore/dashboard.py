@@ -6,6 +6,7 @@ import os
 import re
 import time
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from aiohttp import web
 
@@ -670,6 +671,28 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(LocalBrandsIconView())
     hass.http.register_view(LocalBrandsListView())
     hass.http.register_view(LocalBrandsUploadView())
+    hass.http.register_view(DocumentationReposView(eid))
+    hass.http.register_view(DocumentationFilesView(eid))
+    hass.http.register_view(DocumentationContentView(eid))
+    hass.http.register_view(AutomationsReposView(eid))
+    hass.http.register_view(AutomationsFilesView(eid))
+    hass.http.register_view(AutomationsContentView(eid))
+    hass.http.register_view(DashboardsReposView(eid))
+    hass.http.register_view(DashboardsFilesView(eid))
+    hass.http.register_view(DashboardsContentView(eid))
+    hass.http.register_view(HelpersReposView(eid))
+    hass.http.register_view(HelpersFilesView(eid))
+    hass.http.register_view(HelpersContentView(eid))
+    hass.http.register_view(AudioReposView(eid))
+    hass.http.register_view(AudioFilesView(eid))
+    hass.http.register_view(AudioContentView(eid))
+    hass.http.register_view(BlueprintsReposView(eid))
+    hass.http.register_view(BlueprintsFilesView(eid))
+    hass.http.register_view(BlueprintsContentView(eid))
+    hass.http.register_view(AddAutomationView())
+    hass.http.register_view(AddDashboardView())
+    hass.http.register_view(AddHelperView())
+    hass.http.register_view(ListHelpersView())
 
     # Initialize requires_restart set in hass.data
     if "yidstore_requires_restart" not in hass.data:
@@ -742,6 +765,10 @@ class OnOffStoreReposView(HomeAssistantView):
                 full_name = repo_obj.get("full_name")
                 if not full_name: return
                 if full_name in seen_repos: return
+                # Skip repos from orgs that have their own tabs (Documentation, Automations, Dashboards, Helpers)
+                owner = repo_obj.get("owner", {}).get("login", "")
+                if owner in HIDDEN_STORE_ORGS:
+                    return
                 seen_repos.add(full_name)
                 tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state))
             
@@ -764,11 +791,14 @@ class OnOffStoreReposView(HomeAssistantView):
                     user_orgs = await client.get_user_orgs()
                     for org in user_orgs:
                         org_name = org.get("username") or org.get("name")
-                        if org_name:
+                        if org_name and org_name not in HIDDEN_STORE_ORGS:
                             orgs_to_fetch.add(org_name)
                     _LOGGER.debug("Fetching repos from %d organizations", len(orgs_to_fetch))
                 except Exception as e:
                     _LOGGER.debug("Failed to fetch user orgs: %s", e)
+
+            # Remove hidden orgs from the fetch list
+            orgs_to_fetch = orgs_to_fetch - HIDDEN_STORE_ORGS
 
             # Collect org members to fetch their repos too (when authenticated)
             users_from_orgs = set()
@@ -1846,3 +1876,1386 @@ class LocalBrandsUploadView(HomeAssistantView):
             return web.json_response({"error": "Failed to save branding."}, status=500)
 
         return web.json_response({"success": True, "domain": domain, "files": list(files.keys())})
+
+
+# Documentation Organization name
+DOCUMENTATION_ORG = "Documentation"
+
+
+class DocumentationReposView(HomeAssistantView):
+    """API to list documentation repositories from the Documentation organization."""
+    url = "/api/yidstore/docs"
+    name = "api:yidstore:docs"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Fetch repos from Documentation organization
+            repos = await client.get_org_repos(DOCUMENTATION_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+
+                # Skip archived repos
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", DOCUMENTATION_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching documentation repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class DocumentationFilesView(HomeAssistantView):
+    """API to list files in a documentation repository."""
+    url = "/api/yidstore/docs/{owner}/{repo}/files"
+    name = "api:yidstore:docs:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Get path parameter (for subdirectories)
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            # List directory with file info
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            # Filter to only show documentation files and directories
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    # Only include documentation files
+                    lower_name = name.lower()
+                    if lower_name.endswith(('.md', '.html', '.htm', '.txt')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching documentation files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class DocumentationContentView(HomeAssistantView):
+    """API to get content of a documentation file."""
+    url = "/api/yidstore/docs/{owner}/{repo}/content"
+    name = "api:yidstore:docs:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Get file path from query parameter
+            file_path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            if not file_path:
+                return web.json_response({"error": "Missing path parameter"}, status=400)
+
+            # Get file content with history
+            file_info = await client.get_file_info_with_history(owner, repo, file_path, branch)
+
+            if file_info is None:
+                return web.json_response({"error": "File not found"}, status=404)
+
+            return web.json_response({
+                "content": file_info.get("content", ""),
+                "file_path": file_info.get("file_path", ""),
+                "last_modified_by": file_info.get("last_modified_by"),
+                "last_modified_at": file_info.get("last_modified_at"),
+                "commit_message": file_info.get("commit_message"),
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching documentation content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+# Automations Organization name
+AUTOMATIONS_ORG = "Automations"
+
+# Dashboards Organization name
+DASHBOARDS_ORG = "Dashboards"
+
+# Helpers Organization name
+HELPERS_ORG = "Helpers"
+
+# Audio Organization name
+AUDIO_ORG = "Audio"
+
+# Blueprints Organization name
+BLUEPRINTS_ORG = "Blueprints"
+
+# Organizations to hide from the Store view (they have their own tabs)
+HIDDEN_STORE_ORGS = {"Documentation", "Automations", "Dashboards", "Helpers", "Audio", "Blueprints"}
+
+
+class AutomationsReposView(HomeAssistantView):
+    """API to list automation repositories from the Automations organization."""
+    url = "/api/yidstore/automations"
+    name = "api:yidstore:automations"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Fetch repos from Automations organization
+            repos = await client.get_org_repos(AUTOMATIONS_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", AUTOMATIONS_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching automation repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AutomationsFilesView(HomeAssistantView):
+    """API to list YAML files in an automations repository."""
+    url = "/api/yidstore/automations/{owner}/{repo}/files"
+    name = "api:yidstore:automations:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    lower_name = name.lower()
+                    # Include YAML files and their potential instruction files
+                    if lower_name.endswith(('.yaml', '.yml', '.md', '.html', '.htm')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching automation files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AutomationsContentView(HomeAssistantView):
+    """API to get content of an automation YAML file with linked instructions."""
+    url = "/api/yidstore/automations/{owner}/{repo}/content"
+    name = "api:yidstore:automations:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            file_path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            if not file_path:
+                return web.json_response({"error": "Missing path parameter"}, status=400)
+
+            # Get YAML file content
+            file_info = await client.get_file_info_with_history(owner, repo, file_path, branch)
+
+            if file_info is None:
+                return web.json_response({"error": "File not found"}, status=404)
+
+            # Try to find linked instructions file (same name but .md or .html)
+            base_path = file_path.rsplit('.', 1)[0] if '.' in file_path else file_path
+            base_name = base_path.rsplit('/', 1)[-1] if '/' in base_path else base_path
+            dir_path = base_path.rsplit('/', 1)[0] if '/' in base_path else ""
+            instructions_content = None
+            instructions_path = None
+
+            # First try exact match
+            for ext in ['.md', '.html', '.htm']:
+                try_path = base_path + ext
+                instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                if instr_info and instr_info.get("content"):
+                    instructions_content = instr_info.get("content")
+                    instructions_path = try_path
+                    break
+
+            # If no exact match, try case-insensitive search in the directory
+            if not instructions_content:
+                dir_entries = await client.list_dir(owner, repo, dir_path, branch)
+                base_name_lower = base_name.lower()
+                for entry in dir_entries:
+                    if entry.get("type") != "file":
+                        continue
+                    entry_name = entry.get("name", "")
+                    entry_lower = entry_name.lower()
+                    # Check if this file starts with the base name (case-insensitive) and has instruction extension
+                    if entry_lower.endswith(('.md', '.html', '.htm')):
+                        entry_base = entry_lower.rsplit('.', 1)[0]
+                        # Match if base names are similar (exact match or starts with)
+                        if entry_base == base_name_lower or entry_base.startswith(base_name_lower) or base_name_lower.startswith(entry_base):
+                            try_path = f"{dir_path}/{entry_name}" if dir_path else entry_name
+                            instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                            if instr_info and instr_info.get("content"):
+                                instructions_content = instr_info.get("content")
+                                instructions_path = try_path
+                                break
+
+            return web.json_response({
+                "content": file_info.get("content", ""),
+                "file_path": file_info.get("file_path", ""),
+                "last_modified_by": file_info.get("last_modified_by"),
+                "last_modified_at": file_info.get("last_modified_at"),
+                "instructions": instructions_content,
+                "instructions_path": instructions_path,
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching automation content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class DashboardsReposView(HomeAssistantView):
+    """API to list dashboard repositories from the Dashboards organization or user."""
+    url = "/api/yidstore/dashboards"
+    name = "api:yidstore:dashboards"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Try org first, fall back to user repos if org doesn't exist
+            repos = await client.get_org_repos(DASHBOARDS_ORG)
+            if not repos:
+                repos = await client.get_user_repos(DASHBOARDS_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", DASHBOARDS_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching dashboard repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class DashboardsFilesView(HomeAssistantView):
+    """API to list YAML files in a dashboards repository."""
+    url = "/api/yidstore/dashboards/{owner}/{repo}/files"
+    name = "api:yidstore:dashboards:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    lower_name = name.lower()
+                    if lower_name.endswith(('.yaml', '.yml', '.md', '.html', '.htm')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching dashboard files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class DashboardsContentView(HomeAssistantView):
+    """API to get content of a dashboard YAML file with linked instructions."""
+    url = "/api/yidstore/dashboards/{owner}/{repo}/content"
+    name = "api:yidstore:dashboards:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            file_path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            if not file_path:
+                return web.json_response({"error": "Missing path parameter"}, status=400)
+
+            file_info = await client.get_file_info_with_history(owner, repo, file_path, branch)
+
+            if file_info is None:
+                return web.json_response({"error": "File not found"}, status=404)
+
+            # Try to find linked instructions file
+            base_path = file_path.rsplit('.', 1)[0] if '.' in file_path else file_path
+            base_name = base_path.rsplit('/', 1)[-1] if '/' in base_path else base_path
+            dir_path = base_path.rsplit('/', 1)[0] if '/' in base_path else ""
+            instructions_content = None
+            instructions_path = None
+
+            # First try exact match
+            for ext in ['.md', '.html', '.htm']:
+                try_path = base_path + ext
+                instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                if instr_info and instr_info.get("content"):
+                    instructions_content = instr_info.get("content")
+                    instructions_path = try_path
+                    break
+
+            # If no exact match, try case-insensitive search in the directory
+            if not instructions_content:
+                dir_entries = await client.list_dir(owner, repo, dir_path, branch)
+                base_name_lower = base_name.lower()
+                for entry in dir_entries:
+                    if entry.get("type") != "file":
+                        continue
+                    entry_name = entry.get("name", "")
+                    entry_lower = entry_name.lower()
+                    # Check if this file starts with the base name (case-insensitive) and has instruction extension
+                    if entry_lower.endswith(('.md', '.html', '.htm')):
+                        entry_base = entry_lower.rsplit('.', 1)[0]
+                        # Match if base names are similar (exact match or starts with)
+                        if entry_base == base_name_lower or entry_base.startswith(base_name_lower) or base_name_lower.startswith(entry_base):
+                            try_path = f"{dir_path}/{entry_name}" if dir_path else entry_name
+                            instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                            if instr_info and instr_info.get("content"):
+                                instructions_content = instr_info.get("content")
+                                instructions_path = try_path
+                                break
+
+            return web.json_response({
+                "content": file_info.get("content", ""),
+                "file_path": file_info.get("file_path", ""),
+                "last_modified_by": file_info.get("last_modified_by"),
+                "last_modified_at": file_info.get("last_modified_at"),
+                "instructions": instructions_content,
+                "instructions_path": instructions_path,
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching dashboard content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AddAutomationView(HomeAssistantView):
+    """API to add an automation from YAML."""
+    url = "/api/yidstore/add_automation"
+    name = "api:yidstore:add_automation"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            data = await request.json()
+            yaml_content = data.get("yaml", "")
+            name = data.get("name", "New Automation")
+
+            if not yaml_content:
+                return web.json_response({"error": "No YAML content provided"}, status=400)
+
+            import yaml
+            import uuid
+
+            # Parse YAML
+            try:
+                automation_config = yaml.safe_load(yaml_content)
+            except yaml.YAMLError as e:
+                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
+
+            # Generate unique ID if not present
+            if "id" not in automation_config:
+                automation_config["id"] = str(uuid.uuid4()).replace("-", "")[:12]
+
+            # Set alias if not present
+            if "alias" not in automation_config:
+                automation_config["alias"] = name
+
+            # Call HA service to create automation
+            await hass.services.async_call(
+                "automation",
+                "reload",
+                {},
+                blocking=True
+            )
+
+            # Write to automations.yaml
+            automations_path = Path(hass.config.path("automations.yaml"))
+            existing = []
+            if automations_path.exists():
+                content = automations_path.read_text()
+                if content.strip():
+                    try:
+                        existing = yaml.safe_load(content) or []
+                        if not isinstance(existing, list):
+                            existing = [existing]
+                    except:
+                        existing = []
+
+            existing.append(automation_config)
+
+            with open(automations_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+
+            # Reload automations
+            await hass.services.async_call(
+                "automation",
+                "reload",
+                {},
+                blocking=True
+            )
+
+            return web.json_response({"success": True, "id": automation_config["id"]})
+        except Exception as e:
+            _LOGGER.error("Error adding automation: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AddDashboardView(HomeAssistantView):
+    """API to add a dashboard from YAML."""
+    url = "/api/yidstore/add_dashboard"
+    name = "api:yidstore:add_dashboard"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            data = await request.json()
+            yaml_content = data.get("yaml", "")
+            name = data.get("name", "New Dashboard")
+            slug = data.get("slug", "custom-dashboard")
+
+            if not yaml_content:
+                return web.json_response({"error": "No YAML content provided"}, status=400)
+
+            import yaml
+
+            # Parse YAML
+            try:
+                dashboard_config = yaml.safe_load(yaml_content)
+            except yaml.YAMLError as e:
+                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
+
+            # Create lovelace dashboard storage file
+            storage_path = Path(hass.config.path(f".storage/lovelace.lovelace_{slug}"))
+
+            # Create storage entry
+            storage_data = {
+                "version": 1,
+                "minor_version": 1,
+                "key": f"lovelace.lovelace_{slug}",
+                "data": {"config": dashboard_config}
+            }
+
+            import json
+            with open(storage_path, "w") as f:
+                json.dump(storage_data, f, indent=2)
+
+            # Register dashboard in lovelace_dashboards storage
+            dashboards_storage_path = Path(hass.config.path(".storage/lovelace_dashboards"))
+            dashboards_data = {"version": 1, "minor_version": 1, "key": "lovelace_dashboards", "data": {"items": []}}
+
+            if dashboards_storage_path.exists():
+                with open(dashboards_storage_path, "r") as f:
+                    dashboards_data = json.load(f)
+
+            # Check if dashboard already exists
+            items = dashboards_data.get("data", {}).get("items", [])
+            existing = next((i for i in items if i.get("url_path") == slug), None)
+
+            if not existing:
+                items.append({
+                    "id": slug,
+                    "url_path": slug,
+                    "title": name,
+                    "icon": "mdi:view-dashboard",
+                    "show_in_sidebar": True,
+                    "require_admin": False,
+                    "mode": "storage"
+                })
+                dashboards_data["data"]["items"] = items
+
+                with open(dashboards_storage_path, "w") as f:
+                    json.dump(dashboards_data, f, indent=2)
+
+            return web.json_response({"success": True, "slug": slug, "message": "Dashboard created. Please restart Home Assistant to see it in the sidebar."})
+        except Exception as e:
+            _LOGGER.error("Error adding dashboard: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class HelpersReposView(HomeAssistantView):
+    """API to list helper repositories from the Helpers organization."""
+    url = "/api/yidstore/helpers"
+    name = "api:yidstore:helpers"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Try org first, fall back to user repos if org doesn't exist
+            repos = await client.get_org_repos(HELPERS_ORG)
+            if not repos:
+                repos = await client.get_user_repos(HELPERS_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", HELPERS_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching helper repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class HelpersFilesView(HomeAssistantView):
+    """API to list YAML files in a helpers repository."""
+    url = "/api/yidstore/helpers/{owner}/{repo}/files"
+    name = "api:yidstore:helpers:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    lower_name = name.lower()
+                    if lower_name.endswith(('.yaml', '.yml', '.md', '.html', '.htm')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching helper files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class HelpersContentView(HomeAssistantView):
+    """API to get content of a helper YAML file with linked instructions."""
+    url = "/api/yidstore/helpers/{owner}/{repo}/content"
+    name = "api:yidstore:helpers:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            file_path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            if not file_path:
+                return web.json_response({"error": "Missing path parameter"}, status=400)
+
+            file_info = await client.get_file_info_with_history(owner, repo, file_path, branch)
+
+            if file_info is None:
+                return web.json_response({"error": "File not found"}, status=404)
+
+            # Try to find linked instructions file
+            base_path = file_path.rsplit('.', 1)[0] if '.' in file_path else file_path
+            base_name = base_path.rsplit('/', 1)[-1] if '/' in base_path else base_path
+            dir_path = base_path.rsplit('/', 1)[0] if '/' in base_path else ""
+            instructions_content = None
+            instructions_path = None
+
+            # First try exact match
+            for ext in ['.md', '.html', '.htm']:
+                try_path = base_path + ext
+                instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                if instr_info and instr_info.get("content"):
+                    instructions_content = instr_info.get("content")
+                    instructions_path = try_path
+                    break
+
+            # If no exact match, try case-insensitive search
+            if not instructions_content:
+                dir_entries = await client.list_dir(owner, repo, dir_path, branch)
+                base_name_lower = base_name.lower()
+                for entry in dir_entries:
+                    if entry.get("type") != "file":
+                        continue
+                    entry_name = entry.get("name", "")
+                    entry_lower = entry_name.lower()
+                    if entry_lower.endswith(('.md', '.html', '.htm')):
+                        entry_base = entry_lower.rsplit('.', 1)[0]
+                        if entry_base == base_name_lower or entry_base.startswith(base_name_lower) or base_name_lower.startswith(entry_base):
+                            try_path = f"{dir_path}/{entry_name}" if dir_path else entry_name
+                            instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                            if instr_info and instr_info.get("content"):
+                                instructions_content = instr_info.get("content")
+                                instructions_path = try_path
+                                break
+
+            return web.json_response({
+                "content": file_info.get("content", ""),
+                "file_path": file_info.get("file_path", ""),
+                "last_modified_by": file_info.get("last_modified_by"),
+                "last_modified_at": file_info.get("last_modified_at"),
+                "instructions": instructions_content,
+                "instructions_path": instructions_path,
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching helper content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AddHelperView(HomeAssistantView):
+    """API to add a helper from YAML."""
+    url = "/api/yidstore/add_helper"
+    name = "api:yidstore:add_helper"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            data = await request.json()
+            yaml_content = data.get("yaml", "")
+            helper_type = data.get("type", "")  # input_boolean, input_number, input_text, etc.
+            name = data.get("name", "New Helper")
+
+            if not yaml_content:
+                return web.json_response({"error": "No YAML content provided"}, status=400)
+
+            import yaml
+
+            # Parse YAML
+            try:
+                helper_config = yaml.safe_load(yaml_content)
+            except yaml.YAMLError as e:
+                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
+
+            # Detect helper type from YAML if not specified
+            if not helper_type:
+                if isinstance(helper_config, dict):
+                    for key in ["input_boolean", "input_number", "input_text", "input_select", "input_datetime", "input_button", "counter", "timer", "schedule"]:
+                        if key in helper_config:
+                            helper_type = key
+                            helper_config = helper_config[key]
+                            break
+
+            if not helper_type:
+                return web.json_response({"error": "Could not determine helper type"}, status=400)
+
+            # Create helper via HA service
+            if isinstance(helper_config, dict):
+                for helper_id, config in helper_config.items():
+                    if not isinstance(config, dict):
+                        config = {}
+
+                    config["name"] = config.get("name", helper_id.replace("_", " ").title())
+
+                    try:
+                        await hass.services.async_call(
+                            helper_type,
+                            "create",
+                            config,
+                            blocking=True
+                        )
+                    except Exception as e:
+                        _LOGGER.warning("Could not create helper via service, trying storage: %s", e)
+                        # Fall back to writing to storage
+                        return await self._create_via_storage(hass, helper_type, helper_id, config)
+
+            return web.json_response({"success": True, "type": helper_type})
+        except Exception as e:
+            _LOGGER.error("Error adding helper: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _create_via_storage(self, hass, helper_type: str, helper_id: str, config: dict) -> web.Response:
+        """Create helper via storage file when service is not available."""
+        import json
+        from pathlib import Path
+
+        storage_key = f"core.config_entries" if helper_type in ["counter", "timer"] else f"input_{helper_type.replace('input_', '')}"
+        storage_path = Path(hass.config.path(f".storage/{storage_key}"))
+
+        try:
+            storage_data = {"version": 1, "data": {}}
+            if storage_path.exists():
+                with open(storage_path, "r") as f:
+                    storage_data = json.load(f)
+
+            # Add new helper
+            items = storage_data.get("data", {}).get("items", [])
+            import uuid
+            new_item = {
+                "id": str(uuid.uuid4()),
+                "name": config.get("name", helper_id),
+                **config
+            }
+            items.append(new_item)
+            storage_data["data"]["items"] = items
+
+            with open(storage_path, "w") as f:
+                json.dump(storage_data, f, indent=2)
+
+            return web.json_response({"success": True, "type": helper_type, "message": "Helper created. Please restart Home Assistant."})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class ListHelpersView(HomeAssistantView):
+    """API to list existing helpers in Home Assistant."""
+    url = "/api/yidstore/helpers/list"
+    name = "api:yidstore:helpers:list"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            helpers = []
+
+            # Get all helper domains
+            helper_domains = ["input_boolean", "input_number", "input_text", "input_select", "input_datetime", "input_button", "counter", "timer", "schedule"]
+
+            for domain in helper_domains:
+                entities = hass.states.async_entity_ids(domain)
+                for entity_id in entities:
+                    state = hass.states.get(entity_id)
+                    if state:
+                        helpers.append({
+                            "entity_id": entity_id,
+                            "type": domain,
+                            "name": state.attributes.get("friendly_name", entity_id),
+                            "state": state.state,
+                        })
+
+            return web.json_response(helpers)
+        except Exception as e:
+            _LOGGER.error("Error listing helpers: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AudioReposView(HomeAssistantView):
+    """API to list audio repositories from the Audio organization."""
+    url = "/api/yidstore/audio"
+    name = "api:yidstore:audio"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Try org first, fall back to user repos
+            repos = await client.get_org_repos(AUDIO_ORG)
+            if not repos:
+                repos = await client.get_user_repos(AUDIO_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", AUDIO_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching audio repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AudioFilesView(HomeAssistantView):
+    """API to list files in an audio repository."""
+    url = "/api/yidstore/audio/{owner}/{repo}/files"
+    name = "api:yidstore:audio:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    lower_name = name.lower()
+                    # Include audio files and documentation
+                    if lower_name.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.md', '.html', '.htm', '.yaml', '.yml')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching audio files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class AudioContentView(HomeAssistantView):
+    """API to get content/info of an audio repo for installation."""
+    url = "/api/yidstore/audio/{owner}/{repo}/content"
+    name = "api:yidstore:audio:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            branch = request.query.get("branch", "main")
+
+            # Get repo info
+            try:
+                repo_info = await client.get_repo(owner, repo)
+            except:
+                repo_info = {}
+
+            # List all audio files in the repo
+            audio_files = []
+            entries = await client.list_dir_recursive(owner, repo, "", branch)
+            for entry in entries:
+                if entry.get("type") == "file":
+                    name = entry.get("name", "").lower()
+                    if name.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac')):
+                        audio_files.append(entry.get("path", entry.get("name", "")))
+
+            # Check if already installed
+            www_path = Path(hass.config.path("www", "audio", owner, repo))
+            media_path = Path(hass.config.path("media", "audio", owner, repo))
+            is_installed = www_path.exists() or media_path.exists()
+            install_location = "www" if www_path.exists() else ("media" if media_path.exists() else None)
+
+            # Get local audio files if installed
+            local_files = []
+            if www_path.exists():
+                for f in www_path.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in ('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'):
+                        rel = f.relative_to(www_path)
+                        # Use forward slashes for URLs (Windows uses backslashes)
+                        rel_url = str(rel).replace("\\", "/")
+                        local_files.append({
+                            "name": f.name,
+                            "path": rel_url,
+                            "url": f"/local/audio/{owner}/{repo}/{rel_url}"
+                        })
+            elif media_path.exists():
+                for f in media_path.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in ('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'):
+                        rel = f.relative_to(media_path)
+                        rel_url = str(rel).replace("\\", "/")
+                        local_files.append({
+                            "name": f.name,
+                            "path": rel_url,
+                            "url": f"/media/audio/{owner}/{repo}/{rel_url}"
+                        })
+
+            # Get README if available
+            readme = await client.get_readme(owner, repo)
+
+            return web.json_response({
+                "owner": owner,
+                "repo": repo,
+                "description": repo_info.get("description", ""),
+                "default_branch": repo_info.get("default_branch", branch),
+                "audio_files": audio_files,
+                "is_installed": is_installed,
+                "install_location": install_location,
+                "local_files": local_files,
+                "readme": readme,
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching audio content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class BlueprintsReposView(HomeAssistantView):
+    """API to list blueprint repositories from the Blueprints organization."""
+    url = "/api/yidstore/blueprints"
+    name = "api:yidstore:blueprints"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            # Try org first, fall back to user repos
+            repos = await client.get_org_repos(BLUEPRINTS_ORG)
+            if not repos:
+                repos = await client.get_user_repos(BLUEPRINTS_ORG)
+
+            result = []
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+                if repo.get("archived", False):
+                    continue
+
+                owner = repo.get("owner", {}).get("login", BLUEPRINTS_ORG)
+                repo_name = repo.get("name", "")
+                description = repo.get("description", "")
+                updated_at = repo.get("updated_at", "")
+                default_branch = repo.get("default_branch", "main")
+
+                result.append({
+                    "name": f"{owner}/{repo_name}",
+                    "owner": owner,
+                    "repo_name": repo_name,
+                    "description": description,
+                    "updated_at": updated_at,
+                    "default_branch": default_branch,
+                })
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching blueprint repos: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class BlueprintsFilesView(HomeAssistantView):
+    """API to list YAML files in a blueprints repository."""
+    url = "/api/yidstore/blueprints/{owner}/{repo}/files"
+    name = "api:yidstore:blueprints:files"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            entries = await client.list_dir_recursive(owner, repo, path, branch)
+
+            result = []
+            for entry in entries:
+                entry_type = entry.get("type", "")
+                name = entry.get("name", "")
+
+                if entry_type == "dir":
+                    result.append(entry)
+                elif entry_type == "file":
+                    lower_name = name.lower()
+                    if lower_name.endswith(('.yaml', '.yml', '.md', '.html', '.htm')):
+                        result.append(entry)
+
+            return web.json_response(result)
+        except Exception as e:
+            _LOGGER.error("Error fetching blueprint files for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)
+
+
+class BlueprintsContentView(HomeAssistantView):
+    """API to get content of a blueprint YAML file with linked instructions."""
+    url = "/api/yidstore/blueprints/{owner}/{repo}/content"
+    name = "api:yidstore:blueprints:content"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+
+            file_path = request.query.get("path", "")
+            branch = request.query.get("branch", "main")
+
+            if not file_path:
+                return web.json_response({"error": "Missing path parameter"}, status=400)
+
+            file_info = await client.get_file_info_with_history(owner, repo, file_path, branch)
+
+            if file_info is None:
+                return web.json_response({"error": "File not found"}, status=404)
+
+            # Try to find linked instructions file
+            base_path = file_path.rsplit('.', 1)[0] if '.' in file_path else file_path
+            base_name = base_path.rsplit('/', 1)[-1] if '/' in base_path else base_path
+            dir_path = base_path.rsplit('/', 1)[0] if '/' in base_path else ""
+            instructions_content = None
+            instructions_path = None
+
+            for ext in ['.md', '.html', '.htm']:
+                try_path = base_path + ext
+                instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                if instr_info and instr_info.get("content"):
+                    instructions_content = instr_info.get("content")
+                    instructions_path = try_path
+                    break
+
+            if not instructions_content:
+                dir_entries = await client.list_dir(owner, repo, dir_path, branch)
+                base_name_lower = base_name.lower()
+                for entry in dir_entries:
+                    if entry.get("type") != "file":
+                        continue
+                    entry_name = entry.get("name", "")
+                    entry_lower = entry_name.lower()
+                    if entry_lower.endswith(('.md', '.html', '.htm')):
+                        entry_base = entry_lower.rsplit('.', 1)[0]
+                        if entry_base == base_name_lower or entry_base.startswith(base_name_lower) or base_name_lower.startswith(entry_base):
+                            try_path = f"{dir_path}/{entry_name}" if dir_path else entry_name
+                            instr_info = await client.get_file_info_with_history(owner, repo, try_path, branch)
+                            if instr_info and instr_info.get("content"):
+                                instructions_content = instr_info.get("content")
+                                instructions_path = try_path
+                                break
+
+            return web.json_response({
+                "content": file_info.get("content", ""),
+                "file_path": file_info.get("file_path", ""),
+                "last_modified_by": file_info.get("last_modified_by"),
+                "last_modified_at": file_info.get("last_modified_at"),
+                "instructions": instructions_content,
+                "instructions_path": instructions_path,
+            })
+        except Exception as e:
+            _LOGGER.error("Error fetching blueprint content for %s/%s: %s", owner, repo, e)
+            return web.json_response({"error": str(e)}, status=500)

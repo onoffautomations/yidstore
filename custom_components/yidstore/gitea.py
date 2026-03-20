@@ -320,3 +320,89 @@ class GiteaClient:
                 if name and not name.startswith("."):
                     domains.append(name)
         return domains
+
+    async def get_file_commits(self, owner: str, repo: str, file_path: str, branch: str = "main", limit: int = 1) -> list[dict]:
+        """Fetch commit history for a specific file."""
+        sess = async_get_clientsession(self.hass)
+        p = file_path.strip("/")
+        url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/commits?path={p}&sha={branch}&limit={limit}"
+        try:
+            async with sess.get(url, headers=self._headers(), timeout=20) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch file commits for %s/%s/%s: %s", owner, repo, file_path, e)
+        return []
+
+    async def get_file_info_with_history(self, owner: str, repo: str, file_path: str, branch: str = "main") -> dict | None:
+        """Get file content and last commit info (modifier, date)."""
+        # Get file content
+        content = await self.get_file_content(owner, repo, file_path, branch)
+        if content is None:
+            return None
+
+        # Get last commit for this file
+        commits = await self.get_file_commits(owner, repo, file_path, branch, limit=1)
+
+        last_modified_by = None
+        last_modified_at = None
+        commit_message = None
+
+        if commits and len(commits) > 0:
+            commit = commits[0]
+            committer = commit.get("committer") or commit.get("author") or {}
+            last_modified_by = committer.get("login") or committer.get("name") or committer.get("username")
+            # Try commit date first, then author date
+            commit_info = commit.get("commit", {})
+            committer_info = commit_info.get("committer") or commit_info.get("author") or {}
+            last_modified_at = committer_info.get("date") or commit.get("created")
+            commit_message = commit_info.get("message", "")
+
+        return {
+            "content": content,
+            "last_modified_by": last_modified_by,
+            "last_modified_at": last_modified_at,
+            "commit_message": commit_message,
+            "file_path": file_path,
+        }
+
+    async def list_dir_recursive(self, owner: str, repo: str, path: str = "", branch: str = "main") -> list[dict]:
+        """List directory contents with file info including last modified data."""
+        entries = await self.list_dir(owner, repo, path, branch)
+        result = []
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            name = entry.get("name", "")
+            entry_type = entry.get("type", "")
+            entry_path = entry.get("path", "")
+
+            # Skip hidden files/directories
+            if name.startswith("."):
+                continue
+
+            item = {
+                "name": name,
+                "path": entry_path,
+                "type": entry_type,
+                "size": entry.get("size", 0),
+            }
+
+            # For files, get last commit info
+            if entry_type == "file":
+                # Only get commit info for documentation and YAML files
+                if name.lower().endswith(('.md', '.html', '.htm', '.txt', '.yaml', '.yml')):
+                    commits = await self.get_file_commits(owner, repo, entry_path, branch, limit=1)
+                    if commits and len(commits) > 0:
+                        commit = commits[0]
+                        committer = commit.get("committer") or commit.get("author") or {}
+                        item["last_modified_by"] = committer.get("login") or committer.get("name")
+                        commit_info = commit.get("commit", {})
+                        committer_info = commit_info.get("committer") or commit_info.get("author") or {}
+                        item["last_modified_at"] = committer_info.get("date") or commit.get("created")
+
+            result.append(item)
+
+        return result
