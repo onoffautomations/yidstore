@@ -2132,7 +2132,7 @@
         const THEME_KEY = 'yidstore_theme';
         const CACHE_KEY = 'yidstore_cache';
         const AUDIO_LOCATION_KEY = 'yidstore_audio_location';
-        const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+        let CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours by default
         const LIVE_SYNC_INTERVAL = 15 * 1000; // lightweight status sync
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
@@ -2399,22 +2399,24 @@
             const t = (theme === 'light') ? 'light' : 'dark';
             document.documentElement.setAttribute('data-theme', t);
 
-            // Swap logo + icon assets (served from /yidstore_static/)
+            // Swap logo + icon assets - uses brand API which checks local brand folder first, then public HA brands
             const logoFile = (t === 'light') ? 'logo.png' : 'dark_logo.png';
             const iconFile = (t === 'light') ? 'icon.png' : 'dark_icon.png';
+            const brandLogoUrl = `/api/yidstore/brands/yidstore/${logoFile}`;
+            const brandIconUrl = `/api/yidstore/brands/yidstore/${iconFile}`;
 
             const favicon = document.getElementById('appFavicon');
-            if (favicon) favicon.href = iconFile;
+            if (favicon) favicon.href = brandIconUrl;
 
             const apple = document.getElementById('appAppleTouch');
-            if (apple) apple.href = iconFile;
+            if (apple) apple.href = brandIconUrl;
 
             const themeColor = document.getElementById('appThemeColor');
             if (themeColor) themeColor.content = (t === 'light') ? '#f6f7fb' : '#0f172a';
 
             const iconImg = document.getElementById('headerIconImg');
             if (iconImg) {
-                iconImg.src = iconFile;
+                iconImg.src = brandIconUrl;
                 iconImg.style.display = 'inline-block';
             }
 
@@ -2426,10 +2428,11 @@
                     if (logoFallback) logoFallback.style.display = 'none';
                 };
                 logoImg.onerror = () => {
+                    // Brand not found (neither local nor public), show fallback icon
                     logoImg.style.display = 'none';
                     if (logoFallback) logoFallback.style.display = 'inline-flex';
                 };
-                logoImg.src = logoFile;
+                logoImg.src = brandLogoUrl;
             }
 
             updateThemeSwitchUI(t);
@@ -2494,12 +2497,19 @@
 
             const candidates = [];
 
-            // 0) If fallback URL is a GitHub raw URL, generate theme-aware variants
-            if (fallbackUrl && fallbackUrl.includes('raw.githubusercontent.com')) {
-                const baseUrl = fallbackUrl.replace(/\/[^\/]+\.png$/, '/');
+            // 1) FIRST: Try integration's own brand folder from repo (GitHub or Gitea)
+            // Check if fallbackUrl is a GitHub raw URL or Gitea raw URL
+            const isGitHubRaw = fallbackUrl && fallbackUrl.includes('raw.githubusercontent.com');
+            const isGiteaRaw = fallbackUrl && fallbackUrl.includes('/raw/branch/');
+
+            if (isGitHubRaw || isGiteaRaw) {
+                const baseUrl = fallbackUrl.replace(/\/[^\/]+\.(png|svg)$/, '/');
                 if (kind === 'logo') {
                     candidates.push(baseUrl + logoPrimary);
                     candidates.push(baseUrl + logoSecondary);
+                    // Also try icon as fallback for logo
+                    candidates.push(baseUrl + iconPrimary);
+                    candidates.push(baseUrl + iconSecondary);
                 } else {
                     candidates.push(baseUrl + iconPrimary);
                     candidates.push(baseUrl + iconSecondary);
@@ -2510,24 +2520,22 @@
                     candidates.push(altBaseUrl + 'icon.png');
                 }
             } else if (fallbackUrl) {
-                // Non-GitHub fallback URL
+                // Other fallback URL (non-GitHub/Gitea)
                 candidates.push(fallbackUrl);
             }
 
+            // 2) SECOND: Fall back to HA brands (via local API which checks local then public)
             if (kind === 'logo') {
-                // 1) Brand logo files
                 candidates.push(
                     haBrandUrl(domain, logoPrimary),
                     haBrandUrl(domain, logoSecondary)
                 );
-
-                // 2) Brand icon files (fallback for logo)
+                // Icon files as fallback for logo
                 candidates.push(
                     haBrandUrl(domain, iconPrimary),
                     haBrandUrl(domain, iconSecondary)
                 );
             } else {
-                // Icon kind
                 candidates.push(
                     haBrandUrl(domain, iconPrimary),
                     haBrandUrl(domain, iconSecondary)
@@ -2546,6 +2554,7 @@
         }
 
         function brandImgLoaded(img) {
+            img.dataset.brandResolved = img.getAttribute('src') || '';
             // If there is a fallback element right after the image, hide it
             const fb = img.nextElementSibling;
             if (fb && fb.classList && fb.classList.contains('card-icon-fallback')) {
@@ -2584,9 +2593,23 @@
                 if (candidates.length === 0) return;
 
                 img.dataset.candidates = candidates.join('|');
-
                 const desired = candidates[0];
-                if ((img.getAttribute('src') || '') !== desired) {
+
+                const current = img.getAttribute('src') || '';
+                if (current === desired) {
+                    return;
+                }
+
+                const resolved = img.dataset.brandResolved || '';
+                if (resolved === desired) {
+                    if (current !== resolved) {
+                        img.style.display = '';
+                        img.src = resolved;
+                    }
+                    return;
+                }
+
+                if (current !== desired) {
                     img.style.display = '';
                     img.src = desired;
                 }
@@ -2635,6 +2658,15 @@
             let s = n.startsWith('x-') ? n.substring(2) : n;
             s = s.replace(/[_-]/g, ' ');
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+
+        function getRepoDisplayName(itemOrName, fallbackRepoName = '') {
+            if (itemOrName && typeof itemOrName === 'object') {
+                const explicit = (itemOrName.display_name || itemOrName.name || '').toString().trim();
+                if (explicit && explicit !== `${itemOrName.owner}/${itemOrName.repo_name}`) return explicit;
+                return formatName((itemOrName.repo_name || fallbackRepoName || '').toString());
+            }
+            return formatName((itemOrName || fallbackRepoName || '').toString());
         }
 
         async function load(forceRefresh = false, showLoader = true) {
@@ -2769,7 +2801,11 @@
             // First filter by everything except author (for populating author dropdown)
             let preAuthorFiltered = items.filter(i => {
                 if (!showHidden && i.is_hidden) return false;
-                const matchQ = i.repo_name.toLowerCase().includes(q) || i.description.toLowerCase().includes(q);
+                const displayName = getRepoDisplayName(i).toLowerCase();
+                const matchQ =
+                    i.repo_name.toLowerCase().includes(q) ||
+                    displayName.includes(q) ||
+                    i.description.toLowerCase().includes(q);
                 const matchFilter =
                     filterVal === 'all' ||
                     (['integration', 'lovelace', 'blueprints', 'audio'].includes(filterVal) && i.type === filterVal) ||
@@ -2789,23 +2825,23 @@
             });
 
             filtered.sort((a, b) => {
-                if (s === 'name') return a.repo_name.localeCompare(b.repo_name);
+                if (s === 'name') return getRepoDisplayName(a).localeCompare(getRepoDisplayName(b));
                 if (s === 'new') return new Date(b.updated_at) - new Date(a.updated_at);
                 if (s === 'upd') {
                     if (a.update_available && !b.update_available) return -1;
                     if (!a.update_available && b.update_available) return 1;
-                    return a.repo_name.localeCompare(b.repo_name);
+                    return getRepoDisplayName(a).localeCompare(getRepoDisplayName(b));
                 }
                 if (s === 'type') {
                     const typeOrder = { 'integration': 0, 'lovelace': 1, 'blueprints': 2, 'audio': 3 };
                     const diff = (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
-                    return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
+                    return diff !== 0 ? diff : getRepoDisplayName(a).localeCompare(getRepoDisplayName(b));
                 }
                 if (s === 'author') {
                     const authorA = (a.owner_display_name || a.owner).toLowerCase();
                     const authorB = (b.owner_display_name || b.owner).toLowerCase();
                     const diff = authorA.localeCompare(authorB);
-                    return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
+                    return diff !== 0 ? diff : getRepoDisplayName(a).localeCompare(getRepoDisplayName(b));
                 }
                 return 0;
             });
@@ -2835,7 +2871,7 @@
             const typeClass = i.type === 'lovelace'
                 ? 'tag-card'
                 : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
-            const displayTitle = formatName(i.repo_name);
+            const displayTitle = getRepoDisplayName(i);
             const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
             const typeLabel = i.type === 'lovelace'
                 ? 'Card'
@@ -2924,7 +2960,7 @@
             const typeClass = i.type === 'lovelace'
                 ? 'tag-card'
                 : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
-            const displayTitle = formatName(i.repo_name);
+            const displayTitle = getRepoDisplayName(i);
             const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
 
             let iconHtml;
@@ -2933,35 +2969,25 @@
                        <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: #a855f7;"></i>
                    </div>`;
             } else {
-                const iconUrl = i.icon_url;
-                if (iconUrl) {
-                    iconHtml = `<img src="${iconUrl}" alt="" class="list-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                const domain = getDomainFromItem(i);
+                const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
+                const primaryIcon = candidates[0] || '';
+                if (primaryIcon) {
+                    const dataCandidates = candidates.join('|');
+                    const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
+                    iconHtml = `<img src="${primaryIcon}" alt="" class="list-icon"
+                         data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
+                         data-candidates="${dataCandidates}"
+                         onload="brandImgLoaded(this)"
+                         onerror="brandImgError(this)"
+                         style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
                        <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
                            <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
                        </div>`;
                 } else {
-                    // Do brands lookup for list items too?
-                    // The current list implementation logic was simpler: check i.icon_url.
-                    // We should update it to use brands as well for consistency.
-                    const domain = getDomainFromItem(i);
-                    const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
-                    const primaryIcon = candidates[0] || '';
-                    if (primaryIcon) {
-                        const dataCandidates = candidates.join('|');
-                        iconHtml = `<img src="${primaryIcon}" alt="" class="list-icon"
-                             data-brand-domain="${domain}" data-brand-kind="icon"
-                             data-candidates="${dataCandidates}"
-                             onload="brandImgLoaded(this)"
-                             onerror="brandImgError(this)"
-                             style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                           <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
-                               <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                           </div>`;
-                    } else {
-                        iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); display: flex; align-items: center; justify-content: center;">
-                               <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                           </div>`;
-                    }
+                    iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); display: flex; align-items: center; justify-content: center;">
+                           <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
+                       </div>`;
                 }
             }
 
@@ -3156,15 +3182,17 @@
                 const [o, r] = id.split('/');
                 const item = items.find(x => x.owner === o && x.repo_name === r);
                 if (item) {
-                    await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
-                    item.is_installed = true;
-                    item.install_source = 'yidstore';
-                    item.update_available = false;
-                    installedCount++;
-                    if (item.type === 'integration') {
-                        addToRestartSet(o, r);
-                    } else {
-                        hasCards = true;
+                    const success = await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
+                    if (success) {
+                        item.is_installed = true;
+                        item.install_source = 'yidstore';
+                        item.update_available = false;
+                        installedCount++;
+                        if (item.type === 'integration') {
+                            addToRestartSet(o, r);
+                        } else {
+                            hasCards = true;
+                        }
                     }
                 }
             }
@@ -3217,13 +3245,20 @@
                     body.source = 'github';
                     if (item.repo_url) body.repo_url = item.repo_url;
                 }
-                await fetch('/api/yidstore/install', {
+                const res = await fetch('/api/yidstore/install', {
                     method: 'POST',
                     body: JSON.stringify(body),
                     headers: { 'Content-Type': 'application/json' }
                 });
-            } catch (e) { }
-            refreshBrandImages();
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || data.success === false) {
+                    throw new Error(data.error || 'Install failed');
+                }
+                refreshBrandImages();
+                return true;
+            } catch (e) { 
+                return false;
+            }
         }
 
         async function openDet(o, r, e) {
@@ -3290,7 +3325,7 @@
                 const resp = await fetch(`/api/yidstore/readme/${o}/${r}${sourceParam}`);
                 let md = '';
                 if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
-                md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
+                md += resp.ok ? await resp.text() : `${getRepoDisplayName(item)} has no instructions available.`;
                 const logoMarkup = buildModalLogo(item);
                 const itemNeedsRestart = item.type === 'integration' && needsRestart(item.owner, item.repo_name);
                 const restartBadge = itemNeedsRestart ? '<span class="badge badge-restart" id="modalRestartBadge" style="margin-left: 0.5rem;">Restart Required</span>' : '<span id="modalRestartBadge" style="display:none;"></span>';
@@ -3299,7 +3334,7 @@
                         <div class="modal-top-row">
                             ${logoMarkup}
                             <div class="modal-top-text">
-                                <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
+                                <div class="modal-top-title">${getRepoDisplayName(item)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
                                 <div class="modal-top-author">by ${item.owner_display_name || item.owner}</div>
                             </div>
                         </div>
@@ -3308,7 +3343,7 @@
                 body.innerHTML = `${headerMarkup}${marked.parse(md)}`;
                 initModalLogo();
                 setupModalScroll();
-            } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
+            } catch { body.innerHTML = `${getRepoDisplayName(item || r, r)} has no instructions available.`; }
         }
 
         function buildModalLogo(item) {
@@ -5330,10 +5365,27 @@
             return div.innerHTML;
         }
 
-        initTheme();
-        updateAudioLocationToggleLabel();
-        loadRestartSet();
-        triggerAutoFullReload();
+        async function loadDashboardSettings() {
+            try {
+                const res = await fetch('/api/yidstore/settings');
+                if (!res.ok) return;
+                const data = await res.json();
+                const hours = Number(data.full_reload_hours);
+                if (Number.isFinite(hours) && hours >= 1) {
+                    CACHE_DURATION = hours * 60 * 60 * 1000;
+                }
+            } catch (e) {}
+        }
+
+        async function initializeDashboard() {
+            initTheme();
+            updateAudioLocationToggleLabel();
+            loadRestartSet();
+            await loadDashboardSettings();
+            triggerAutoFullReload();
+        }
+
+        initializeDashboard();
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
