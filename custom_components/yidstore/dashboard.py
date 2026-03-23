@@ -16,7 +16,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.components import frontend
 
-from .const import DOMAIN, CONF_SIDE_PANEL, SERVICE_INSTALL
+from .const import (
+    CONF_FULL_RELOAD_HOURS,
+    CONF_SIDE_PANEL,
+    DEFAULT_FULL_RELOAD_HOURS,
+    DOMAIN,
+    SERVICE_INSTALL,
+)
 from .config_flow import load_store_list
 from .installer import uninstall_package
 
@@ -55,6 +61,28 @@ async def _github_json(hass: HomeAssistant, url: str) -> dict | list | None:
             return await resp.json()
     except Exception:
         return None
+
+
+async def _get_github_repo_info(hass: HomeAssistant, owner: str, repo: str) -> dict:
+    info = await _github_json(hass, f"https://api.github.com/repos/{owner}/{repo}")
+    return info if isinstance(info, dict) else {}
+
+
+def _extract_github_display_name(line: str, match, repo: str) -> str | None:
+    trailing = (line[match.end():] or "").strip()
+    trailing = trailing.lstrip("-:*").strip()
+    if trailing.startswith(")") or trailing.startswith("]"):
+        trailing = trailing[1:].strip()
+    if trailing:
+        return trailing
+
+    link_text_match = re.search(r"\[([^\]]+)\]\(\s*(?:https?://)?github\.com/[^\)]+\)", line, re.IGNORECASE)
+    if link_text_match:
+        link_text = (link_text_match.group(1) or "").strip()
+        if link_text and "github.com/" not in link_text.lower():
+            return link_text
+
+    return None
 
 
 async def _resolve_github_integration_domain(hass: HomeAssistant, owner: str, repo: str) -> str | None:
@@ -112,6 +140,30 @@ def _github_brand_icon_url(owner: str, repo: str, domain: str | None, branch: st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/custom_components/{chosen_domain}/brand/icon.png"
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _is_hidden_store_org(owner: str | None) -> bool:
+    return (owner or "").strip().lower() in {org.lower() for org in HIDDEN_STORE_ORGS}
+
+
+def _brand_filename_candidates(filename: str) -> list[str]:
+    candidates = [filename]
+    alternates = {
+        "dark_icon.png": ["icon.png", "icon.svg"],
+        "icon.png": ["dark_icon.png", "icon.svg"],
+        "dark_logo.png": ["logo.png", "dark_icon.png", "icon.png", "logo.svg"],
+        "logo.png": ["dark_logo.png", "icon.png", "dark_icon.png", "logo.svg"],
+        "icon@2x.png": ["icon.png", "dark_icon@2x.png", "dark_icon.png"],
+        "dark_icon@2x.png": ["dark_icon.png", "icon@2x.png", "icon.png"],
+        "logo@2x.png": ["logo.png", "dark_logo@2x.png", "dark_logo.png", "icon.png"],
+        "dark_logo@2x.png": ["dark_logo.png", "logo@2x.png", "logo.png", "dark_icon.png"],
+        "logo.svg": ["logo.png", "icon.svg", "icon.png"],
+        "icon.svg": ["icon.png", "dark_icon.png"],
+    }
+    for alt in alternates.get(filename, []):
+        if alt not in candidates:
+            candidates.append(alt)
+    return candidates
 
 
 def _repo_slug(text: str) -> str:
@@ -214,24 +266,31 @@ async def _fetch_github_integrations_list(hass: HomeAssistant, client) -> list[d
             import re
             github_pattern = r'(?:https?://)?github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+)'
 
-            for match in re.finditer(github_pattern, content):
-                owner = match.group(1).strip()
-                repo = match.group(2).strip()
+            for raw_line in content.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
 
-                # Clean up repo name (remove .git suffix, trailing slashes, etc.)
-                repo = repo.rstrip('/').rstrip('.git')
-                if repo.endswith('.git'):
-                    repo = repo[:-4]
+                for match in re.finditer(github_pattern, line):
+                    owner = match.group(1).strip()
+                    repo = match.group(2).strip()
 
-                if owner and repo:
-                    result.append({
-                        "owner": owner,
-                        "repo": repo,
-                        "type": pkg_type,
-                        "source": "github",
-                        "url": f"https://github.com/{owner}/{repo}",
-                        "from_list": filename,
-                    })
+                    # Clean up repo name (remove .git suffix, trailing slashes, etc.)
+                    repo = repo.rstrip('/').rstrip('.git')
+                    if repo.endswith('.git'):
+                        repo = repo[:-4]
+
+                    if owner and repo:
+                        display_name = _extract_github_display_name(line, match, repo)
+                        result.append({
+                            "owner": owner,
+                            "repo": repo,
+                            "name": display_name or repo,
+                            "type": pkg_type,
+                            "source": "github",
+                            "url": f"https://github.com/{owner}/{repo}",
+                            "from_list": filename,
+                        })
 
         except Exception as e:
             _LOGGER.debug("Failed to fetch %s from Github-Integrations: %s", filename, e)
@@ -661,6 +720,7 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(OnOffStoreReadmeView(eid))
     hass.http.register_view(OnOffStoreReleasesView(eid))
     hass.http.register_view(OnOffStoreRefreshView(eid))
+    hass.http.register_view(OnOffStoreSettingsView(eid))
     hass.http.register_view(OnOffStoreAddCustomView(eid))
     hass.http.register_view(OnOffStoreListCustomView(eid))
     hass.http.register_view(OnOffStoreRemoveCustomView(eid))
@@ -767,7 +827,7 @@ class OnOffStoreReposView(HomeAssistantView):
                 if full_name in seen_repos: return
                 # Skip repos from orgs that have their own tabs (Documentation, Automations, Dashboards, Helpers)
                 owner = repo_obj.get("owner", {}).get("login", "")
-                if owner in HIDDEN_STORE_ORGS:
+                if _is_hidden_store_org(owner):
                     return
                 seen_repos.add(full_name)
                 tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state))
@@ -791,14 +851,14 @@ class OnOffStoreReposView(HomeAssistantView):
                     user_orgs = await client.get_user_orgs()
                     for org in user_orgs:
                         org_name = org.get("username") or org.get("name")
-                        if org_name and org_name not in HIDDEN_STORE_ORGS:
+                        if org_name and not _is_hidden_store_org(org_name):
                             orgs_to_fetch.add(org_name)
                     _LOGGER.debug("Fetching repos from %d organizations", len(orgs_to_fetch))
                 except Exception as e:
                     _LOGGER.debug("Failed to fetch user orgs: %s", e)
 
             # Remove hidden orgs from the fetch list
-            orgs_to_fetch = orgs_to_fetch - HIDDEN_STORE_ORGS
+            orgs_to_fetch = {org for org in orgs_to_fetch if not _is_hidden_store_org(org)}
 
             # Collect org members to fetch their repos too (when authenticated)
             users_from_orgs = set()
@@ -890,18 +950,30 @@ class OnOffStoreReposView(HomeAssistantView):
                 source = cr.get("source", "gitea")
                 if not owner or not repo:
                     continue
+                if _is_hidden_store_org(owner):
+                    continue
 
                 if not any(x["owner"].lower() == owner.lower() and x["repo_name"].lower() == repo.lower() for x in resp_data):
                     if source == "github":
                         repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
                         repo_url = cr.get("url")
+                        github_info = await _get_github_repo_info(hass, owner, repo)
+                        default_branch = github_info.get("default_branch") or "main"
+                        owner_obj = github_info.get("owner", {}) if isinstance(github_info.get("owner"), dict) else {}
+                        owner_display_name = (
+                            owner_obj.get("name")
+                            or owner_obj.get("login")
+                            or owner
+                        )
+                        display_name = (cr.get("name") or github_info.get("name") or repo).strip()
+                        description = (github_info.get("description") or "").strip()
                         # Best-effort domain resolution (repo_name != domain for many integrations)
                         domain = None
                         if repo_type == "integration":
                             domain = await _resolve_github_integration_domain(hass, owner, repo)
 
                         # Prefer integration-local brand icon in the repo.
-                        icon_url = _github_brand_icon_url(owner, repo, domain, "main")
+                        icon_url = _github_brand_icon_url(owner, repo, domain, default_branch)
 
                         # Determine installation status and source
                         tracked_pkg = coordinator.get_package_by_repo(owner, repo)
@@ -924,12 +996,13 @@ class OnOffStoreReposView(HomeAssistantView):
                             install_source = None
 
                         resp_data.append({
-                            "name": f"{owner}/{repo}",
+                            "name": display_name,
+                            "display_name": display_name,
                             "repo_name": repo,
                             "owner": owner,
-                            "owner_display_name": owner,
+                            "owner_display_name": owner_display_name,
                             "type": repo_type,
-                            "description": "",
+                            "description": description,
                             "updated_at": "",
                             "mode": "zipball",
                             "asset_name": None,
@@ -941,7 +1014,7 @@ class OnOffStoreReposView(HomeAssistantView):
                             "is_hidden": coordinator.is_hidden_repo(owner, repo),
                             "icon_url": icon_url,
                             "domain": domain,
-                            "default_branch": "main",
+                            "default_branch": default_branch,
                             "source": "github",
                             "repo_url": repo_url,
                         })
@@ -973,6 +1046,8 @@ class OnOffStoreReposView(HomeAssistantView):
 
         # Skip Github-Integrations repo (it's just a config repo for GitHub links)
         if owner.lower() == "onoffpublic" and rn.lower() == "github-integrations":
+            return None
+        if _is_hidden_store_org(owner):
             return None
 
         # Skip if MANUALLY hidden (unless we are showing hidden ones - logic will be in UI)
@@ -1371,6 +1446,39 @@ class OnOffStoreRefreshView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
+class OnOffStoreSettingsView(HomeAssistantView):
+    """Expose frontend settings for the dashboard."""
+    url = "/api/yidstore/settings"
+    name = "api:yidstore:settings"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            entry = hass.config_entries.async_get_entry(eid)
+            if entry is None:
+                return web.json_response({"error": "Config entry missing"}, status=503)
+
+            full_reload_hours = int(entry.data.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS))
+            return web.json_response({
+                "full_reload_hours": max(1, min(168, full_reload_hours)),
+            })
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+
 class OnOffStoreAddCustomView(HomeAssistantView):
     """API to add a custom repository."""
     url = "/api/yidstore/custom/add"
@@ -1680,13 +1788,19 @@ class LocalBrandsIconView(HomeAssistantView):
         # Security: sanitize domain name
         domain = domain.replace('..', '').replace('/', '').replace('\\', '')
 
-        # Try multiple locations in order of preference
-        locations = [
-            os.path.join(hass.config.path("custom_components", domain, "brand"), filename),
-            os.path.join(hass.config.path("custom_components", domain), filename),
-            # Legacy fallback (read-only) for older installs.
-            os.path.join(hass.config.path("www", "brands", domain), filename),
-        ]
+        # Try local integration branding first, with dark/light/logo/icon fallbacks,
+        # before falling back to official HA branding.
+        filenames_to_try = _brand_filename_candidates(filename)
+        locations = []
+        for candidate_name in filenames_to_try:
+            locations.extend(
+                [
+                    os.path.join(hass.config.path("custom_components", domain, "brand"), candidate_name),
+                    os.path.join(hass.config.path("custom_components", domain), candidate_name),
+                    # Legacy fallback (read-only) for older installs.
+                    os.path.join(hass.config.path("www", "brands", domain), candidate_name),
+                ]
+            )
 
         def _read_file(file_path: str) -> bytes | None:
             """Read file in executor."""

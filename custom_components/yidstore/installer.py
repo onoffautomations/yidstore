@@ -9,7 +9,7 @@ from pathlib import Path
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import AUDIO_VENDOR_FOLDER, LOVELACE_VENDOR_FOLDER
+from .const import AUDIO_VENDOR_FOLDER
 
 
 def _detect_single_top_folder(extract_dir: Path) -> Path:
@@ -148,17 +148,14 @@ def _install_lovelace_from_extracted(extracted_root: Path, ha_www_community: Pat
     import logging
     _LOGGER = logging.getLogger(__name__)
 
-    # Create destination: /config/www/community/onoff/<repo_name>
-    # This only affects the specific repo folder, not other repos in /onoff/
-    onoff_folder = ha_www_community / LOVELACE_VENDOR_FOLDER
-    dest = onoff_folder / repo_name
+    # Install cards HACS-style directly under /config/www/community/<repo_name>.
+    dest = ha_www_community / repo_name
 
     _LOGGER.info("Installing Lovelace card...")
-    _LOGGER.info("  Vendor folder: %s", onoff_folder)
     _LOGGER.info("  Repo destination: %s", dest)
 
-    # Ensure onoff vendor folder exists (won't delete it if it exists)
-    onoff_folder.mkdir(parents=True, exist_ok=True)
+    # Ensure the community folder exists before copying the repo in.
+    ha_www_community.mkdir(parents=True, exist_ok=True)
     _LOGGER.info("✓ Vendor folder ready (other repos preserved)")
 
     # Remove only this specific repo folder if it exists (for clean reinstall)
@@ -276,6 +273,13 @@ async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> b
         return await _get(url)
     except RuntimeError as err:
         msg = str(err)
+        if url.endswith("/archive/HEAD.zip") and "Download failed: 404" in msg:
+            for branch in ("main", "master"):
+                retry_url = url.removesuffix("/archive/HEAD.zip") + f"/archive/refs/heads/{branch}.zip"
+                try:
+                    return await _get(retry_url)
+                except RuntimeError:
+                    continue
         if "unrecognized repository reference" in msg and "/archive/" in url and url.endswith(".zip"):
             marker = "/archive/"
             idx = url.find(marker)
@@ -314,7 +318,7 @@ async def install_package(
 
             if package_type == "lovelace":
                 main_js = _install_lovelace_from_extracted(root, ha_www_community, repo_name)
-                dest_url = f"/local/community/{LOVELACE_VENDOR_FOLDER}/{repo_name}/{main_js}"
+                dest_url = f"/local/community/{repo_name}/{main_js}"
                 result = {"main_js": main_js, "dest_url": dest_url}
                 import logging
                 _LOGGER = logging.getLogger(__name__)
@@ -373,10 +377,13 @@ def uninstall_package(
     _LOGGER = logging.getLogger(__name__)
     
     if package_type == "lovelace":
-        dest = Path(hass.config.path("www", "community", LOVELACE_VENDOR_FOLDER, repo_name))
-        if dest.exists():
-            _LOGGER.info("Uninstalling Lovelace card: %s", dest)
-            shutil.rmtree(dest)
+        for dest in (
+            Path(hass.config.path("www", "community", repo_name)),
+            Path(hass.config.path("www", "community", "onoff", repo_name)),
+        ):
+            if dest.exists():
+                _LOGGER.info("Uninstalling Lovelace card: %s", dest)
+                shutil.rmtree(dest)
 
     elif package_type == "audio":
         if not owner:

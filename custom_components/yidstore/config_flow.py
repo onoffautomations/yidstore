@@ -10,7 +10,17 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util.yaml import load_yaml
 
-from .const import DOMAIN, MODE_ASSET, MODE_ZIPBALL, TYPE_INTEGRATION, TYPE_LOVELACE, TYPE_BLUEPRINTS, CONF_SIDE_PANEL
+from .const import (
+    CONF_FULL_RELOAD_HOURS,
+    CONF_SIDE_PANEL,
+    DEFAULT_FULL_RELOAD_HOURS,
+    DOMAIN,
+    MODE_ASSET,
+    MODE_ZIPBALL,
+    TYPE_BLUEPRINTS,
+    TYPE_INTEGRATION,
+    TYPE_LOVELACE,
+)
 from .gitea import GiteaClient
 from ._utils import get_primary_endpoint
 
@@ -80,6 +90,7 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "token": "",
                     "owner": "",
                     CONF_SIDE_PANEL: user_input.get(CONF_SIDE_PANEL, True),
+                    CONF_FULL_RELOAD_HOURS: user_input.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS),
                 }
 
                 # Move to store selection BEFORE creating entry
@@ -89,6 +100,9 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Optional(CONF_SIDE_PANEL, default=True): bool,
+                vol.Optional(CONF_FULL_RELOAD_HOURS, default=DEFAULT_FULL_RELOAD_HOURS): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=168)
+                ),
             }
         )
 
@@ -135,6 +149,10 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data = {**entry.data}
             new_data["token"] = token or ""
             new_data[CONF_SIDE_PANEL] = user_input.get(CONF_SIDE_PANEL, True)
+            new_data[CONF_FULL_RELOAD_HOURS] = user_input.get(
+                CONF_FULL_RELOAD_HOURS,
+                entry.data.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS),
+            )
 
             self.hass.config_entries.async_update_entry(entry, data=new_data)
 
@@ -163,6 +181,10 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("use_token", default=has_token): bool,
                 vol.Optional("token", default=entry.data.get("token", "")): str,
                 vol.Optional(CONF_SIDE_PANEL, default=entry.data.get(CONF_SIDE_PANEL, True)): bool,
+                vol.Optional(
+                    CONF_FULL_RELOAD_HOURS,
+                    default=entry.data.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
             }
         )
 
@@ -309,6 +331,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             # Only use token if use_token is enabled
             token = user_input.get("token", "").strip() if use_token else ""
             side_panel = user_input.get(CONF_SIDE_PANEL, True)
+            full_reload_hours = user_input.get(
+                CONF_FULL_RELOAD_HOURS,
+                entry_data.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS),
+            )
 
             # Validate token if provided
             if token:
@@ -325,6 +351,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 new_data = dict(entry_data)
                 new_data["token"] = token
                 new_data[CONF_SIDE_PANEL] = side_panel
+                new_data[CONF_FULL_RELOAD_HOURS] = full_reload_hours
 
                 # Update the entry
                 self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
@@ -347,6 +374,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional("use_token", default=has_token): bool,
                 vol.Optional("token", default=entry_data.get("token", "")): str,
                 vol.Optional(CONF_SIDE_PANEL, default=entry_data.get(CONF_SIDE_PANEL, True)): bool,
+                vol.Optional(
+                    CONF_FULL_RELOAD_HOURS,
+                    default=entry_data.get(CONF_FULL_RELOAD_HOURS, DEFAULT_FULL_RELOAD_HOURS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
             }
         )
 

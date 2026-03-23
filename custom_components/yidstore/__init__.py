@@ -324,7 +324,7 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
 
     Args:
         hass: Home Assistant instance
-        base_url: Base resource URL (e.g., /local/community/onoff/search-card/search-card.js)
+        base_url: Base resource URL (e.g., /local/community/search-card/search-card.js)
         git_tag: Git release tag (e.g., v1.0.0) - logged for reference only
     """
     timestamp = _get_datetime_timestamp()
@@ -339,6 +339,7 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
 
     desired_url = _with_time_update(base_url)
     base_url_without_query = _strip_query(base_url)
+    legacy_base_url_without_query = base_url_without_query.replace("/local/community/", "/local/community/onoff/", 1)
 
     _LOGGER.info("Final URL: %s", desired_url)
     _LOGGER.info("=" * 80)
@@ -384,7 +385,8 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
 
     for idx, item in enumerate(items):
         item_url = item.get("url", "")
-        if _strip_query(item_url) == base_url_without_query:
+        normalized_item_url = _strip_query(item_url)
+        if normalized_item_url in {base_url_without_query, legacy_base_url_without_query}:
             found_index = idx
             resource_id = item.get("id")
             _LOGGER.info("✓ Found existing resource:")
@@ -754,9 +756,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None, source: str | None) -> tuple[str, str]:
         if source == "github":
-            ref = tag or "main"
-            url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{ref}" if tag else f"https://api.github.com/repos/{owner}/{repo}/zipball"
-            return url, ref
+            if tag:
+                return f"https://github.com/{owner}/{repo}/archive/refs/tags/{tag}.zip", tag
+            return f"https://github.com/{owner}/{repo}/archive/HEAD.zip", "HEAD"
 
         # Intelligent "Zipball First" logic with silent Asset recovery
         
