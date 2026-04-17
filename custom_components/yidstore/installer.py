@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import tempfile
 import zipfile
@@ -9,7 +10,7 @@ from pathlib import Path
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import AUDIO_VENDOR_FOLDER
+from .const import AUDIO_VENDOR_FOLDER, LOVELACE_VENDOR_FOLDER
 
 
 def _detect_single_top_folder(extract_dir: Path) -> Path:
@@ -129,7 +130,36 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
     return installed_domains
 
 
-def _find_main_js(dest: Path, repo_name: str) -> str | None:
+def _find_hacs_filename(extracted_root: Path) -> str | None:
+    hacs_path = extracted_root / "hacs.json"
+    if not hacs_path.is_file():
+        return None
+
+    try:
+        data = json.loads(hacs_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    filename = data.get("filename") if isinstance(data, dict) else None
+    if not isinstance(filename, str):
+        return None
+    filename = filename.strip().lstrip("/").replace("\\", "/")
+    if filename.lower().endswith(".js") and ".." not in filename.split("/"):
+        return filename
+    return None
+
+
+def _find_main_js(dest: Path, repo_name: str, preferred_name: str | None = None) -> str | None:
+    if preferred_name:
+        candidates = [preferred_name]
+        if preferred_name.startswith("dist/"):
+            candidates.append(preferred_name[5:])
+        candidates.append(f"dist/{preferred_name}")
+        for candidate in candidates:
+            preferred_path = dest / candidate
+            if preferred_path.is_file():
+                return str(preferred_path.relative_to(dest)).replace("\\", "/")
+
     preferred = dest / f"{repo_name}.js"
     if preferred.exists():
         return preferred.name
@@ -141,21 +171,30 @@ def _find_main_js(dest: Path, repo_name: str) -> str | None:
     js_files = sorted([p for p in dest.rglob("*.js") if p.is_file() and not p.name.endswith(".map")])
     if not js_files:
         return None
-    return js_files[0].name
+    return str(js_files[0].relative_to(dest)).replace("\\", "/")
 
 
-def _install_lovelace_from_extracted(extracted_root: Path, ha_www_community: Path, repo_name: str) -> str:
+def _install_lovelace_from_extracted(
+    extracted_root: Path,
+    ha_www_community: Path,
+    repo_name: str,
+    *,
+    use_vendor_folder: bool = True,
+) -> tuple[str, str]:
     import logging
     _LOGGER = logging.getLogger(__name__)
 
-    # Install cards HACS-style directly under /config/www/community/<repo_name>.
-    dest = ha_www_community / repo_name
+    # Gitea store cards are namespaced under onoff; GitHub custom cards use
+    # the normal HACS-style community/<repo> path.
+    base_folder = ha_www_community / LOVELACE_VENDOR_FOLDER if use_vendor_folder else ha_www_community
+    dest = base_folder / repo_name
+    hacs_filename = _find_hacs_filename(extracted_root)
 
     _LOGGER.info("Installing Lovelace card...")
+    _LOGGER.info("  Base folder: %s", base_folder)
     _LOGGER.info("  Repo destination: %s", dest)
 
-    # Ensure the community folder exists before copying the repo in.
-    ha_www_community.mkdir(parents=True, exist_ok=True)
+    base_folder.mkdir(parents=True, exist_ok=True)
     _LOGGER.info("✓ Vendor folder ready (other repos preserved)")
 
     # Remove only this specific repo folder if it exists (for clean reinstall)
@@ -171,29 +210,29 @@ def _install_lovelace_from_extracted(extracted_root: Path, ha_www_community: Pat
     if dist.exists() and dist.is_dir():
         _LOGGER.info("Found dist/ folder, copying files")
         _copytree_merge(dist, dest)
-        main_js = _find_main_js(dest, repo_name)
+        main_js = _find_main_js(dest, repo_name, hacs_filename)
         if not main_js:
             raise RuntimeError("Lovelace install: dist/ found but no .js files were found to register.")
         _LOGGER.info("Found main JS file: %s", main_js)
-        return main_js
+        return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
 
     repo_folder = extracted_root / repo_name
     if repo_folder.exists() and repo_folder.is_dir():
         _LOGGER.info("Found repo folder %s, copying files", repo_name)
         _copytree_merge(repo_folder, dest)
-        main_js = _find_main_js(dest, repo_name)
+        main_js = _find_main_js(dest, repo_name, hacs_filename)
         if not main_js:
             raise RuntimeError("Lovelace install: repo folder copied but no .js files were found to register.")
         _LOGGER.info("Found main JS file: %s", main_js)
-        return main_js
+        return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
 
     _LOGGER.info("Copying all files from root")
     _copytree_merge(extracted_root, dest)
-    main_js = _find_main_js(dest, repo_name)
+    main_js = _find_main_js(dest, repo_name, hacs_filename)
     if not main_js:
         raise RuntimeError("Lovelace install: no .js files were found to register.")
     _LOGGER.info("Found main JS file: %s", main_js)
-    return main_js
+    return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
 
 
 def _install_blueprints_from_extracted(extracted_root: Path, ha_blueprints_root: Path) -> None:
@@ -273,13 +312,6 @@ async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> b
         return await _get(url)
     except RuntimeError as err:
         msg = str(err)
-        if url.endswith("/archive/HEAD.zip") and "Download failed: 404" in msg:
-            for branch in ("main", "master"):
-                retry_url = url.removesuffix("/archive/HEAD.zip") + f"/archive/refs/heads/{branch}.zip"
-                try:
-                    return await _get(retry_url)
-                except RuntimeError:
-                    continue
         if "unrecognized repository reference" in msg and "/archive/" in url and url.endswith(".zip"):
             marker = "/archive/"
             idx = url.find(marker)
@@ -300,6 +332,7 @@ async def install_package(
     repo_name: str,
     owner: str | None = None,
     audio_location: str = "www",
+    source: str | None = None,
 ) -> dict:
     ha_custom_components = Path(hass.config.path("custom_components"))
     ha_www_community = Path(hass.config.path("www", "community"))
@@ -317,8 +350,17 @@ async def install_package(
                 return {"domains": installed_domains}
 
             if package_type == "lovelace":
-                main_js = _install_lovelace_from_extracted(root, ha_www_community, repo_name)
-                dest_url = f"/local/community/{repo_name}/{main_js}"
+                is_github = source == "github"
+                main_js, relative_dest = _install_lovelace_from_extracted(
+                    root,
+                    ha_www_community,
+                    repo_name,
+                    use_vendor_folder=not is_github,
+                )
+                if is_github:
+                    dest_url = f"/hacsfiles/{repo_name}/{main_js}"
+                else:
+                    dest_url = f"/local/community/{relative_dest}/{main_js}"
                 result = {"main_js": main_js, "dest_url": dest_url}
                 import logging
                 _LOGGER = logging.getLogger(__name__)
@@ -353,6 +395,7 @@ async def download_and_install(
     repo_name: str,
     owner: str | None = None,
     audio_location: str = "www",
+    source: str | None = None,
 ) -> dict:
     zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
     return await install_package(
@@ -362,6 +405,7 @@ async def download_and_install(
         repo_name=repo_name,
         owner=owner,
         audio_location=audio_location,
+        source=source,
     )
 
 
@@ -378,8 +422,8 @@ def uninstall_package(
     
     if package_type == "lovelace":
         for dest in (
+            Path(hass.config.path("www", "community", LOVELACE_VENDOR_FOLDER, repo_name)),
             Path(hass.config.path("www", "community", repo_name)),
-            Path(hass.config.path("www", "community", "onoff", repo_name)),
         ):
             if dest.exists():
                 _LOGGER.info("Uninstalling Lovelace card: %s", dest)

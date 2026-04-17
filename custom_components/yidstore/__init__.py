@@ -90,6 +90,33 @@ def _strip_query(url: str) -> str:
     return urlunparse((p.scheme, p.netloc, p.path, p.params, "", p.fragment))
 
 
+def _alternate_lovelace_resource_urls(base_url_without_query: str) -> set[str]:
+    """Return old/new equivalent resource paths for onoff-vendored cards."""
+    p = urlparse(base_url_without_query)
+    parts = [part for part in p.path.split("/") if part]
+    if len(parts) < 3:
+        return set()
+
+    alternates: set[str] = set()
+    equivalent_paths: list[list[str]] = []
+
+    if parts[0] == "hacsfiles" and len(parts) >= 3:
+        equivalent_paths.append(["", "local", "community", *parts[1:]])
+        equivalent_paths.append(["", "local", "community", "onoff", *parts[1:]])
+    elif len(parts) >= 4 and parts[0] == "local" and parts[1] == "community":
+        if parts[2] == "onoff" and len(parts) >= 5:
+            equivalent_paths.append(["", "local", "community", *parts[3:]])
+            equivalent_paths.append(["", "hacsfiles", *parts[3:]])
+        else:
+            equivalent_paths.append(["", "local", "community", "onoff", *parts[2:]])
+            equivalent_paths.append(["", "hacsfiles", *parts[2:]])
+
+    for alt_parts in equivalent_paths:
+        alt_path = "/".join(alt_parts)
+        alternates.add(urlunparse((p.scheme, p.netloc, alt_path, p.params, "", p.fragment)))
+    return alternates
+
+
 def _scan_custom_components_versions(hass: HomeAssistant) -> dict[str, str]:
     """Return installed custom_components domains mapped to their manifest versions."""
     cc_root = Path(hass.config.path("custom_components"))
@@ -324,7 +351,7 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
 
     Args:
         hass: Home Assistant instance
-        base_url: Base resource URL (e.g., /local/community/search-card/search-card.js)
+        base_url: Base resource URL (e.g., /local/community/onoff/search-card/search-card.js)
         git_tag: Git release tag (e.g., v1.0.0) - logged for reference only
     """
     timestamp = _get_datetime_timestamp()
@@ -339,7 +366,6 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
 
     desired_url = _with_time_update(base_url)
     base_url_without_query = _strip_query(base_url)
-    legacy_base_url_without_query = base_url_without_query.replace("/local/community/", "/local/community/onoff/", 1)
 
     _LOGGER.info("Final URL: %s", desired_url)
     _LOGGER.info("=" * 80)
@@ -382,21 +408,30 @@ async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: s
     _LOGGER.info("STEP 2: Finding existing resource...")
     found_index = None
     resource_id = None
+    alternate_urls = _alternate_lovelace_resource_urls(base_url_without_query)
+    stale_indices: list[int] = []
 
     for idx, item in enumerate(items):
         item_url = item.get("url", "")
-        normalized_item_url = _strip_query(item_url)
-        if normalized_item_url in {base_url_without_query, legacy_base_url_without_query}:
+        stripped_item_url = _strip_query(item_url)
+        if stripped_item_url == base_url_without_query:
             found_index = idx
             resource_id = item.get("id")
             _LOGGER.info("✓ Found existing resource:")
             _LOGGER.info("    Index: %d", idx)
             _LOGGER.info("    ID: %s", resource_id)
             _LOGGER.info("    Current URL: %s", item_url)
-            break
+            continue
+        if stripped_item_url in alternate_urls:
+            stale_indices.append(idx)
 
     if found_index is None:
         _LOGGER.info("  No existing resource found - will create new")
+    for idx in reversed(stale_indices):
+        stale = items.pop(idx)
+        if found_index is not None and idx < found_index:
+            found_index -= 1
+        _LOGGER.info("  Removed stale duplicate resource: %s", stale.get("url", ""))
     _LOGGER.info("")
 
     # STEP 3: Update or add resource
@@ -756,9 +791,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None, source: str | None) -> tuple[str, str]:
         if source == "github":
-            if tag:
-                return f"https://github.com/{owner}/{repo}/archive/refs/tags/{tag}.zip", tag
-            return f"https://github.com/{owner}/{repo}/archive/HEAD.zip", "HEAD"
+            ref = tag or "main"
+            url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{ref}" if tag else f"https://api.github.com/repos/{owner}/{repo}/zipball"
+            return url, ref
 
         # Intelligent "Zipball First" logic with silent Asset recovery
         
@@ -834,7 +869,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Get auth token for download - use client's token (not Accept: application/json header)
             download_headers = {}
             current_token = client.token  # Get from client instance
-            if source != "github" and current_token:
+            if source == "github":
+                download_headers["Accept"] = "application/vnd.github+json"
+                download_headers["User-Agent"] = "YidStore"
+            elif current_token:
                 download_headers["Authorization"] = f"token {current_token}"
                 _LOGGER.debug("Using authenticated download for %s/%s", owner, repo)
             else:
@@ -848,6 +886,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 repo_name=repo,
                 owner=owner,
                 audio_location=audio_location,
+                source=source,
             )
 
             installed_domain = None
