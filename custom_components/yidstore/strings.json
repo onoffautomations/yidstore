@@ -5,8 +5,7 @@
         "title": "YidStore",
         "description": "Setup YidStore - Your Integration Store",
         "data": {
-          "side_panel": "Show Store in Sidebar (Admins Only)",
-          "full_reload_hours": "Full Reload Interval (Hours)"
+          "side_panel": "Show Store in Sidebar (Admins Only)"
         }
       },
       "store_selection": {
@@ -22,8 +21,7 @@
         "data": {
           "use_token": "Use Access Token",
           "token": "Access Token",
-          "side_panel": "Show Store in Sidebar (Admins Only)",
-          "full_reload_hours": "Full Reload Interval (Hours)"
+          "side_panel": "Show Store in Sidebar (Admins Only)"
         }
       }
     },
@@ -53,8 +51,7 @@
         "data": {
           "use_token": "Use Access Token",
           "token": "Access Token",
-          "side_panel": "Show Store in Sidebar (Admins Only)",
-          "full_reload_hours": "Full Reload Interval (Hours)"
+          "side_panel": "Show Store in Sidebar (Admins Only)"
         }
       }
     },

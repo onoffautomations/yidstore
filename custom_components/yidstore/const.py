@@ -14,6 +14,9 @@ TYPE_LOVELACE = "lovelace"
 TYPE_BLUEPRINTS = "blueprints"
 TYPE_AUDIO = "audio"
 
+# /config/www/community/onoff/<repo>  ->  /local/community/onoff/<repo>
+LOVELACE_VENDOR_FOLDER = "onoff"
+
 # /config/www/audio/<owner>/<repo>/...
 AUDIO_VENDOR_FOLDER = "audio"
 
@@ -37,5 +40,3 @@ ATTR_RELEASE_SUMMARY = "release_summary"
 ATTR_RELEASE_NOTES = "release_notes"
 
 CONF_SIDE_PANEL = "side_panel"
-CONF_FULL_RELOAD_HOURS = "full_reload_hours"
-DEFAULT_FULL_RELOAD_HOURS = 24
