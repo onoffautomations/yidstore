@@ -231,61 +231,65 @@ class GiteaClient:
         # Example: /api/v1/repos/:owner/:repo/archive/:ref.zip
         return f"{self.base_url}/api/v1/repos/{owner}/{repo}/archive/{ref}.zip"
 
-    async def search_repos(self, limit: int = 100) -> list[dict]:
-        """Search for all accessible repositories."""
-        sess = async_get_clientsession(self.hass)
-        url = f"{self.base_url}/api/v1/repos/search?limit={limit}"
-        try:
-            async with sess.get(url, headers=self._headers(), timeout=60) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # The search API returns {"ok": true, "data": [...repos...]}
-                    if isinstance(data, dict) and "data" in data:
-                        return data["data"]
-                    elif isinstance(data, list):
-                        return data
-        except Exception as e:
-            _LOGGER.debug("Failed to search repos: %s", e)
-        return []
+    async def search_repos(self, limit: int = 500) -> list[dict]:
+        """Search for all accessible repositories (paginated, in parallel).
 
-    async def get_icon_url(self, owner: str, repo: str, branch: str = "main") -> str | None:
-        """Get the URL for the repo's icon if it exists."""
+        Gitea caps per-page results (typically 50). Without pagination the
+        sidepanel was silently missing any repos beyond the first page —
+        which is what caused "not picking up everything right". We fire
+        all pages concurrently so total search time is one round-trip
+        rather than N.
+        """
+        import asyncio
         sess = async_get_clientsession(self.hass)
-        # Prefer new integration-local branding first, then legacy icon locations.
-        icon_paths: list[str] = []
-        try:
-            domains = await self.get_integration_domains(owner, repo, branch=branch)
-            for domain in domains:
-                icon_paths.extend(
-                    [
-                        f"custom_components/{domain}/brand/icon.png",
-                        f"custom_components/{domain}/brand/icon.svg",
-                        f"custom_components/{domain}/icon.png",
-                    ]
-                )
-        except Exception:
-            pass
-        icon_paths.extend(
-            [
-                "icons/icon.png",
-                "icons/icon@2x.png",
-                "Icons/icon.png",
-                "Icons/icon@2x.png",
-                "icon.png",
-            ]
-        )
+        per_page = 50
+        max_pages = max(1, (limit + per_page - 1) // per_page)
 
-        for path in icon_paths:
-            url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/contents/{path}?ref={branch}"
+        async def _fetch_page(page: int) -> list[dict]:
+            url = f"{self.base_url}/api/v1/repos/search?limit={per_page}&page={page}"
             try:
-                async with sess.get(url, headers=self._headers(), timeout=10) as resp:
-                    if resp.status == 200:
-                        # Return the raw download URL
-                        return f"{self.base_url}/{owner}/{repo}/raw/branch/{branch}/{path}"
-            except Exception:
-                continue
+                async with sess.get(url, headers=self._headers(), timeout=60) as resp:
+                    if resp.status != 200:
+                        return []
+                    data = await resp.json()
+                    if isinstance(data, dict) and "data" in data:
+                        return data["data"] or []
+                    if isinstance(data, list):
+                        return data
+            except Exception as e:
+                _LOGGER.debug("Failed to search repos page %d: %s", page, e)
+            return []
 
-        return None
+        page_results = await asyncio.gather(*[_fetch_page(p) for p in range(1, max_pages + 1)])
+        merged: list[dict] = []
+        for batch in page_results:
+            if batch:
+                merged.extend(batch)
+        return merged[:limit] if limit else merged
+
+    async def get_icon_url(self, owner: str, repo: str, branch: str = "main", domains: list[str] | None = None) -> str | None:
+        """Return a best-guess icon URL WITHOUT verifying existence.
+
+        Verifying icon existence used to cost 3-15 sequential HTTP requests
+        per repo and was the dominant cost on initial sidepanel load. The
+        frontend already has full fallback handling via brandImgError —
+        if this URL 404s the browser silently cycles through candidates
+        and finally hides the image. So we just build the most likely URL
+        and return immediately.
+        """
+        if domains is None:
+            try:
+                domains = await self.get_integration_domains(owner, repo, branch=branch)
+            except Exception:
+                domains = []
+
+        if domains:
+            return (
+                f"{self.base_url}/{owner}/{repo}/raw/branch/{branch}"
+                f"/custom_components/{domains[0]}/brand/icon.png"
+            )
+        # Fallback to legacy convention; if it 404s the frontend handles it.
+        return f"{self.base_url}/{owner}/{repo}/raw/branch/{branch}/icons/icon.png"
 
     def get_raw_icon_url(self, owner: str, repo: str, branch: str = "main") -> str:
         """Get the raw URL for potential icon files."""

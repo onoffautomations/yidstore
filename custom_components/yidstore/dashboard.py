@@ -702,11 +702,29 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     await async_setup_brand_patcher(hass)
 
 
+# Module-level response cache for /api/yidstore/repos.
+# Side-panel opens, multi-tab, and quick close-and-reopen all hit this and
+# get an instant response instead of redoing the full collection pass.
+# Mutating operations (install/uninstall/refresh/custom add/remove/hide)
+# call _invalidate_repos_cache() to bust it.
+_REPOS_CACHE: dict[str, tuple[float, list]] = {}
+_REPOS_CACHE_TTL = 45.0  # seconds
+_REPOS_CACHE_LOCK = asyncio.Lock()
+
+
+def _invalidate_repos_cache(eid: str | None = None) -> None:
+    """Drop cached /api/yidstore/repos response so the next call recomputes."""
+    if eid is None:
+        _REPOS_CACHE.clear()
+    else:
+        _REPOS_CACHE.pop(eid, None)
+
+
 class OnOffStoreReposView(HomeAssistantView):
     """API to list Gitea repositories."""
     url = "/api/yidstore/repos"
     name = "api:yidstore:repos"
-    requires_auth = False 
+    requires_auth = False
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -718,7 +736,7 @@ class OnOffStoreReposView(HomeAssistantView):
             eid = self.entry_id
             if DOMAIN not in hass.data:
                 return web.json_response({"error": "Integration not ready"}, status=503)
-            
+
             if eid not in hass.data[DOMAIN]:
                 # Try to find any existing entry (handles reload/reinstall cases)
                 eids = list(hass.data[DOMAIN].keys())
@@ -726,6 +744,32 @@ class OnOffStoreReposView(HomeAssistantView):
                     return web.json_response({"error": "Integration not ready"}, status=503)
                 eid = eids[0]
 
+            # Serve from cache if fresh — coalesces concurrent requests.
+            force = request.query.get("force") in ("1", "true", "yes")
+            if not force:
+                cached = _REPOS_CACHE.get(eid)
+                if cached:
+                    age = time.time() - cached[0]
+                    if age < _REPOS_CACHE_TTL:
+                        return web.json_response(cached[1])
+
+            # Lock to coalesce simultaneous misses — first one computes,
+            # rest re-check the cache before doing the work themselves.
+            async with _REPOS_CACHE_LOCK:
+                if not force:
+                    cached = _REPOS_CACHE.get(eid)
+                    if cached and (time.time() - cached[0]) < _REPOS_CACHE_TTL:
+                        return web.json_response(cached[1])
+
+                resp_data = await self._build_repos(hass, eid)
+                _REPOS_CACHE[eid] = (time.time(), resp_data)
+                return web.json_response(resp_data)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _build_repos(self, hass, eid):
+        # Raises on failure so we don't cache a broken empty list.
+        try:
             comp = hass.data[DOMAIN][eid]
             client = comp["client"]
             coordinator = comp["coordinator"]
@@ -777,23 +821,46 @@ class OnOffStoreReposView(HomeAssistantView):
                 seen_repos.add(full_name)
                 tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state))
             
-            for y in yaml_items:
-                try:
-                    # Fetch full info from Gitea for the YAML item
-                    r = await client.get_repo(y["owner"], y["repo"])
-                    if r: add_repo_task(r, bypass=True, auth=is_authenticated)
-                except Exception:
-                    pass
+            # === PARALLEL COLLECTION PHASE ===
+            # Previously every fetch below was sequential (one YAML repo, then
+            # one org, then one user, etc.). With even a handful of orgs/users
+            # that turned into dozens of round-trips in series. Now we fan
+            # everything out and only await the dependencies we truly need.
 
-            # B. Fetch from Organizations
-            # Default public orgs (always fetched)
+            async def _safe_get_repo(owner_, repo_):
+                try:
+                    return await client.get_repo(owner_, repo_)
+                except Exception as e:
+                    _LOGGER.debug("Store: YAML repo %s/%s fetch failed: %s", owner_, repo_, e)
+                    return None
+
+            yaml_fetch_task = asyncio.gather(*[_safe_get_repo(y["owner"], y["repo"]) for y in yaml_items])
+
+            # Kick off search immediately — it's the slowest single call and now paginates.
+            search_task = asyncio.create_task(client.search_repos(limit=500))
+
+            # Authenticated metadata (orgs membership + following) can run in parallel too.
+            user_orgs_task = asyncio.create_task(client.get_user_orgs()) if is_authenticated else None
+            following_task = asyncio.create_task(client.get_user_following()) if is_authenticated else None
+
+            # Authenticated user's own repos
+            async def _fetch_own_repos():
+                try:
+                    sess = async_get_clientsession(hass)
+                    async with sess.get(f"{client.base_url}/api/v1/user/repos", headers=client._headers()) as resp:
+                        if resp.status == 200:
+                            return await resp.json()
+                except Exception as e:
+                    _LOGGER.debug("Failed to fetch own repos: %s", e)
+                return None
+            own_repos_task = asyncio.create_task(_fetch_own_repos()) if is_authenticated else None
+
+            # B. Determine which orgs to fetch from
             default_orgs = ["Zing", "OnOffPublic"]
-
-            # If authenticated, also fetch from all orgs they have access to
             orgs_to_fetch = set(default_orgs)
-            if is_authenticated:
+            if user_orgs_task is not None:
                 try:
-                    user_orgs = await client.get_user_orgs()
+                    user_orgs = await user_orgs_task
                     for org in user_orgs:
                         org_name = org.get("username") or org.get("name")
                         if org_name and org_name not in HIDDEN_STORE_ORGS:
@@ -802,83 +869,84 @@ class OnOffStoreReposView(HomeAssistantView):
                 except Exception as e:
                     _LOGGER.debug("Failed to fetch user orgs: %s", e)
 
-            # Remove hidden orgs from the fetch list
             orgs_to_fetch = orgs_to_fetch - HIDDEN_STORE_ORGS
 
-            # Collect org members to fetch their repos too (when authenticated)
-            users_from_orgs = set()
+            # Fan out org repos + org members concurrently across ALL orgs.
+            org_repos_tasks = {o: asyncio.create_task(client.get_org_repos(o)) for o in orgs_to_fetch}
+            org_members_tasks = (
+                {o: asyncio.create_task(client.get_org_members(o)) for o in orgs_to_fetch}
+                if is_authenticated else {}
+            )
 
-            for o in orgs_to_fetch:
+            # Collect YAML repos as soon as they're all back.
+            yaml_results = await yaml_fetch_task
+            for r in yaml_results:
+                if r:
+                    add_repo_task(r, bypass=True, auth=is_authenticated)
+
+            # Collect org repos
+            users_from_orgs = set()
+            for o, task in org_repos_tasks.items():
                 try:
-                    repos = await client.get_org_repos(o)
+                    repos = await task
                     if isinstance(repos, list):
                         for r in repos:
                             add_repo_task(r, auth=is_authenticated)
-
-                    # When authenticated, also get org members to fetch their personal repos
-                    if is_authenticated:
-                        try:
-                            members = await client.get_org_members(o)
-                            for member in members:
-                                username = member.get("username") or member.get("login")
-                                if username:
-                                    users_from_orgs.add(username)
-                        except Exception:
-                            pass
                 except Exception as e:
-                    _LOGGER.debug("Store: Org %s error: %s", o, e)
+                    _LOGGER.debug("Store: Org %s repos error: %s", o, e)
 
-            # C. Fetch from Individual Users
-            # Default public users (always fetched) - add any public users you want to include
-            default_users = []  # Add usernames here if needed
+            for o, task in org_members_tasks.items():
+                try:
+                    members = await task
+                    if isinstance(members, list):
+                        for member in members:
+                            username = member.get("username") or member.get("login")
+                            if username:
+                                users_from_orgs.add(username)
+                except Exception as e:
+                    _LOGGER.debug("Store: Org %s members error: %s", o, e)
 
-            users_to_fetch = set(default_users)
-
-            # Add org members when authenticated
+            # C. Determine which users to fetch from
+            users_to_fetch = set()
             if is_authenticated:
                 users_to_fetch.update(users_from_orgs)
-
-                # Also fetch from users the authenticated user is following
-                try:
-                    following = await client.get_user_following()
-                    for user in following:
-                        username = user.get("login") or user.get("username")
-                        if username:
-                            users_to_fetch.add(username)
-                except Exception as e:
-                    _LOGGER.debug("Failed to fetch following users: %s", e)
-
+                if following_task is not None:
+                    try:
+                        following = await following_task
+                        for user in following:
+                            username = user.get("login") or user.get("username")
+                            if username:
+                                users_to_fetch.add(username)
+                    except Exception as e:
+                        _LOGGER.debug("Failed to fetch following users: %s", e)
                 _LOGGER.debug("Fetching repos from %d users (org members + following)", len(users_to_fetch))
 
-            # Fetch repos from users
-            for u in users_to_fetch:
+            # Fan out user repos
+            user_repos_tasks = {u: asyncio.create_task(client.get_user_repos(u)) for u in users_to_fetch}
+            for u, task in user_repos_tasks.items():
                 try:
-                    repos = await client.get_user_repos(u)
+                    repos = await task
                     if isinstance(repos, list):
                         for r in repos:
                             add_repo_task(r, auth=is_authenticated)
                 except Exception as e:
                     _LOGGER.debug("Store: User %s error: %s", u, e)
 
-            # D. If authenticated, fetch user's own repositories
-            if is_authenticated:
+            # D. Authenticated user's own repos
+            if own_repos_task is not None:
                 try:
-                    # Fetch user's own repositories
-                    sess = async_get_clientsession(hass)
-                    async with sess.get(f"{client.base_url}/api/v1/user/repos", headers=client._headers()) as resp:
-                        if resp.status == 200:
-                            u_repos = await resp.json()
-                            if isinstance(u_repos, list):
-                                for repo in u_repos:
-                                    add_repo_task(repo, bypass=True, auth=True)
-                except Exception:
-                    pass
+                    u_repos = await own_repos_task
+                    if isinstance(u_repos, list):
+                        for repo in u_repos:
+                            add_repo_task(repo, bypass=True, auth=True)
+                except Exception as e:
+                    _LOGGER.debug("Store: Own repos error: %s", e)
 
-            # E. Search for all accessible repos (catches user repos from both orgs and individuals)
-            # This works for public repos even without authentication
+            # E. Global search (now paginated — previously silently capped at one page)
             try:
-                search_repos = await client.search_repos(limit=200)
+                search_repos = await search_task
                 if isinstance(search_repos, list):
+                    _LOGGER.debug("Store: search returned %d repos", len(search_repos))
                     for repo in search_repos:
                         add_repo_task(repo, auth=is_authenticated)
             except Exception as e:
@@ -888,114 +956,131 @@ class OnOffStoreReposView(HomeAssistantView):
             processed_results = await asyncio.gather(*tasks)
             resp_data = [res for res in processed_results if res is not None]
 
-            # F. Explicitly fetch custom repos if they weren't in organizations or users
+            # F. Explicitly fetch custom repos if they weren't in organizations or users.
+            # Process all the misses in parallel — GitHub custom repos do a slow
+            # domain resolution that used to block the whole response.
+            existing_keys = {(x["owner"].lower(), x["repo_name"].lower()) for x in resp_data}
+            missing_custom = []
             for cr in custom_repos_to_fetch:
                 owner = (cr.get("owner") or "").strip()
                 repo = (cr.get("repo") or "").strip()
-                source = cr.get("source", "gitea")
                 if not owner or not repo:
                     continue
+                if (owner.lower(), repo.lower()) in existing_keys:
+                    continue
+                missing_custom.append((cr, owner, repo))
 
-                if not any(x["owner"].lower() == owner.lower() and x["repo_name"].lower() == repo.lower() for x in resp_data):
-                    if source == "github":
-                        repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
-                        repo_url = cr.get("url")
-                        # Best-effort domain resolution (repo_name != domain for many integrations)
-                        domain = None
-                        if repo_type == "integration":
-                            domain = await _resolve_github_integration_domain(hass, owner, repo)
+            async def _process_missing_custom(cr, owner, repo):
+                source = cr.get("source", "gitea")
+                if source == "github":
+                    repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
+                    repo_url = cr.get("url")
+                    domain = None
+                    if repo_type == "integration":
+                        domain = await _resolve_github_integration_domain(hass, owner, repo)
 
-                        # Prefer integration-local brand icon in the repo.
-                        icon_url = _github_brand_icon_url(owner, repo, domain, "main")
+                    icon_url = _github_brand_icon_url(owner, repo, domain, "main")
 
-                        # Determine installation status and source
-                        tracked_pkg = coordinator.get_package_by_repo(owner, repo)
-                        disk_installed, disk_source = _get_install_info(
-                            local_state=local_state,
-                            pkg_type=repo_type,
-                            domain=domain,
-                            repo_name=repo,
-                            owner=owner,
-                        )
+                    tracked_pkg = coordinator.get_package_by_repo(owner, repo)
+                    disk_installed, disk_source = _get_install_info(
+                        local_state=local_state,
+                        pkg_type=repo_type,
+                        domain=domain,
+                        repo_name=repo,
+                        owner=owner,
+                    )
 
-                        if tracked_pkg is not None:
-                            is_installed = True
-                            install_source = "yidstore"
-                        elif disk_installed:
-                            is_installed = True
-                            install_source = disk_source
-                        else:
-                            is_installed = False
-                            install_source = None
-
-                        resp_data.append({
-                            "name": f"{owner}/{repo}",
-                            "repo_name": repo,
-                            "owner": owner,
-                            "owner_display_name": owner,
-                            "type": repo_type,
-                            "description": "",
-                            "updated_at": "",
-                            "mode": "zipball",
-                            "asset_name": None,
-                            "is_installed": is_installed,
-                            "install_source": install_source,
-                            "update_available": False,
-                            "latest_version": None,
-                            "release_notes": None,
-                            "is_hidden": coordinator.is_hidden_repo(owner, repo),
-                            "icon_url": icon_url,
-                            "domain": domain,
-                            "default_branch": "main",
-                            "source": "github",
-                            "repo_url": repo_url,
-                        })
+                    if tracked_pkg is not None:
+                        is_installed = True
+                        install_source = "yidstore"
+                    elif disk_installed:
+                        is_installed = True
+                        install_source = disk_source
                     else:
-                        try:
-                            # Manually fetch missed Gitea custom repo
-                            r = await client.get_repo(owner, repo)
-                            if r:
-                                item = await self._process_repo(r, coordinator, yaml_items, bypass=True, auth=is_authenticated, local_state=local_state)
-                                if item:
-                                    resp_data.append(item)
-                        except Exception as e:
-                            repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
-                            _LOGGER.debug("Custom repo %s/%s metadata fetch failed, adding fallback row: %s", owner, repo, e)
+                        is_installed = False
+                        install_source = None
 
-                            tracked_pkg = coordinator.get_package_by_repo(owner, repo)
-                            domain = cr.get("domain")
-                            disk_installed, disk_source = _get_install_info(
-                                local_state=local_state,
-                                pkg_type=repo_type,
-                                domain=domain,
-                                repo_name=repo,
-                                owner=owner,
-                            )
-                            resp_data.append({
-                                "name": f"{owner}/{repo}",
-                                "repo_name": repo,
-                                "owner": owner,
-                                "owner_display_name": owner,
-                                "type": repo_type,
-                                "description": "",
-                                "updated_at": "",
-                                "mode": tracked_pkg.get("mode") if tracked_pkg else cr.get("mode"),
-                                "asset_name": tracked_pkg.get("asset_name") if tracked_pkg else cr.get("asset_name"),
-                                "is_installed": tracked_pkg is not None or disk_installed,
-                                "install_source": "yidstore" if tracked_pkg is not None else disk_source,
-                                "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
-                                "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
-                                "release_notes": tracked_pkg.get("release_notes") if tracked_pkg else None,
-                                "is_hidden": coordinator.is_hidden_repo(owner, repo),
-                                "icon_url": None,
-                                "domain": domain,
-                                "default_branch": cr.get("default_branch", "main"),
-                                "source": "gitea",
-                            })
+                    return {
+                        "name": f"{owner}/{repo}",
+                        "repo_name": repo,
+                        "owner": owner,
+                        "owner_display_name": owner,
+                        "type": repo_type,
+                        "description": "",
+                        "updated_at": "",
+                        "mode": "zipball",
+                        "asset_name": None,
+                        "is_installed": is_installed,
+                        "install_source": install_source,
+                        "update_available": False,
+                        "latest_version": None,
+                        "release_notes": None,
+                        "is_hidden": coordinator.is_hidden_repo(owner, repo),
+                        "icon_url": icon_url,
+                        "domain": domain,
+                        "default_branch": "main",
+                        "source": "github",
+                        "repo_url": repo_url,
+                    }
 
-            return web.json_response(resp_data)
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
+                # Gitea custom repo
+                try:
+                    r = await client.get_repo(owner, repo)
+                    if r:
+                        item = await self._process_repo(r, coordinator, yaml_items, bypass=True, auth=is_authenticated, local_state=local_state)
+                        if item:
+                            return item
+                except Exception as e:
+                    _LOGGER.debug("Custom repo %s/%s metadata fetch failed, adding fallback row: %s", owner, repo, e)
+
+                repo_type = cr.get("type") or ("audio" if owner.lower() == "audio" else "integration")
+                tracked_pkg = coordinator.get_package_by_repo(owner, repo)
+                domain = cr.get("domain")
+                disk_installed, disk_source = _get_install_info(
+                    local_state=local_state,
+                    pkg_type=repo_type,
+                    domain=domain,
+                    repo_name=repo,
+                    owner=owner,
+                )
+                return {
+                    "name": f"{owner}/{repo}",
+                    "repo_name": repo,
+                    "owner": owner,
+                    "owner_display_name": owner,
+                    "type": repo_type,
+                    "description": "",
+                    "updated_at": "",
+                    "mode": tracked_pkg.get("mode") if tracked_pkg else cr.get("mode"),
+                    "asset_name": tracked_pkg.get("asset_name") if tracked_pkg else cr.get("asset_name"),
+                    "is_installed": tracked_pkg is not None or disk_installed,
+                    "install_source": "yidstore" if tracked_pkg is not None else disk_source,
+                    "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
+                    "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
+                    "release_notes": tracked_pkg.get("release_notes") if tracked_pkg else None,
+                    "is_hidden": coordinator.is_hidden_repo(owner, repo),
+                    "icon_url": None,
+                    "domain": domain,
+                    "default_branch": cr.get("default_branch", "main"),
+                    "source": "gitea",
+                }
+
+            if missing_custom:
+                custom_results = await asyncio.gather(
+                    *[_process_missing_custom(cr, owner, repo) for cr, owner, repo in missing_custom],
+                    return_exceptions=True,
+                )
+                for item in custom_results:
+                    if isinstance(item, Exception):
+                        _LOGGER.debug("Custom repo processing raised: %s", item)
+                        continue
+                    if item is not None:
+                        resp_data.append(item)
+
+            return resp_data
+        except Exception:
+            # Let the caller decide what to do — never cache a partial result.
+            raise
 
     async def _process_repo(self, r, coord, yaml_items=None, bypass=False, auth=False, local_state=None):
         name = r.get("full_name")
@@ -1041,100 +1126,138 @@ class OnOffStoreReposView(HomeAssistantView):
 
         default_branch = r.get("default_branch", "main")
 
-        # Better type detection
-        pkg_type = "integration"
+        # Type detection — layout is the source of truth.
+        #
+        # Name/description hints alone are unreliable: a repo named
+        # "discord_card_integration" or one whose description mentions
+        # "theme" can be a real integration. So whenever there is no
+        # definitive answer from the coordinator (installed package
+        # metadata) or the special "audio" owner, we always check the
+        # actual repo layout. If layout is inconclusive, only then do we
+        # fall back to name/desc hints.
+        pkg_type = None
         desc = (r.get("description") or "").lower()
         if p:
             pkg_type = p.get("package_type", "integration")
         elif owner.lower() == "audio":
             pkg_type = "audio"
-        elif "card" in rn.lower() or "lovelace" in rn.lower() or "card" in desc or "theme" in desc:
-            pkg_type = "lovelace"
-        elif "blueprint" in rn.lower() or "blueprint" in desc:
-            pkg_type = "blueprints"
-        else:
-            # Repo layout-based detection for better card/integration classification.
+
+        if pkg_type is None:
+            # Compute the name/desc hint up-front but only use it if the
+            # layout check can't give a definitive answer.
+            name_hint = None
+            if "blueprint" in rn.lower() or "blueprint" in desc:
+                name_hint = "blueprints"
+            elif "card" in rn.lower() or "lovelace" in rn.lower() or "card" in desc or "theme" in desc:
+                name_hint = "lovelace"
+
+            # Fire both directory listings in parallel — root layout (for
+            # type detection) and custom_components/ (for integration
+            # domains). For ~most repos in this store these are both needed;
+            # for non-integrations the second call is a cheap miss but we
+            # save a round-trip on the critical path.
+            root_task = asyncio.create_task(
+                coord.client.list_dir(owner, rn, path="", branch=default_branch)
+            )
+            cc_task = asyncio.create_task(
+                coord.client.get_integration_domains(owner, rn, branch=default_branch)
+            )
+
             try:
-                root_entries = await coord.client.list_dir(owner, rn, path="", branch=default_branch)
-                if isinstance(root_entries, list):
-                    has_custom_components = any(
-                        isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "custom_components"
-                        for e in root_entries
-                    )
-                    has_blueprints = any(
-                        isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "blueprints"
-                        for e in root_entries
-                    )
-                    has_root_js = any(
-                        isinstance(e, dict)
-                        and e.get("type") == "file"
-                        and str(e.get("name") or "").lower().endswith(".js")
-                        for e in root_entries
-                    )
-                    if has_blueprints:
-                        pkg_type = "blueprints"
-                    elif has_root_js and not has_custom_components:
-                        pkg_type = "lovelace"
+                root_entries = await root_task
             except Exception:
-                pass
+                root_entries = None
+            try:
+                speculative_domains = await cc_task
+            except Exception:
+                speculative_domains = []
+            if not isinstance(speculative_domains, list):
+                speculative_domains = []
+
+            if isinstance(root_entries, list):
+                has_custom_components = any(
+                    isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "custom_components"
+                    for e in root_entries
+                )
+                has_blueprints = any(
+                    isinstance(e, dict) and e.get("type") == "dir" and (e.get("name") or "").lower() == "blueprints"
+                    for e in root_entries
+                )
+                has_root_js = any(
+                    isinstance(e, dict)
+                    and e.get("type") == "file"
+                    and str(e.get("name") or "").lower().endswith(".js")
+                    for e in root_entries
+                )
+
+                # Layout takes precedence over name/desc — custom_components/
+                # presence definitively means integration even if the repo
+                # name or description mentions "card" or "theme".
+                if has_custom_components:
+                    pkg_type = "integration"
+                elif has_blueprints:
+                    pkg_type = "blueprints"
+                elif has_root_js:
+                    pkg_type = "lovelace"
+                else:
+                    pkg_type = name_hint or "integration"
+            else:
+                # Layout fetch failed — fall back to hint, default to integration
+                pkg_type = name_hint or "integration"
+        else:
+            speculative_domains = None  # Not fetched on this path
 
         # Get display name from owner object if available
         owner_obj = r.get("owner", {})
         owner_display_name = owner_obj.get("full_name") or owner_obj.get("username") or owner
 
-        # Generate potential icon URL with fallback to Brands
-        if pkg_type in ("lovelace", "audio"):
-            # Never show integration/brands icon for cards or audio packs.
-            icon_url = None
-        else:
-            icon_url = None
-            try:
-                # Check Gitea for icon
-                icon_url = await coord.client.get_icon_url(owner, rn, branch=default_branch)
-            except Exception:
-                pass
-
-
-        # Resolve integration domain (HACS-style): custom_components/<domain>/manifest.json -> manifest["domain"].
-        # This is critical because repo_name != domain for many integrations (e.g. ha_pura -> pura).
+        # Network-heavy work is now ONLY done for integration repos. For
+        # cards/audio/blueprints, none of this matters and used to be wasted
+        # round-trips that blocked the whole response.
+        icon_url = None
         domain_from_manifest = None
+
         if pkg_type == "integration":
-            try:
-                # 1) Prefer a domain that is already installed locally
+            # Reuse the speculative custom_components/ listing if we already
+            # fetched it in parallel above; otherwise fetch now.
+            if speculative_domains is not None:
+                domains = speculative_domains
+            else:
+                try:
+                    domains = await coord.client.get_integration_domains(owner, rn, branch=default_branch)
+                except Exception:
+                    domains = []
+                if not isinstance(domains, list):
+                    domains = []
+
+            # Prefer a domain that is already installed locally
+            chosen_domain = None
+            if domains:
                 local_cc = Path("/config/custom_components")
-                domains = await coord.client.get_integration_domains(owner, rn, branch=default_branch)
-                chosen_domain = None
-                if domains:
-                    for d in domains:
-                        try:
-                            if (local_cc / d).is_dir():
-                                chosen_domain = d
-                                break
-                        except Exception:
-                            continue
-                    if not chosen_domain:
-                        chosen_domain = domains[0]
-
-                # 2) Read manifest from the chosen domain folder (or fall back to legacy root manifest)
-                manifest_paths = []
-                if chosen_domain:
-                    manifest_paths.append(f"custom_components/{chosen_domain}/manifest.json")
-                manifest_paths.append("manifest.json")
-
-                for mp in manifest_paths:
+                for d in domains:
                     try:
-                        manifest_content = await coord.client.get_file_content(owner, rn, mp, branch=default_branch)
-                        if not manifest_content:
-                            continue
-                        import json
-                        manifest = json.loads(manifest_content)
-                        domain_from_manifest = (manifest.get("domain") or chosen_domain or "").strip() or None
-                        if domain_from_manifest:
+                        if (local_cc / d).is_dir():
+                            chosen_domain = d
                             break
                     except Exception:
                         continue
+                if not chosen_domain:
+                    chosen_domain = domains[0]
+
+            # Use dir name as domain. This matches what's on disk (what
+            # install detection checks) and avoids an extra manifest fetch.
+            # In the rare case where manifest["domain"] differs from the
+            # folder name, install detection still works because the folder
+            # name is canonical for "is it installed?".
+            domain_from_manifest = chosen_domain
+
+            # Best-guess icon URL — frontend handles fallback if it 404s.
+            try:
+                icon_url = await coord.client.get_icon_url(
+                    owner, rn, branch=default_branch, domains=domains
+                )
             except Exception:
-                pass
+                icon_url = None
 
         # Determine installation status and source
         disk_installed, disk_source = _get_install_info(
@@ -1238,6 +1361,7 @@ class OnOffStoreInstallView(HomeAssistantView):
                 hass.data["yidstore_requires_restart"] = set()
             hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
 
+            _invalidate_repos_cache()
             return web.json_response({"success": True, "requires_restart": True})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -1402,6 +1526,7 @@ class OnOffStoreRefreshView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_check_updates()
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1448,6 +1573,7 @@ class OnOffStoreAddCustomView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_add_custom_repo(o, r, source=source, repo_type=repo_type, repo_url=repo_url)
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1508,6 +1634,7 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_remove_custom_repo(o, r)
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1538,6 +1665,7 @@ class OnOffStoreHideView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_hide_repo(o, r)
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1569,6 +1697,7 @@ class OnOffStoreUnhideView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_unhide_repo(o, r)
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1612,6 +1741,7 @@ class OnOffStoreUninstallView(HomeAssistantView):
                 if "yidstore_requires_restart" in hass.data:
                     hass.data["yidstore_requires_restart"].discard(f"{o}/{r}".lower())
 
+                _invalidate_repos_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
