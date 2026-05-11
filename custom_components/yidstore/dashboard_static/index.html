@@ -1812,7 +1812,13 @@
                 <i class="mdi mdi-storefront"></i> Store
             </button>
             <button class="view-tab" id="docsTab" onclick="switchView('docs')">
-                <i class="mdi mdi-book-open-page-variant"></i> Documentation <span class="beta-chip">BETA</span>
+                <i class="mdi mdi-book-open-page-variant"></i> Documentation
+            </button>
+            <button class="view-tab" id="audioTab" onclick="switchView('audio')">
+                <i class="mdi mdi-music-note"></i> Audio
+            </button>
+            <button class="view-tab" id="blueprintsTab" onclick="switchView('blueprints')">
+                <i class="mdi mdi-file-document-outline"></i> Blueprints <span class="beta-chip">BETA</span>
             </button>
             <button class="view-tab" id="automationsTab" onclick="switchView('automations')">
                 <i class="mdi mdi-robot"></i> Automations <span class="beta-chip">BETA</span>
@@ -1822,12 +1828,6 @@
             </button>
             <button class="view-tab" id="helpersTab" onclick="switchView('helpers')">
                 <i class="mdi mdi-toggle-switch"></i> Helpers <span class="beta-chip">BETA</span>
-            </button>
-            <button class="view-tab" id="audioTab" onclick="switchView('audio')">
-                <i class="mdi mdi-music-note"></i> Audio <span class="beta-chip">BETA</span>
-            </button>
-            <button class="view-tab" id="blueprintsTab" onclick="switchView('blueprints')">
-                <i class="mdi mdi-file-document-outline"></i> Blueprints <span class="beta-chip">BETA</span>
             </button>
         </div>
 
@@ -3737,8 +3737,9 @@
                 controls.style.display = view === 'store' ? 'flex' : 'none';
             }
 
-            // Show beta popup for non-store sections (once per session per section)
-            const betaSections = ['docs', 'automations', 'dashboards', 'helpers', 'audio', 'blueprints'];
+            // Show beta popup for non-store sections (once per session per section).
+            // Docs and Audio are out of beta — no popup for them.
+            const betaSections = ['automations', 'dashboards', 'helpers', 'blueprints'];
             if (betaSections.includes(view) && !betaPopupShown.has(view)) {
                 betaPopupShown.add(view);
                 pop('Beta Feature', `
@@ -3748,6 +3749,29 @@
                     <p style="text-align: center; margin-top: 0.5rem;">This section is in <strong>test mode</strong>.</p>
                     <p style="text-align: center; color: var(--dim); font-size: 0.85rem; margin-top: 0.5rem;">Some features may not work as expected.</p>
                 `, 'mdi-flask', false, [
+                    { t: 'Got it', c: 'btn-p', f: 'closePop()' }
+                ]);
+            }
+
+            // Show a one-time invitation to contribute when opening Documentation.
+            if (view === 'docs' && !betaPopupShown.has('docs-contribute')) {
+                betaPopupShown.add('docs-contribute');
+                pop('Contribute to Documentation', `
+                    <p style="text-align: center;">
+                        <i class="mdi mdi-book-edit-outline" style="font-size: 2rem; color: var(--primary);"></i>
+                    </p>
+                    <p style="text-align: center; margin-top: 0.5rem;">
+                        Have a guide or write-up you'd like to share?
+                    </p>
+                    <p style="text-align: center; color: var(--dim); font-size: 0.9rem; margin-top: 0.6rem;">
+                        Send your <strong>.md</strong> file to
+                        <a href="mailto:yidstore@onoffautomations.com?subject=Documentation%20Contribution"
+                           style="color: var(--primary); text-decoration: none;">
+                           yidstore@onoffautomations.com
+                        </a>
+                        and we'll add it to the store.
+                    </p>
+                `, 'mdi-book-edit-outline', false, [
                     { t: 'Got it', c: 'btn-p', f: 'closePop()' }
                 ]);
             }
