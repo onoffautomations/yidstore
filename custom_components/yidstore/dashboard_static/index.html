@@ -2298,31 +2298,55 @@
             }
         }
 
+        // Digest of the item fields that actually affect rendering.
+        // refreshDashboard runs every 15s and used to call apply()
+        // unconditionally, wiping and rebuilding the entire grid every
+        // tick — that's the side-panel flicker. We now only re-render
+        // when this digest changes.
+        let _lastRenderDigest = '';
+        function computeRenderDigest() {
+            const parts = [
+                requiresRestartSet ? Array.from(requiresRestartSet).sort().join('|') : '',
+            ];
+            for (const i of items) {
+                parts.push([
+                    i.owner,
+                    i.repo_name,
+                    i.is_installed ? 1 : 0,
+                    i.install_source || '',
+                    i.update_available ? 1 : 0,
+                    i.requires_restart ? 1 : 0,
+                    i.is_hidden ? 1 : 0,
+                    i.latest_version || '',
+                ].join(','));
+            }
+            return parts.join('\n');
+        }
+
         async function refreshDashboard() {
-            // Quick sync with integration - just update status without full reload
+            // Quick sync with integration - just update status without full reload.
+            // Only re-render if state actually changed.
             try {
                 const res = await fetch('/api/yidstore/status');
                 if (!res.ok) {
                     console.log('Status API failed:', res.status);
-                    // Even if status fails, still apply with current data
-                    apply();
                     return;
                 }
                 const data = await res.json();
                 applyLiveStatus(data);
 
-                // Update cache with current items
-                setCachedData(items);
-                if (!isOverlayOpen()) {
-                    apply();
+                const digest = computeRenderDigest();
+                if (digest !== _lastRenderDigest) {
+                    _lastRenderDigest = digest;
+                    setCachedData(items);
+                    if (!isOverlayOpen()) {
+                        apply();
+                    }
+                    updateModalRestartBadge();
                 }
-
-                // Update modal restart badge if modal is open
-                updateModalRestartBadge();
             } catch (e) {
                 console.log('Refresh failed:', e);
-                // Still apply current state
-                apply();
+                // No re-render on transient failure — the cached UI is fine.
             }
         }
 
@@ -2816,6 +2840,9 @@
             if (!isOverlayOpen()) {
                 requestAnimationFrame(() => window.scrollTo(0, previousScrollY));
             }
+            // Keep the live-sync digest in sync with what's on screen so the
+            // next /api/yidstore/status tick won't trigger a redundant re-render.
+            try { _lastRenderDigest = computeRenderDigest(); } catch (e) {}
         }
 
         function getDisplayAuthor(owner, displayName) {
