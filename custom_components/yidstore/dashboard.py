@@ -376,6 +376,19 @@ def _collect_local_installed_sync(config_path: str) -> dict:
     }
 
 
+# Short-lived cache for the local install-state disk scan. /status and
+# /repos both need it; without the cache every panel open re-walked
+# custom_components/ and www/ on disk.
+_LOCAL_STATE_CACHE: tuple[float, dict] | None = None
+_LOCAL_STATE_TTL = 30.0  # seconds
+
+
+def _invalidate_local_state_cache() -> None:
+    """Drop the disk-scan cache (call after install/uninstall)."""
+    global _LOCAL_STATE_CACHE
+    _LOCAL_STATE_CACHE = None
+
+
 async def _collect_local_installed(hass: HomeAssistant) -> dict:
     """Collect what is installed on this Home Assistant (async version).
 
@@ -384,6 +397,10 @@ async def _collect_local_installed(hass: HomeAssistant) -> dict:
     match what the user actually has on disk, even if it was installed outside
     of YidStore (e.g. HACS/manual).
     """
+    global _LOCAL_STATE_CACHE
+    if _LOCAL_STATE_CACHE and (time.time() - _LOCAL_STATE_CACHE[0]) < _LOCAL_STATE_TTL:
+        return _LOCAL_STATE_CACHE[1]
+
     # Run filesystem operations in executor
     result = await hass.async_add_executor_job(_collect_local_installed_sync, hass.config.config_dir)
 
@@ -395,6 +412,7 @@ async def _collect_local_installed(hass: HomeAssistant) -> dict:
     except Exception:
         pass
 
+    _LOCAL_STATE_CACHE = (time.time(), result)
     return result
 
 
@@ -663,7 +681,11 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     if not os.path.exists(static_dir):
         os.makedirs(static_dir, exist_ok=True)
 
-    await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, False)])
+    # cache_headers=True lets the browser cache the panel page, fonts and
+    # icons instead of re-downloading them on every sidebar visit. The
+    # panel URL carries a ?v=<startup time> cache-buster, so a new HTML is
+    # fetched after each HA restart (i.e. after every update).
+    await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
 
     if entry.data.get(CONF_SIDE_PANEL, True):
         # Sidebar entry for Admin users - Cache buster added
@@ -853,6 +875,7 @@ def _sync_update_flags_into_cache(coordinator) -> None:
             pkg.get("owner", ""),
             pkg.get("repo_name", ""),
             update_available=pkg.get("update_available", False),
+            installed_version=pkg.get("installed_version"),
             latest_version=pkg.get("latest_version"),
             release_notes=pkg.get("release_notes"),
         )
@@ -970,7 +993,7 @@ class OnOffStoreReposView(HomeAssistantView):
                 if full_name in seen_repos: return
                 # Skip repos from orgs that have their own tabs (Documentation, Automations, Dashboards, Helpers)
                 owner = repo_obj.get("owner", {}).get("login", "")
-                if owner in HIDDEN_STORE_ORGS:
+                if _is_hidden_org(owner):
                     return
                 seen_repos.add(full_name)
                 prev = prev_map.get((owner.lower(), (repo_obj.get("name") or "").lower()))
@@ -1018,13 +1041,13 @@ class OnOffStoreReposView(HomeAssistantView):
                     user_orgs = await user_orgs_task
                     for org in user_orgs:
                         org_name = org.get("username") or org.get("name")
-                        if org_name and org_name not in HIDDEN_STORE_ORGS:
+                        if org_name and not _is_hidden_org(org_name):
                             orgs_to_fetch.add(org_name)
                     _LOGGER.debug("Fetching repos from %d organizations", len(orgs_to_fetch))
                 except Exception as e:
                     _LOGGER.debug("Failed to fetch user orgs: %s", e)
 
-            orgs_to_fetch = orgs_to_fetch - HIDDEN_STORE_ORGS
+            orgs_to_fetch = {o for o in orgs_to_fetch if not _is_hidden_org(o)}
 
             # Fan out org repos + org members concurrently across ALL orgs.
             org_repos_tasks = {o: asyncio.create_task(client.get_org_repos(o)) for o in orgs_to_fetch}
@@ -1121,6 +1144,12 @@ class OnOffStoreReposView(HomeAssistantView):
                 repo = (cr.get("repo") or "").strip()
                 if not owner or not repo:
                     continue
+                # Tab-owned orgs (Helpers, Audio, ...) only show under their
+                # own tab — this path used to bypass that filter. The Audio
+                # org is the exception: audio custom repos install via the
+                # Store flow.
+                if _is_hidden_org(owner) and owner.lower() != "audio":
+                    continue
                 if (owner.lower(), repo.lower()) in existing_keys:
                     continue
                 missing_custom.append((cr, owner, repo))
@@ -1174,8 +1203,9 @@ class OnOffStoreReposView(HomeAssistantView):
                         "asset_name": None,
                         "is_installed": is_installed,
                         "install_source": install_source,
-                        "update_available": False,
-                        "latest_version": None,
+                        "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
+                        "installed_version": tracked_pkg.get("installed_version") if tracked_pkg else None,
+                        "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
                         "release_notes": None,
                         "is_hidden": coordinator.is_hidden_repo(owner, repo),
                         "icon_url": icon_url,
@@ -1218,6 +1248,7 @@ class OnOffStoreReposView(HomeAssistantView):
                     "is_installed": tracked_pkg is not None or disk_installed,
                     "install_source": "yidstore" if tracked_pkg is not None else disk_source,
                     "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
+                    "installed_version": tracked_pkg.get("installed_version") if tracked_pkg else None,
                     "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
                     "release_notes": tracked_pkg.get("release_notes") if tracked_pkg else None,
                     "is_hidden": coordinator.is_hidden_repo(owner, repo),
@@ -1475,6 +1506,7 @@ class OnOffStoreReposView(HomeAssistantView):
             "is_installed": installed,
             "install_source": install_source,
             "update_available": p.get("update_available", False) if p else False,
+            "installed_version": p.get("installed_version") if p else None,
             "latest_version": p.get("latest_version") if p else None,
             "release_notes": p.get("release_notes") if p else None,
             "is_hidden": is_hidden,
@@ -1549,6 +1581,7 @@ class OnOffStoreInstallView(HomeAssistantView):
                 install_source="yidstore",
                 update_available=False,
             )
+            _invalidate_local_state_cache()
             return web.json_response({"success": True, "requires_restart": True})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -1973,6 +2006,7 @@ class OnOffStoreUninstallView(HomeAssistantView):
                     install_source=None,
                     update_available=False,
                 )
+                _invalidate_local_state_cache()
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -2046,6 +2080,8 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "install_source": "yidstore" if disk_installed else None,
                     "requires_restart": needs_restart,
                     "update_available": pkg_data.get("update_available", False) if disk_installed else False,
+                    "installed_version": pkg_data.get("installed_version"),
+                    "latest_version": pkg_data.get("latest_version"),
                 }
 
             return web.json_response({
@@ -2466,6 +2502,17 @@ BLUEPRINTS_ORG = "Blueprints"
 
 # Organizations to hide from the Store view (they have their own tabs)
 HIDDEN_STORE_ORGS = {"Documentation", "Automations", "Dashboards", "Helpers", "Audio", "Blueprints"}
+_HIDDEN_STORE_ORGS_LOWER = {o.lower() for o in HIDDEN_STORE_ORGS}
+
+
+def _is_hidden_org(owner: str) -> bool:
+    """True if the owner org has its own tab (Helpers, Audio, ...).
+
+    Their repos must only appear under that tab, never in the main Store
+    list. Case-insensitive — the previous exact-match check let e.g. a
+    "helpers" (lowercase) org leak into the Store.
+    """
+    return (owner or "").strip().lower() in _HIDDEN_STORE_ORGS_LOWER
 
 
 class AutomationsReposView(HomeAssistantView):

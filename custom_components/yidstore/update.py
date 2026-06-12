@@ -88,8 +88,15 @@ class PackageUpdateEntity(UpdateEntity):
 
     @property
     def latest_version(self) -> str | None:
-        """Return the latest version."""
+        """Return the latest version.
+
+        HA's update entity flags an update whenever this string differs
+        from installed_version, so follow the coordinator's (normalized)
+        decision — otherwise "v3.2.0" vs "3.2.0" shows a phantom update.
+        """
         pkg = self.coordinator.packages.get(self.package_id, {})
+        if not pkg.get("update_available"):
+            return pkg.get("installed_version")
         return pkg.get("latest_version")
 
     @property
@@ -107,14 +114,20 @@ class PackageUpdateEntity(UpdateEntity):
 
     @property
     def entity_picture(self) -> str | None:
-        """Return the entity picture."""
+        """Return the installed integration's own brand icon.
+
+        Served by YidStore's brands endpoint, which prefers the icon
+        shipped inside custom_components/<domain>/brand/ and falls back to
+        the official HA brands site — so update entities show the
+        integration's icon instead of YidStore's.
+        """
         pkg = self.coordinator.packages.get(self.package_id, {})
-        pkg_type = pkg.get("package_type", "integration")
-        if pkg_type == "lovelace":
-            return None  # Could return a card icon
-        elif pkg_type == "blueprints":
+        if pkg.get("package_type", "integration") != "integration":
             return None
-        return None
+        domain = pkg.get("domain") or pkg.get("repo_name", "").lower().replace("-", "_")
+        if not domain:
+            return None
+        return f"/api/yidstore/brands/{domain}/icon.png"
 
     async def async_release_notes(self) -> str | None:
         """Return the release notes."""

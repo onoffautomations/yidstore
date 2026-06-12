@@ -18,6 +18,24 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _norm_version(value: str | None) -> str:
+    """Normalize a version/tag for comparison ("v3.2.0" == "3.2.0")."""
+    v = (value or "").strip().lower()
+    if v.startswith("v") and len(v) > 1 and v[1].isdigit():
+        v = v[1:]
+    return v
+
+
+def _is_version_comparable(installed: str | None) -> bool:
+    """Whether the installed version is a real version we can diff against.
+
+    Branch installs ("main"/"master") and unknown versions can't be
+    compared to a release tag — claiming "update available" for them is
+    always a guess and was producing false positives.
+    """
+    return _norm_version(installed) not in {"", "main", "master", "unknown", "none"}
+
+
 class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
     """Coordinator to manage package tracking and updates."""
 
@@ -229,13 +247,37 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
 
         for package_id, package_data in self.packages.items():
             try:
-                if package_data.get("source", "gitea") in {"github", "hacs"}:
-                    _LOGGER.debug("Skipping update check for %s repo: %s", package_data.get("source"), package_id)
+                source = package_data.get("source", "gitea")
+                if source == "hacs":
+                    _LOGGER.debug("Skipping update check for HACS repo: %s", package_id)
                     continue
 
                 owner = package_data["owner"]
                 repo = package_data["repo_name"]
                 installed_version = package_data["installed_version"]
+
+                if source == "github":
+                    # Resolve via the /releases/latest redirect — no REST
+                    # API, so no unauthenticated rate limit.
+                    from ._utils import async_github_latest_tag
+
+                    latest_tag = await async_github_latest_tag(self.hass, owner, repo)
+                    package_data["last_check"] = datetime.now().isoformat()
+                    if latest_tag:
+                        update_available = (
+                            _is_version_comparable(installed_version)
+                            and _norm_version(latest_tag) != _norm_version(installed_version)
+                        )
+                        package_data["latest_version"] = latest_tag
+                        package_data["update_available"] = update_available
+                        if update_available:
+                            _LOGGER.info(
+                                "✓ Update available for %s (GitHub): %s → %s",
+                                repo, installed_version, latest_tag,
+                            )
+                    else:
+                        _LOGGER.debug("No GitHub releases found for %s/%s", owner, repo)
+                    continue
 
                 _LOGGER.debug("Checking %s/%s (installed: %s)", owner, repo, installed_version)
 
@@ -246,8 +288,13 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     latest_version = latest_release.get("tag_name", "unknown")
                     _LOGGER.debug("Latest version: %s", latest_version)
 
-                    # Check if update available
-                    update_available = latest_version != installed_version
+                    # Check if update available — normalized comparison so
+                    # "v3.2.0" vs "3.2.0" doesn't flag a phantom update, and
+                    # branch/unknown installs are never flagged.
+                    update_available = (
+                        _is_version_comparable(installed_version)
+                        and _norm_version(latest_version) != _norm_version(installed_version)
+                    )
 
                     # Update package data
                     package_data["latest_version"] = latest_version
