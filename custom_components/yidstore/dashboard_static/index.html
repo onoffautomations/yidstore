@@ -7,66 +7,67 @@
     <title>YidStore</title>
     <link id="appFavicon" rel="icon" type="image/png" href="dark_icon.png">
     <link id="appAppleTouch" rel="apple-touch-icon" href="dark_icon.png">
-    <meta id="appThemeColor" name="theme-color" content="#0f172a">
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&display=swap"
+    <meta id="appThemeColor" name="theme-color" content="#111111">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
+        /* Home Assistant style palette */
         :root {
-            --primary: #00d2ff;
-            --secondary: #3a7bd5;
+            --primary: #03a9f4;
+            --secondary: #0288d1;
 
-            /* Theme */
-            --bg: #0f172a;
-            --card: #1e293b;
-            --text: #f8fafc;
-            --dim: #94a3b8;
+            /* Theme (dark) */
+            --bg: #111111;
+            --card: #1c1c1c;
+            --text: #e1e1e1;
+            --dim: #9b9b9b;
 
             /* Surfaces & borders */
-            --border: #334155;
-            --hover-bg: #334155;
-            --btn-hover: rgba(255, 255, 255, 0.1);
-            --soft: rgba(255, 255, 255, 0.05);
+            --border: #2c2c2c;
+            --hover-bg: #2a2a2a;
+            --btn-hover: rgba(255, 255, 255, 0.08);
+            --soft: rgba(255, 255, 255, 0.06);
             --soft-hover: rgba(255, 255, 255, 0.1);
-            --divider: rgba(255, 255, 255, 0.06);
+            --divider: rgba(255, 255, 255, 0.12);
 
             /* Code / inputs */
-            --input-bg: #0f172a;
-            --code-bg: #0f172a;
+            --input-bg: #252525;
+            --code-bg: #252525;
 
-            --glow: rgba(0, 210, 255, 0.2);
-            --success: #22c55e;
-            --warning: #eab308;
-            --danger: #ef4444;
-            --grad: linear-gradient(135deg, #00d2ff, #3a7bd5);
+            --glow: rgba(3, 169, 244, 0.2);
+            --success: #4caf50;
+            --warning: #ff9800;
+            --danger: #f44336;
+            --grad: #03a9f4;
         }
 
-        /* Light theme */
+        /* Light theme (matches HA default) */
         html[data-theme="light"] {
-            --bg: #f6f7fb;
+            --bg: #fafafa;
             --card: #ffffff;
-            --text: #0f172a;
-            --dim: #475569;
+            --text: #212121;
+            --dim: #727272;
 
-            --border: #e2e8f0;
-            --hover-bg: #f1f5f9;
-            --btn-hover: rgba(15, 23, 42, 0.08);
-            --soft: rgba(15, 23, 42, 0.05);
-            --soft-hover: rgba(15, 23, 42, 0.08);
-            --divider: rgba(15, 23, 42, 0.08);
+            --border: #e6e6e6;
+            --hover-bg: #f5f5f5;
+            --btn-hover: rgba(0, 0, 0, 0.06);
+            --soft: rgba(0, 0, 0, 0.04);
+            --soft-hover: rgba(0, 0, 0, 0.07);
+            --divider: rgba(0, 0, 0, 0.1);
 
-            --input-bg: #f1f5f9;
-            --code-bg: #f1f5f9;
+            --input-bg: #f5f5f5;
+            --code-bg: #f5f5f5;
 
-            --glow: rgba(58, 123, 213, 0.18);
+            --glow: rgba(3, 169, 244, 0.18);
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'Roboto', 'Segoe UI', sans-serif;
         }
 
         body {
@@ -316,7 +317,7 @@
 
         .bulk-bar {
             background: var(--primary);
-            color: #000;
+            color: #fff;
             padding: 0.6rem 1rem;
             border-radius: 12px;
             margin-bottom: 1rem;
@@ -402,11 +403,12 @@
 
         .card {
             background: var(--card);
-            border-radius: 16px;
-            padding: 1.2rem;
+            border-radius: 12px;
+            padding: 1rem;
             border: 1px solid var(--border);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
             cursor: pointer;
-            transition: 0.3s;
+            transition: box-shadow 0.15s ease, border-color 0.15s ease;
             display: flex;
             flex-direction: column;
             position: relative;
@@ -414,36 +416,70 @@
         }
 
         .card:hover {
-            transform: translateY(-5px);
-            border-color: var(--primary);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
         }
 
         .card.selected {
             border-color: var(--primary);
-            background: rgba(0, 210, 255, 0.05);
+            background: rgba(3, 169, 244, 0.06);
         }
 
-        .card::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: var(--grad);
-            opacity: 0;
-            transition: 0.3s;
+        /* HA-style bottom status row */
+        .card-status {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding-top: 0.7rem;
+            margin-top: auto;
+            border-top: 1px solid var(--divider);
+            font-size: 0.8rem;
+            color: var(--dim);
+            min-height: 38px;
         }
 
-        .card:hover::after {
-            opacity: 1;
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #9e9e9e;
+            flex: 0 0 auto;
+        }
+
+        .status-dot.installed {
+            background: var(--success);
+        }
+
+        .status-dot.restart {
+            background: var(--warning);
+        }
+
+        .chip-update {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 50px;
+            background: rgba(3, 169, 244, 0.12);
+            color: var(--primary);
+            font-size: 0.72rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .card-author {
+            color: var(--dim);
+            font-size: 0.78rem;
+            margin-bottom: 0.3rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .list-row {
             background: var(--card);
-            border-radius: 14px;
+            border-radius: 12px;
             border: 1px solid var(--border);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
             padding: 0.8rem 1rem;
             display: grid;
             grid-template-columns: 48px minmax(0, 1fr) auto;
@@ -454,13 +490,12 @@
         }
 
         .list-row:hover {
-            border-color: var(--primary);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
         }
 
         .list-row.selected {
             border-color: var(--primary);
-            background: rgba(0, 210, 255, 0.05);
+            background: rgba(3, 169, 244, 0.06);
         }
 
         .list-title {
@@ -547,7 +582,7 @@
         .select-checkbox.checked::after {
             content: '\F012C';
             font-family: 'Material Design Icons';
-            color: #000;
+            color: #fff;
             font-size: 14px;
         }
 
@@ -586,7 +621,7 @@
         .list-select-checkbox.checked::after {
             content: '\F012C';
             font-family: 'Material Design Icons';
-            color: #000;
+            color: #fff;
             font-size: 14px;
         }
 
@@ -599,19 +634,21 @@
         }
 
         .type-tag {
-            padding: 0.25rem 0.5rem;
-            border-radius: 6px;
-            font-size: 0.6rem;
-            font-weight: 800;
+            padding: 0.2rem 0.5rem;
+            border-radius: 50px;
+            font-size: 0.62rem;
+            font-weight: 500;
             text-transform: uppercase;
+            letter-spacing: 0.4px;
             display: flex;
             align-items: center;
             gap: 0.2rem;
+            flex: 0 0 auto;
         }
 
         .tag-int {
-            background: rgba(0, 210, 255, 0.1);
-            color: #00d2ff;
+            background: rgba(3, 169, 244, 0.12);
+            color: #03a9f4;
         }
 
         .tag-card {
@@ -630,36 +667,34 @@
         }
 
         .badge {
-            font-size: 0.6rem;
-            padding: 0.2rem 0.5rem;
+            font-size: 0.65rem;
+            padding: 0.2rem 0.6rem;
             border-radius: 50px;
-            font-weight: 700;
+            font-weight: 500;
             border: 1px solid transparent;
+            white-space: nowrap;
         }
 
         .badge-update {
-            background: rgba(234, 179, 8, 0.1);
-            color: var(--warning);
-            border-color: rgba(234, 179, 8, 0.2);
+            background: rgba(3, 169, 244, 0.12);
+            color: var(--primary);
         }
 
         .badge-inst {
-            background: rgba(34, 197, 94, 0.1);
+            background: rgba(76, 175, 80, 0.12);
             color: var(--success);
-            border-color: rgba(34, 197, 94, 0.2);
         }
 
         .badge-restart {
-            background: rgba(249, 115, 22, 0.1);
-            color: #f97316;
-            border-color: rgba(249, 115, 22, 0.2);
+            background: rgba(255, 152, 0, 0.12);
+            color: var(--warning);
         }
 
         .card-title {
-            font-size: 1.1rem;
-            font-weight: 700;
+            font-size: 0.95rem;
+            font-weight: 500;
             color: var(--text);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.15rem;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -672,15 +707,22 @@
 
         .card-desc {
             color: var(--dim);
-            font-size: 0.85rem;
-            line-height: 1.4;
-            margin-bottom: 0.5rem;
+            font-size: 0.82rem;
+            line-height: 1.45;
+            margin-bottom: 0.7rem;
             flex-grow: 1;
             display: -webkit-box;
-            -webkit-line-clamp: 3;
-            line-clamp: 3;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
+        }
+
+        .card-main {
+            display: flex;
+            gap: 0.8rem;
+            align-items: flex-start;
+            flex-grow: 1;
         }
 
         .card-foot {
@@ -721,13 +763,13 @@
         }
 
         .btn {
-            padding: 0.7rem 1.2rem;
-            border-radius: 12px;
-            font-weight: 700;
+            padding: 0.6rem 1.1rem;
+            border-radius: 8px;
+            font-weight: 500;
             cursor: pointer;
             border: none;
-            transition: 0.3s;
-            font-size: 0.9rem;
+            transition: 0.2s;
+            font-size: 0.85rem;
             display: flex;
             align-items: center;
             gap: 0.5rem;
@@ -735,13 +777,13 @@
         }
 
         .btn-p {
-            background: var(--grad);
+            background: var(--primary);
             color: #fff;
         }
 
         .btn-p:hover {
-            transform: scale(1.03);
-            box-shadow: 0 5px 15px var(--glow);
+            background: var(--secondary);
+            box-shadow: 0 2px 8px var(--glow);
         }
 
         .btn-p:disabled {
@@ -781,8 +823,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(10, 15, 30, 0.95);
-            backdrop-filter: blur(15px);
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(4px);
             display: none;
             z-index: 1000;
             padding: 0.5rem;
@@ -859,11 +901,11 @@
         }
 
         .modal-b.scrolling::-webkit-scrollbar-thumb {
-            background: linear-gradient(180deg, #00d2ff, #3a7bd5);
+            background: var(--primary);
         }
 
         .modal-b.scrolling {
-            scrollbar-color: #3a7bd5 rgba(255, 255, 255, 0.06);
+            scrollbar-color: var(--primary) rgba(255, 255, 255, 0.06);
         }
 
         .modal-b::-webkit-scrollbar-button {
@@ -874,7 +916,7 @@
 
         .modal-f {
             padding: 1rem 1.2rem;
-            border-top: 1px solid #334155;
+            border-top: 1px solid var(--border);
             display: flex;
             justify-content: flex-end;
             gap: 0.8rem;
@@ -1276,8 +1318,9 @@
 
         .view-tab.active {
             color: var(--primary);
-            background: var(--soft);
+            background: transparent;
             border-bottom: 2px solid var(--primary);
+            border-radius: 0;
         }
 
         .beta-chip {
@@ -1839,7 +1882,7 @@
                     <button class="btn btn-dark" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
                         Install</button>
                     <button class="btn btn-o" onclick="clearSelection()"
-                        style="border-color:#000; color:#000;">Cancel</button>
+                        style="border-color:#fff; color:#fff;">Cancel</button>
                 </div>
             </div>
 
@@ -2132,8 +2175,8 @@
         const THEME_KEY = 'yidstore_theme';
         const CACHE_KEY = 'yidstore_cache';
         const AUDIO_LOCATION_KEY = 'yidstore_audio_location';
-        const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
-        const LIVE_SYNC_INTERVAL = 15 * 1000; // lightweight status sync
+        const CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hours — matches server-side refresh schedule
+        const LIVE_SYNC_INTERVAL = 5 * 60 * 1000; // status sync every 5 min (only while tab is visible)
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
         function formatReleaseDate(dateString) {
@@ -2351,11 +2394,9 @@
         }
 
         async function syncBackendAfterAction() {
-            try {
-                await fetch('/api/yidstore/refresh', { method: 'POST' });
-            } catch (e) {
-                console.log('Backend refresh failed:', e);
-            }
+            // The backend patches its own cache on install/uninstall, so a
+            // lightweight status fetch is all the UI needs — no full
+            // server-side update check after every action.
             await refreshDashboard();
         }
 
@@ -2381,9 +2422,11 @@
 
         function startAutoReload() {
             if (autoReloadInterval) clearInterval(autoReloadInterval);
-            // Full reload every 2 hours
+            // Re-sync with the server's store list every 12 hours. Silent
+            // (no loader) and no forced server rebuild — the backend already
+            // rebuilds its list on its own 12h schedule and after restarts.
             autoReloadInterval = setInterval(() => {
-                fullReload();
+                fullReload(false, false);
             }, CACHE_DURATION);
         }
 
@@ -2434,7 +2477,7 @@
             if (apple) apple.href = iconFile;
 
             const themeColor = document.getElementById('appThemeColor');
-            if (themeColor) themeColor.content = (t === 'light') ? '#f6f7fb' : '#0f172a';
+            if (themeColor) themeColor.content = (t === 'light') ? '#fafafa' : '#111111';
 
             const iconImg = document.getElementById('headerIconImg');
             if (iconImg) {
@@ -2632,7 +2675,7 @@
             const btn = document.getElementById('selectModeBtn');
             if (btn) {
                 btn.style.background = selectMode ? 'var(--primary)' : '';
-                btn.style.color = selectMode ? '#000' : '';
+                btn.style.color = selectMode ? '#fff' : '';
             }
             if (!selectMode) {
                 clearSelection();
@@ -2713,8 +2756,14 @@
                 grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--dim);"><i class="mdi mdi-loading mdi-spin" style="font-size: 2.5rem; display: block; margin-bottom: 0.8rem;"></i> Loading...</div>';
             }
             if (triggerBackendRefresh) {
+                // Explicit "Full Reload": ask the server to rebuild its store
+                // list from upstream (otherwise it serves its 12h cache).
                 try {
-                    await fetch('/api/yidstore/refresh', { method: 'POST' });
+                    await fetch('/api/yidstore/refresh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rebuild: true })
+                    });
                 } catch (e) {}
             }
             const keepCurrentView = !showLoader && items.length > 0;
@@ -2723,12 +2772,15 @@
         }
 
         function triggerAutoFullReload() {
-            // Use cached data for fast startup, then refresh once in the background.
+            // Use cached data for fast startup, then sync once with the
+            // server's cached list in the background. This is a single cheap
+            // request — the server only rebuilds its list every 12 hours and
+            // after an HA restart.
             const cached = getCachedData();
             load(false);
             if (cached) {
                 setTimeout(() => {
-                    fullReload(false, true);
+                    fullReload(false, false);
                 }, 300);
             }
         }
@@ -2781,8 +2833,14 @@
         }
 
         async function checkUpdates() {
-            // Quick refresh - sync with integration status
-            await syncBackendAfterAction();
+            // Explicit user action: ask the backend to run an update check,
+            // then sync the UI.
+            try {
+                await fetch('/api/yidstore/refresh', { method: 'POST' });
+            } catch (e) {
+                console.log('Backend refresh failed:', e);
+            }
+            await refreshDashboard();
         }
 
         function apply() {
@@ -2869,12 +2927,6 @@
                 ? 'Card'
                 : (i.type === 'blueprints' ? 'Blueprint' : (i.type === 'audio' ? 'Audio' : 'Integration'));
 
-            // Build description: "Integration by: Author" + actual description if any
-            let descContent = `<span style="color: var(--primary);">${typeLabel} by:</span> ${authorDisplay}`;
-            if (i.description) {
-                descContent += `<br><span style="color: var(--dim); font-size: 0.8rem;">${i.description}</span>`;
-            }
-
             // Icon handling - prefer Home Assistant brands by domain (theme-aware) with fallbacks
             let iconHtml;
             if (i.type === 'lovelace' || i.type === 'audio') {
@@ -2896,40 +2948,61 @@
                          onload="brandImgLoaded(this)"
                          onerror="brandImgError(this)"
                          style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                    <div class="card-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
+                    <div class="card-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); align-items: center; justify-content: center;">
                         <i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: var(--primary);"></i>
                     </div>`;
             }
 
+            // HA add-on store style: bottom status row with colored dot
+            const restartNeeded = i.type === 'integration' && needsRestart(i.owner, i.repo_name);
+            let dotClass = 'status-dot';
+            let statusLabel = 'Not installed';
+            if (i.is_installed) {
+                if (restartNeeded) {
+                    dotClass += ' restart';
+                    statusLabel = 'Restart required';
+                } else {
+                    dotClass += ' installed';
+                    statusLabel = i.install_source === 'hacs'
+                        ? 'Installed (HACS)'
+                        : (i.install_source === 'manual' ? 'Installed (manual)' : 'Installed');
+                }
+            }
+            const updateChip = (i.is_installed && i.update_available)
+                ? '<span class="chip-update"><i class="mdi mdi-update"></i> Update available</span>'
+                : '';
+            const sourceLabel = i.source === 'github'
+                ? '<i class="mdi mdi-github"></i> GitHub'
+                : '<i class="mdi mdi-store"></i> OnOff Store';
+
             card.innerHTML = `
             <div class="select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
             <i class="mdi mdi-check-circle card-check"></i>
-            <div class="card-head">
-                <div class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</div>
-                <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
-                     ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                     ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
-                </div>
-            </div>
-            <div style="display: flex; gap: 0.8rem; align-items: flex-start;">
+            <div class="card-main">
                 ${iconHtml}
                 <div style="flex: 1; min-width: 0;">
                     <div class="card-title">
                         <span>${displayTitle}</span>
-                        <div class="card-actions">
-
-                            ${i.is_installed ? `
-                            <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
-                                <i class="mdi mdi-trash-can-outline"></i>
-                            </button>` : ''}
-                        </div>
+                        <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${typeLabel}</span>
                     </div>
-                    <div class="card-desc">${descContent}</div>
+                    <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}
+                        ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.85rem;"></i>' : ''}
+                    </div>
+                    <div class="card-desc">${i.description || ''}</div>
                 </div>
             </div>
-            <div class="card-foot">
-                <div style="color:var(--dim); font-size:0.75rem;">${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
-                <button class="btn btn-p" onclick="openDet('${i.owner}','${i.repo_name}',event)">View <i class="mdi mdi-chevron-right"></i></button>
+            <div class="card-status">
+                <span class="${dotClass}"></span>
+                <span>${statusLabel}</span>
+                <span style="flex:1;"></span>
+                ${updateChip}
+                ${i.is_installed ? `
+                <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
+                    <i class="mdi mdi-trash-can-outline"></i>
+                </button>` : ''}
+                <button class="action-btn" onclick="openDet('${i.owner}','${i.repo_name}',event)" title="Details">
+                    <i class="mdi mdi-chevron-right"></i>
+                </button>
             </div>
         `;
             card.onclick = (e) => {
@@ -2961,35 +3034,30 @@
                        <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: #a855f7;"></i>
                    </div>`;
             } else {
-                const iconUrl = i.icon_url;
-                if (iconUrl) {
-                    iconHtml = `<img src="${iconUrl}" alt="" class="list-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                       <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
+                // Same brand-candidate handling as grid cards: try the local
+                // brands endpoint / HA brands / icon_url in order, cycling on
+                // 404 via brandImgError. (Using i.icon_url directly broke
+                // here — it's an unverified best-guess URL, so one 404 meant
+                // the generic puzzle icon forever.)
+                const domain = getDomainFromItem(i);
+                const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
+                const primaryIcon = candidates[0] || '';
+                if (primaryIcon) {
+                    const dataCandidates = candidates.join('|');
+                    const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
+                    iconHtml = `<img src="${primaryIcon}" alt="" class="list-icon"
+                         data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
+                         data-candidates="${dataCandidates}"
+                         onload="brandImgLoaded(this)"
+                         onerror="brandImgError(this)"
+                         style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                       <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); align-items: center; justify-content: center;">
                            <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
                        </div>`;
                 } else {
-                    // Do brands lookup for list items too?
-                    // The current list implementation logic was simpler: check i.icon_url.
-                    // We should update it to use brands as well for consistency.
-                    const domain = getDomainFromItem(i);
-                    const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
-                    const primaryIcon = candidates[0] || '';
-                    if (primaryIcon) {
-                        const dataCandidates = candidates.join('|');
-                        iconHtml = `<img src="${primaryIcon}" alt="" class="list-icon"
-                             data-brand-domain="${domain}" data-brand-kind="icon"
-                             data-candidates="${dataCandidates}"
-                             onload="brandImgLoaded(this)"
-                             onerror="brandImgError(this)"
-                             style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                           <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); align-items: center; justify-content: center;">
-                               <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                           </div>`;
-                    } else {
-                        iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(0,210,255,0.1); display: flex; align-items: center; justify-content: center;">
-                               <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                           </div>`;
-                    }
+                    iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); display: flex; align-items: center; justify-content: center;">
+                           <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
+                       </div>`;
                 }
             }
 

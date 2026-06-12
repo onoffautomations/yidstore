@@ -117,7 +117,10 @@
   async function init() {
     await loadLocalBrands();
     patch();
-    setInterval(loadLocalBrands, 60000);
+    // Refresh the local brand list rarely — it only changes when an
+    // integration is installed/removed, and a stale list just means the
+    // official brands site is used as fallback.
+    setInterval(loadLocalBrands, 12 * 60 * 60 * 1000);
   }
 
   if (document.readyState === 'loading') {
