@@ -5,51 +5,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>YidStore</title>
-    <link id="appFavicon" rel="icon" type="image/png" href="dark_icon.png">
-    <link id="appAppleTouch" rel="apple-touch-icon" href="dark_icon.png">
-    <meta id="appThemeColor" name="theme-color" content="#111111">
+    <link id="appFavicon" rel="icon" type="image/png" href="icon.png">
+    <link id="appAppleTouch" rel="apple-touch-icon" href="icon.png">
+    <meta id="appThemeColor" name="theme-color" content="#fafafa">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        /* Home Assistant style palette */
+        /* Home Assistant style palette — light by default (matches HA) */
         :root {
             --primary: #03a9f4;
             --secondary: #0288d1;
 
-            /* Theme (dark) */
-            --bg: #111111;
-            --card: #1c1c1c;
-            --text: #e1e1e1;
-            --dim: #9b9b9b;
-
-            /* Surfaces & borders */
-            --border: #2c2c2c;
-            --hover-bg: #2a2a2a;
-            --btn-hover: rgba(255, 255, 255, 0.08);
-            --soft: rgba(255, 255, 255, 0.06);
-            --soft-hover: rgba(255, 255, 255, 0.1);
-            --divider: rgba(255, 255, 255, 0.12);
-
-            /* Code / inputs */
-            --input-bg: #252525;
-            --code-bg: #252525;
-
-            --glow: rgba(3, 169, 244, 0.2);
-            --success: #4caf50;
-            --warning: #ff9800;
-            --danger: #f44336;
-            --grad: #03a9f4;
-        }
-
-        /* Light theme (matches HA default) */
-        html[data-theme="light"] {
+            /* Theme (light) */
             --bg: #fafafa;
             --card: #ffffff;
             --text: #212121;
             --dim: #727272;
 
+            /* Surfaces & borders */
             --border: #e6e6e6;
             --hover-bg: #f5f5f5;
             --btn-hover: rgba(0, 0, 0, 0.06);
@@ -57,10 +32,35 @@
             --soft-hover: rgba(0, 0, 0, 0.07);
             --divider: rgba(0, 0, 0, 0.1);
 
+            /* Code / inputs */
             --input-bg: #f5f5f5;
             --code-bg: #f5f5f5;
 
             --glow: rgba(3, 169, 244, 0.18);
+            --success: #4caf50;
+            --warning: #ff9800;
+            --danger: #f44336;
+            --grad: #03a9f4;
+        }
+
+        /* Dark theme (opt-in via the theme switch) */
+        html[data-theme="dark"] {
+            --bg: #111111;
+            --card: #1c1c1c;
+            --text: #e1e1e1;
+            --dim: #9b9b9b;
+
+            --border: #2c2c2c;
+            --hover-bg: #2a2a2a;
+            --btn-hover: rgba(255, 255, 255, 0.08);
+            --soft: rgba(255, 255, 255, 0.06);
+            --soft-hover: rgba(255, 255, 255, 0.1);
+            --divider: rgba(255, 255, 255, 0.12);
+
+            --input-bg: #252525;
+            --code-bg: #252525;
+
+            --glow: rgba(3, 169, 244, 0.2);
         }
 
         * {
@@ -1210,57 +1210,115 @@
             }
         }
 
-        /* Mobile layout: search full-width, filters below in a clean grid */
+        /* Desktop: mobile-only header controls stay hidden */
+        .mobile-tab-select {
+            display: none;
+        }
+
+        /* Mobile layout: [YidStore + by-line] [search bar] [section dropdown],
+           with the filters + select + menu on the next line. */
         @media (max-width: 740px) {
             header {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 0.6rem;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 0.5rem;
                 margin-bottom: 0.9rem;
             }
 
+            /* Brand: "YidStore" with a small by-line (tapping opens the HA
+               sidebar) */
+            .sidebar-toggle {
+                display: none !important;
+            }
+
             .powered-by {
-                order: 3;
-                text-align: center;
+                display: none;
             }
 
-            .controls {
-                width: 100%;
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 0.55rem;
-                justify-content: stretch;
-                align-items: center;
+            .logo {
+                font-size: 1rem;
+                gap: 0;
             }
 
+            .logo-desc {
+                display: block;
+                font-size: 0.58rem;
+                white-space: nowrap;
+            }
+
+            /* Middle: search bar, always visible */
             .search-box {
-                grid-column: 1 / -1;
+                display: block;
                 width: 100%;
                 max-width: none;
                 min-width: 0;
             }
 
-            .btn-refresh {
+            .search-box input {
+                padding: 0.45rem 0.6rem 0.45rem 2rem;
+                font-size: 0.8rem;
+            }
+
+            /* Right: branded section dropdown (replaces the tab strip) */
+            .mobile-tab-select {
+                display: block;
+                justify-self: end;
+                max-width: 105px;
+                padding: 0.45rem 0.5rem;
+                border-radius: 50px;
+                border: 1px solid var(--primary);
+                background: var(--card);
+                color: var(--primary);
+                font-weight: 600;
+                font-size: 0.8rem;
+                outline: none;
+            }
+
+            .view-tabs {
+                display: none;
+            }
+
+            /* Filters row: filter / author / sort inline + select-mode + menu,
+               branded like the section dropdown */
+            .controls {
+                grid-column: 1 / -1;
                 width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.4rem;
+                align-items: center;
             }
 
             #filterF,
             #authorF,
             #sort {
-                width: 100%;
+                flex: 1 1 0;
+                width: auto;
                 min-width: 0;
+                max-width: none;
+                font-size: 0.75rem;
+                padding: 0.45rem 0.4rem;
+                border: 1px solid var(--primary);
+                background: var(--card);
+                color: var(--primary);
+                font-weight: 600;
+            }
+
+            /* No grid/list switch on mobile */
+            #viewToggleBtn {
+                display: none;
             }
 
             .menu-container {
-                grid-column: 1 / -1;
                 display: flex;
-                justify-content: flex-end;
-                gap: 0.4rem;
+                gap: 0.2rem;
+                flex: 0 0 auto;
             }
 
             .btn-icon {
-                width: 42px;
-                height: 42px;
+                width: 40px;
+                height: 40px;
             }
         }
 
@@ -1334,6 +1392,53 @@
             letter-spacing: 0.5px;
             margin-left: 4px;
             vertical-align: middle;
+        }
+
+        /* Contribute banner (HA-style info bar, replaces the old popup) */
+        .contribute-banner {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.7rem 1rem;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            background: rgba(3, 169, 244, 0.08);
+            border: 1px solid rgba(3, 169, 244, 0.25);
+            color: var(--text);
+            font-size: 0.85rem;
+            line-height: 1.45;
+        }
+
+        .contribute-banner > i {
+            color: var(--primary);
+            font-size: 1.3rem;
+            flex: 0 0 auto;
+        }
+
+        .contribute-banner a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .contribute-banner a:hover {
+            text-decoration: underline;
+        }
+
+        .contribute-banner .banner-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--dim);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0.3rem;
+            border-radius: 50%;
+            flex: 0 0 auto;
+        }
+
+        .contribute-banner .banner-close:hover {
+            background: var(--btn-hover);
+            color: var(--text);
         }
 
         /* Documentation Section */
@@ -1772,29 +1877,144 @@
             font-size: 1rem;
             color: var(--warning);
         }
+        /* ----------------------------------------------------------------
+           Mobile optimization
+           ---------------------------------------------------------------- */
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            min-width: 0;
+        }
+
+        /* HA sidebar toggle — iframe panels have no HA header on mobile,
+           so without this there is no way to get the sidebar back. */
+        .sidebar-toggle {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+
+        @media (max-width: 870px) {
+            .sidebar-toggle {
+                display: inline-flex;
+            }
+        }
+
+        /* Tabs: swipeable on narrow screens instead of wrapping/overflowing */
+        .view-tabs {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+
+        .view-tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .view-tab {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+
+        /* Tab strip is replaced by the section dropdown on phones.
+           (Lives here, after the base .view-tabs rule, so it wins.) */
+        @media (max-width: 740px) {
+            .view-tabs {
+                display: none;
+            }
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 0.75rem;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+
+            /* Detail dialog goes full-screen, like native HA on mobile */
+            #modal {
+                padding: 0;
+            }
+
+            #modal .modal-c {
+                height: 100dvh;
+                max-height: 100dvh;
+                border-radius: 0;
+                border: none;
+            }
+
+            .card-status {
+                flex-wrap: wrap;
+                row-gap: 0.4rem;
+            }
+
+            .version-select,
+            .version-wrap {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .list-row {
+                grid-template-columns: 40px minmax(0, 1fr);
+            }
+
+            .list-actions {
+                grid-column: 1 / -1;
+                justify-content: flex-end;
+            }
+
+            body.select-mode .list-row {
+                grid-template-columns: 22px 40px minmax(0, 1fr);
+            }
+        }
     </style>
 </head>
 
 <body>
     <div class="container">
         <header>
-            <div class="logo-section">
-                <div class="logo" onclick="load()">
-                    <img id="headerIconImg" class="store-icon" alt="YidStore Icon">
-                    <img id="headerLogoImg" class="logo-img" alt="YidStore Logo">
-                    <i id="headerLogoFallback" class="mdi mdi-storefront"></i>
-                    <span class="store-title">YidStore</span>
+            <div class="header-brand">
+                <button id="sidebarToggle" class="btn-icon sidebar-toggle" onclick="toggleHaSidebar()"
+                    title="Open Home Assistant menu" aria-label="Open Home Assistant menu">
+                    <i class="mdi mdi-menu-open" style="transform: scaleX(-1);"></i>
+                </button>
+                <div class="logo-section">
+                    <div class="logo" onclick="onLogoClick()">
+                        <img id="headerIconImg" class="store-icon" alt="YidStore Icon">
+                        <img id="headerLogoImg" class="logo-img" alt="YidStore Logo">
+                        <i id="headerLogoFallback" class="mdi mdi-storefront"></i>
+                        <span class="store-title">YidStore</span>
+                    </div>
+                    <div class="logo-desc">by: OnOff Automations</div>
                 </div>
-                <div class="logo-desc">Your Integration Store</div>
             </div>
             <div class="powered-by">
                 Powered by: <strong><a href="https://onoffautomations.com/" target="_blank" rel="noopener noreferrer"
                         style="color: inherit; text-decoration: none;">OnOff Automations</a></strong></div>
+            <!-- Search lives at header level so it can sit between the brand
+                 and the section dropdown on mobile -->
+            <div class="search-box">
+                <i class="mdi mdi-magnify"></i>
+                <input type="text" id="q" placeholder="Search..." oninput="apply()">
+            </div>
+            <!-- Mobile-only: branded section dropdown -->
+            <select id="mobileTabSelect" class="mobile-tab-select" onchange="switchView(this.value)"
+                title="Section" aria-label="Section">
+                <option value="store">Store</option>
+                <option value="docs">Documentation</option>
+                <option value="audio">Audio</option>
+                <option value="blueprints">Blueprints</option>
+                <option value="automations">Automations</option>
+                <option value="dashboards">Dashboards</option>
+                <option value="helpers">Helpers</option>
+            </select>
             <div class="controls">
-                <div class="search-box">
-                    <i class="mdi mdi-magnify"></i>
-                    <input type="text" id="q" placeholder="Search..." oninput="apply()">
-                </div>
                 <select id="filterF" onchange="apply()" title="Filter">
                     <option value="all">Filter: All</option>
                     <option value="integration">Filter: Integrations</option>
@@ -1891,6 +2111,18 @@
 
         <!-- Documentation View -->
         <div id="docsView">
+            <!-- Contribute banner (replaces the old popup) -->
+            <div id="docsContributeBanner" class="contribute-banner">
+                <i class="mdi mdi-book-edit-outline"></i>
+                <span>
+                    Have a guide or write-up you'd like to share? Send your <strong>.md</strong> file to
+                    <a href="mailto:yidstore@onoffautomations.com?subject=Documentation%20Contribution">yidstore@onoffautomations.com</a>
+                    and we'll add it to the store.
+                </span>
+                <button class="banner-close" onclick="dismissDocsBanner()" title="Dismiss" aria-label="Dismiss">
+                    <i class="mdi mdi-close"></i>
+                </button>
+            </div>
             <!-- Docs Controls -->
             <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                 <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
@@ -2199,12 +2431,13 @@
                 const cached = localStorage.getItem(CACHE_KEY);
                 if (!cached) return null;
                 const { data, timestamp } = JSON.parse(cached);
+                if (!Array.isArray(data) || data.length === 0) return null;
                 const age = Date.now() - timestamp;
-                if (age > CACHE_DURATION) {
-                    localStorage.removeItem(CACHE_KEY);
-                    return null;
-                }
-                return { data, age };
+                // Never block rendering on an old cache: show it instantly
+                // and let the background sync replace it. This removes the
+                // "sometimes the panel takes forever" case that happened
+                // whenever the cache crossed the expiry age.
+                return { data, age, expired: age > CACHE_DURATION };
             } catch (e) {
                 localStorage.removeItem(CACHE_KEY);
                 return null;
@@ -2338,6 +2571,8 @@
                 if (status.update_available !== undefined) {
                     item.update_available = !!status.update_available;
                 }
+                if (status.installed_version) item.installed_version = status.installed_version;
+                if (status.latest_version) item.latest_version = status.latest_version;
             }
         }
 
@@ -2360,6 +2595,7 @@
                     i.update_available ? 1 : 0,
                     i.requires_restart ? 1 : 0,
                     i.is_hidden ? 1 : 0,
+                    i.installed_version || '',
                     i.latest_version || '',
                 ].join(','));
             }
@@ -2452,8 +2688,9 @@
         }
 
         function getSavedTheme() {
-            const t = (localStorage.getItem(THEME_KEY) || 'dark').toLowerCase();
-            return (t === 'light') ? 'light' : 'dark';
+            // Default is light (matches Home Assistant); dark is opt-in.
+            const t = (localStorage.getItem(THEME_KEY) || 'light').toLowerCase();
+            return (t === 'dark') ? 'dark' : 'light';
         }
 
         function setTheme(theme, persist = true) {
@@ -2517,7 +2754,7 @@
         }
 
         function initTheme() {
-            // Default is dark
+            // Default is light (HA-style); saved preference wins
             setTheme(getSavedTheme(), false);
 
             // Keyboard toggle for accessibility
@@ -2968,8 +3205,14 @@
                         : (i.install_source === 'manual' ? 'Installed (manual)' : 'Installed');
                 }
             }
+            const versionInfo = (i.installed_version && i.latest_version)
+                ? `<span style="font-size:0.68rem; color:var(--dim); white-space:nowrap;">${i.installed_version} → ${i.latest_version}</span>`
+                : '';
             const updateChip = (i.is_installed && i.update_available)
-                ? '<span class="chip-update"><i class="mdi mdi-update"></i> Update available</span>'
+                ? `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                       <span class="chip-update"><i class="mdi mdi-update"></i> Update available</span>
+                       ${versionInfo}
+                   </div>`
                 : '';
             const sourceLabel = i.source === 'github'
                 ? '<i class="mdi mdi-github"></i> GitHub'
@@ -3073,7 +3316,7 @@
                         <span class="title-text">${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                        ${i.is_installed ? (i.update_available ? '<span class="badge badge-update">Update</span>' : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
+                        ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${i.installed_version} → ${i.latest_version}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
                     <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
                 </div>
@@ -3808,6 +4051,10 @@
         function switchView(view) {
             currentDocsView = view;
 
+            // Keep the mobile section dropdown in sync
+            const mobileSel = document.getElementById('mobileTabSelect');
+            if (mobileSel && mobileSel.value !== view) mobileSel.value = view;
+
             // Update tabs
             document.getElementById('storeTab').classList.toggle('active', view === 'store');
             document.getElementById('docsTab').classList.toggle('active', view === 'docs');
@@ -3831,6 +4078,12 @@
             if (controls) {
                 controls.style.display = view === 'store' ? 'flex' : 'none';
             }
+            // The store search bar lives at header level (next to the brand
+            // on mobile) — hide it together with the controls.
+            const headerSearch = document.querySelector('header > .search-box');
+            if (headerSearch) {
+                headerSearch.style.display = view === 'store' ? '' : 'none';
+            }
 
             // Show beta popup for non-store sections (once per session per section).
             // Docs and Audio are out of beta — no popup for them.
@@ -3844,29 +4097,6 @@
                     <p style="text-align: center; margin-top: 0.5rem;">This section is in <strong>test mode</strong>.</p>
                     <p style="text-align: center; color: var(--dim); font-size: 0.85rem; margin-top: 0.5rem;">Some features may not work as expected.</p>
                 `, 'mdi-flask', false, [
-                    { t: 'Got it', c: 'btn-p', f: 'closePop()' }
-                ]);
-            }
-
-            // Show a one-time invitation to contribute when opening Documentation.
-            if (view === 'docs' && !betaPopupShown.has('docs-contribute')) {
-                betaPopupShown.add('docs-contribute');
-                pop('Contribute to Documentation', `
-                    <p style="text-align: center;">
-                        <i class="mdi mdi-book-edit-outline" style="font-size: 2rem; color: var(--primary);"></i>
-                    </p>
-                    <p style="text-align: center; margin-top: 0.5rem;">
-                        Have a guide or write-up you'd like to share?
-                    </p>
-                    <p style="text-align: center; color: var(--dim); font-size: 0.9rem; margin-top: 0.6rem;">
-                        Send your <strong>.md</strong> file to
-                        <a href="mailto:yidstore@onoffautomations.com?subject=Documentation%20Contribution"
-                           style="color: var(--primary); text-decoration: none;">
-                           yidstore@onoffautomations.com
-                        </a>
-                        and we'll add it to the store.
-                    </p>
-                `, 'mdi-book-edit-outline', false, [
                     { t: 'Got it', c: 'btn-p', f: 'closePop()' }
                 ]);
             }
@@ -5464,7 +5694,68 @@
             return div.innerHTML;
         }
 
+        // HA sidebar toggle (mobile). The panel is a same-origin iframe, so
+        // we can ask the surrounding Home Assistant frontend to open its
+        // drawer — same event HA's own header hamburger fires.
+        function toggleHaSidebar() {
+            try {
+                const haEl = window.top.document.querySelector('home-assistant');
+                if (haEl) {
+                    haEl.dispatchEvent(new CustomEvent('hass-toggle-menu', { bubbles: true, composed: true }));
+                }
+            } catch (e) {
+                console.debug('Could not toggle HA sidebar:', e);
+            }
+        }
+
+        function onLogoClick() {
+            // Mobile: the brand icon doubles as the HA sidebar button
+            // (the separate toggle was removed from the compact header).
+            if (window.matchMedia('(max-width: 740px)').matches) {
+                try {
+                    if (window.top !== window && window.top.document.querySelector('home-assistant')) {
+                        toggleHaSidebar();
+                        return;
+                    }
+                } catch (e) { /* fall through to reload */ }
+            }
+            load();
+        }
+
+        const DOCS_BANNER_KEY = 'yidstore_docs_banner_dismissed';
+
+        function dismissDocsBanner() {
+            const banner = document.getElementById('docsContributeBanner');
+            if (banner) banner.style.display = 'none';
+            try { localStorage.setItem(DOCS_BANNER_KEY, '1'); } catch (e) {}
+        }
+
+        function initDocsBanner() {
+            try {
+                if (localStorage.getItem(DOCS_BANNER_KEY) === '1') {
+                    const banner = document.getElementById('docsContributeBanner');
+                    if (banner) banner.style.display = 'none';
+                }
+            } catch (e) {}
+        }
+
+        function initSidebarToggle() {
+            // Hide the button when it can't work (opened outside HA, or
+            // cross-origin for some reason).
+            const btn = document.getElementById('sidebarToggle');
+            if (!btn) return;
+            try {
+                if (window.top === window || !window.top.document.querySelector('home-assistant')) {
+                    btn.style.display = 'none';
+                }
+            } catch (e) {
+                btn.style.display = 'none';
+            }
+        }
+
         initTheme();
+        initSidebarToggle();
+        initDocsBanner();
         updateAudioLocationToggleLabel();
         loadRestartSet();
         triggerAutoFullReload();
