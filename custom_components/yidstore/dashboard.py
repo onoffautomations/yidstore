@@ -6,13 +6,15 @@ import os
 import re
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components import frontend
 
@@ -59,6 +61,26 @@ async def _github_json(hass: HomeAssistant, url: str) -> dict | list | None:
 
 async def _resolve_github_integration_domain(hass: HomeAssistant, owner: str, repo: str) -> str | None:
     """Resolve HA integration domain in a GitHub repo (HACS-style)."""
+    # 0) Cheap no-API guess first: most repos use custom_components/<repo>/.
+    #    raw.githubusercontent.com is not subject to the 60 req/hour
+    #    unauthenticated REST API limit, so prefer it.
+    import json as json_module
+    guess = repo.strip().lower().replace("-", "_")
+    sess = async_get_clientsession(hass)
+    for branch_guess in ("main", "master"):
+        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_guess}/custom_components/{guess}/manifest.json"
+        try:
+            async with sess.get(raw_url, timeout=15) as resp:
+                if resp.status == 200:
+                    try:
+                        manifest = json_module.loads(await resp.text())
+                        dom = (manifest.get("domain") or guess).strip()
+                        return dom or guess
+                    except Exception:
+                        return guess
+        except Exception:
+            pass
+
     # 1) Get default branch
     info = await _github_json(hass, f"https://api.github.com/repos/{owner}/{repo}")
     branch = None
@@ -218,10 +240,14 @@ async def _fetch_github_integrations_list(hass: HomeAssistant, client) -> list[d
                 owner = match.group(1).strip()
                 repo = match.group(2).strip()
 
-                # Clean up repo name (remove .git suffix, trailing slashes, etc.)
-                repo = repo.rstrip('/').rstrip('.git')
+                # Clean up repo name (remove .git suffix, trailing slashes/dots)
+                # NOTE: rstrip('.git') must not be used here — it strips any
+                # trailing '.', 'g', 'i', 't' CHARACTERS (so "protector_net"
+                # became "protector_ne"), not the ".git" suffix.
+                repo = repo.rstrip('/')
                 if repo.endswith('.git'):
                     repo = repo[:-4]
+                repo = repo.rstrip('.')
 
                 if owner and repo:
                     result.append({
@@ -569,7 +595,10 @@ async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
   async function init() {
     await loadLocalBrands();
     patch();
-    setInterval(loadLocalBrands, 60000);
+    // Refresh the local brand list rarely — it only changes when an
+    // integration is installed/removed, and a stale list just means the
+    // official brands site is used as fallback.
+    setInterval(loadLocalBrands, 12 * 60 * 60 * 1000);
   }
 
   if (document.readyState === 'loading') {
@@ -701,15 +730,47 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     # Setup the frontend brand patcher
     await async_setup_brand_patcher(hass)
 
+    # Load the persisted store snapshot so the panel renders instantly
+    # after a restart, even before the first server sweep finishes.
+    await _async_load_repos_snapshot(hass, eid)
+
+    async def _scheduled_store_refresh(_now=None) -> None:
+        _ensure_repos_rebuild(hass, eid)
+
+    # Refresh the store list from the server once after each HA restart...
+    if hass.is_running:
+        await _scheduled_store_refresh()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _scheduled_store_refresh)
+
+    # ...and again every 12 hours.
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass,
+            _scheduled_store_refresh,
+            timedelta(seconds=_REPOS_CACHE_TTL),
+        )
+    )
+
 
 # Module-level response cache for /api/yidstore/repos.
-# Side-panel opens, multi-tab, and quick close-and-reopen all hit this and
-# get an instant response instead of redoing the full collection pass.
-# Mutating operations (install/uninstall/refresh/custom add/remove/hide)
-# call _invalidate_repos_cache() to bust it.
+# The full collection pass costs dozens of upstream API calls, so it only
+# runs rarely: once after each HA restart, every 12 hours on a schedule,
+# and on explicit user request ("Full Reload"). Everything else is served
+# from this cache instantly. A persistent snapshot (Store) survives
+# restarts so the panel renders immediately while the post-restart rebuild
+# runs in the background. Install/uninstall/hide actions patch the cached
+# entries in place instead of busting the whole cache.
 _REPOS_CACHE: dict[str, tuple[float, list]] = {}
-_REPOS_CACHE_TTL = 45.0  # seconds
-_REPOS_CACHE_LOCK = asyncio.Lock()
+_REPOS_CACHE_TTL = 12 * 60 * 60  # seconds (12 hours)
+_REPOS_REBUILD_TASKS: dict[str, asyncio.Task] = {}
+_REPOS_STORE_VERSION = 1
+_REPOS_STORE_KEY = f"{DOMAIN}.repos_cache"
+# Last successfully built list, kept even when _REPOS_CACHE is invalidated.
+# Rebuilds use it to reuse type/domain/icon metadata for repos whose
+# updated_at hasn't changed, skipping the per-repo directory listings that
+# made a full rebuild take ~30 seconds.
+_REPOS_PREV_ITEMS: dict[str, list] = {}
 
 
 def _invalidate_repos_cache(eid: str | None = None) -> None:
@@ -718,6 +779,83 @@ def _invalidate_repos_cache(eid: str | None = None) -> None:
         _REPOS_CACHE.clear()
     else:
         _REPOS_CACHE.pop(eid, None)
+
+
+def _repos_store(hass: HomeAssistant) -> Store:
+    return Store(hass, _REPOS_STORE_VERSION, _REPOS_STORE_KEY)
+
+
+async def _async_load_repos_snapshot(hass: HomeAssistant, eid: str) -> None:
+    """Load the persisted repos snapshot into the in-memory cache."""
+    if eid in _REPOS_CACHE:
+        return
+    try:
+        data = await _repos_store(hass).async_load()
+    except Exception as e:
+        _LOGGER.debug("Could not load repos snapshot: %s", e)
+        return
+    if not data or not isinstance(data.get("items"), list) or not data["items"]:
+        return
+    ts = float(data.get("ts") or 0)
+    _REPOS_CACHE[eid] = (ts, data["items"])
+    _LOGGER.info(
+        "Loaded store snapshot with %d items (age: %.0f min)",
+        len(data["items"]),
+        max(0.0, (time.time() - ts) / 60),
+    )
+
+
+async def _async_rebuild_repos_cache(hass: HomeAssistant, eid: str) -> list:
+    """Run the full collection pass and refresh memory + persistent caches."""
+    view = OnOffStoreReposView(eid)
+    data = await view._build_repos(hass, eid)
+    _REPOS_CACHE[eid] = (time.time(), data)
+    _REPOS_PREV_ITEMS[eid] = data
+    try:
+        await _repos_store(hass).async_save({"ts": time.time(), "items": data})
+    except Exception as e:
+        _LOGGER.debug("Could not persist repos snapshot: %s", e)
+    _LOGGER.info("Store list refreshed from server (%d items)", len(data))
+    return data
+
+
+def _ensure_repos_rebuild(hass: HomeAssistant, eid: str) -> asyncio.Task:
+    """Start (or join) the background rebuild of the repos cache.
+
+    Concurrent callers share one task so the expensive collection pass
+    never runs twice at the same time.
+    """
+    task = _REPOS_REBUILD_TASKS.get(eid)
+    if task and not task.done():
+        return task
+    task = hass.async_create_task(_async_rebuild_repos_cache(hass, eid))
+    _REPOS_REBUILD_TASKS[eid] = task
+    return task
+
+
+def _patch_repos_cache(owner: str, repo: str, **fields) -> None:
+    """Update cached repo entries in place after install/uninstall/hide.
+
+    Keeps the cached list accurate without redoing the full (slow)
+    collection pass.
+    """
+    o, r = (owner or "").lower(), (repo or "").lower()
+    for _ts, data in _REPOS_CACHE.values():
+        for item in data:
+            if item.get("owner", "").lower() == o and item.get("repo_name", "").lower() == r:
+                item.update(fields)
+
+
+def _sync_update_flags_into_cache(coordinator) -> None:
+    """Reflect coordinator update-check results into the cached repo list."""
+    for pkg in coordinator.packages.values():
+        _patch_repos_cache(
+            pkg.get("owner", ""),
+            pkg.get("repo_name", ""),
+            update_available=pkg.get("update_available", False),
+            latest_version=pkg.get("latest_version"),
+            release_notes=pkg.get("release_notes"),
+        )
 
 
 class OnOffStoreReposView(HomeAssistantView):
@@ -744,26 +882,32 @@ class OnOffStoreReposView(HomeAssistantView):
                     return web.json_response({"error": "Integration not ready"}, status=503)
                 eid = eids[0]
 
-            # Serve from cache if fresh — coalesces concurrent requests.
             force = request.query.get("force") in ("1", "true", "yes")
-            if not force:
-                cached = _REPOS_CACHE.get(eid)
-                if cached:
-                    age = time.time() - cached[0]
-                    if age < _REPOS_CACHE_TTL:
-                        return web.json_response(cached[1])
+            cached = _REPOS_CACHE.get(eid)
 
-            # Lock to coalesce simultaneous misses — first one computes,
-            # rest re-check the cache before doing the work themselves.
-            async with _REPOS_CACHE_LOCK:
-                if not force:
-                    cached = _REPOS_CACHE.get(eid)
-                    if cached and (time.time() - cached[0]) < _REPOS_CACHE_TTL:
+            if force:
+                # Explicit user refresh — rebuild now (coalesced), but fall
+                # back to the cached list if the rebuild fails.
+                try:
+                    resp_data = await _ensure_repos_rebuild(hass, eid)
+                except Exception:
+                    if cached:
                         return web.json_response(cached[1])
-
-                resp_data = await self._build_repos(hass, eid)
-                _REPOS_CACHE[eid] = (time.time(), resp_data)
+                    raise
                 return web.json_response(resp_data)
+
+            if cached:
+                # Serve instantly. If the snapshot is older than the refresh
+                # interval, kick a background rebuild (stale-while-revalidate)
+                # so no panel open ever waits on the network.
+                if time.time() - cached[0] >= _REPOS_CACHE_TTL:
+                    _ensure_repos_rebuild(hass, eid)
+                return web.json_response(cached[1])
+
+            # Nothing cached yet (first run) — build now, coalesced across
+            # concurrent requests.
+            resp_data = await _ensure_repos_rebuild(hass, eid)
+            return web.json_response(resp_data)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
@@ -773,6 +917,16 @@ class OnOffStoreReposView(HomeAssistantView):
             comp = hass.data[DOMAIN][eid]
             client = comp["client"]
             coordinator = comp["coordinator"]
+
+            # Previous sweep's items, used to reuse type/domain/icon metadata
+            # for repos that haven't been pushed to since (skips the per-repo
+            # directory listings that dominate rebuild time).
+            cached_prev = _REPOS_CACHE.get(eid)
+            prev_items = cached_prev[1] if cached_prev else _REPOS_PREV_ITEMS.get(eid)
+            prev_map: dict[tuple[str, str], dict] = {}
+            for it in prev_items or []:
+                if isinstance(it, dict):
+                    prev_map[((it.get("owner") or "").lower(), (it.get("repo_name") or "").lower())] = it
 
             local_state_task = asyncio.create_task(_collect_local_installed(hass))
             yaml_items_task = hass.async_add_executor_job(load_store_list, hass)
@@ -819,7 +973,8 @@ class OnOffStoreReposView(HomeAssistantView):
                 if owner in HIDDEN_STORE_ORGS:
                     return
                 seen_repos.add(full_name)
-                tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state))
+                prev = prev_map.get((owner.lower(), (repo_obj.get("name") or "").lower()))
+                tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state, prev))
             
             # === PARALLEL COLLECTION PHASE ===
             # Previously every fetch below was sequential (one YAML repo, then
@@ -977,7 +1132,14 @@ class OnOffStoreReposView(HomeAssistantView):
                     repo_url = cr.get("url")
                     domain = None
                     if repo_type == "integration":
-                        domain = await _resolve_github_integration_domain(hass, owner, repo)
+                        # Reuse the previously resolved domain — resolving it
+                        # costs up to 3 api.github.com calls per repo, which
+                        # is slow and burns the unauthenticated rate limit.
+                        prev = prev_map.get((owner.lower(), repo.lower()))
+                        if prev and prev.get("domain"):
+                            domain = prev["domain"]
+                        else:
+                            domain = await _resolve_github_integration_domain(hass, owner, repo)
 
                     icon_url = _github_brand_icon_url(owner, repo, domain, "main")
 
@@ -1082,7 +1244,7 @@ class OnOffStoreReposView(HomeAssistantView):
             # Let the caller decide what to do — never cache a partial result.
             raise
 
-    async def _process_repo(self, r, coord, yaml_items=None, bypass=False, auth=False, local_state=None):
+    async def _process_repo(self, r, coord, yaml_items=None, bypass=False, auth=False, local_state=None, prev=None):
         name = r.get("full_name")
         # Dupe check handled by caller
 
@@ -1135,12 +1297,24 @@ class OnOffStoreReposView(HomeAssistantView):
         # metadata) or the special "audio" owner, we always check the
         # actual repo layout. If layout is inconclusive, only then do we
         # fall back to name/desc hints.
+        # Metadata reuse: if the repo hasn't been pushed to since the last
+        # sweep, its layout (and therefore type/domain/icon) can't have
+        # changed — skip the per-repo directory listings, which are the
+        # dominant cost of a full rebuild.
+        prev_fresh = (
+            isinstance(prev, dict)
+            and bool(prev.get("type"))
+            and (prev.get("updated_at") or "") == (r.get("updated_at") or "")
+        )
+
         pkg_type = None
         desc = (r.get("description") or "").lower()
         if p:
             pkg_type = p.get("package_type", "integration")
         elif owner.lower() == "audio":
             pkg_type = "audio"
+        elif prev_fresh:
+            pkg_type = prev.get("type")
 
         if pkg_type is None:
             # Compute the name/desc hint up-front but only use it if the
@@ -1217,7 +1391,15 @@ class OnOffStoreReposView(HomeAssistantView):
         icon_url = None
         domain_from_manifest = None
 
-        if pkg_type == "integration":
+        reuse_meta = prev_fresh and pkg_type == prev.get("type")
+        if reuse_meta and pkg_type == "integration" and not (prev.get("domain") or prev.get("icon_url")):
+            # Previous sweep failed to resolve anything useful — retry.
+            reuse_meta = False
+
+        if reuse_meta:
+            icon_url = prev.get("icon_url")
+            domain_from_manifest = prev.get("domain")
+        elif pkg_type == "integration":
             # Reuse the speculative custom_components/ listing if we already
             # fetched it in parallel above; otherwise fetch now.
             if speculative_domains is not None:
@@ -1361,7 +1543,12 @@ class OnOffStoreInstallView(HomeAssistantView):
                 hass.data["yidstore_requires_restart"] = set()
             hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
 
-            _invalidate_repos_cache()
+            _patch_repos_cache(
+                o, r,
+                is_installed=True,
+                install_source="yidstore",
+                update_available=False,
+            )
             return web.json_response({"success": True, "requires_restart": True})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -1495,6 +1682,24 @@ class OnOffStoreReleasesView(HomeAssistantView):
                         if len(out) >= 100:
                             break
 
+                if not out:
+                    # REST API rate-limited (403) — at least surface the
+                    # latest release via the redirect trick so installs of
+                    # the newest version still work from the UI.
+                    from ._utils import async_github_latest_tag
+                    latest = await async_github_latest_tag(hass, owner, repo)
+                    if latest:
+                        out.append(
+                            {
+                                "tag_name": latest,
+                                "name": latest,
+                                "body": "",
+                                "published_at": "",
+                                "created_at": "",
+                                "prerelease": False,
+                            }
+                        )
+
                 return web.json_response(out)
 
             releases = await client.get_releases(owner, repo)
@@ -1523,10 +1728,27 @@ class OnOffStoreRefreshView(HomeAssistantView):
                 if not eids: return web.json_response({"error": "Integration not ready"}, status=503)
                 eid = eids[0]
 
+            # Optional flag: rebuild the full store list from the server
+            # (used by the "Full Reload" menu action).
+            rebuild = False
+            try:
+                body = await request.json()
+                rebuild = bool(body.get("rebuild"))
+            except Exception:
+                pass
+
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_check_updates()
-                _invalidate_repos_cache()
+                if rebuild:
+                    # No invalidate first: the rebuild replaces the cache on
+                    # success, the old list keeps serving meanwhile, and the
+                    # previous items let unchanged repos skip re-detection.
+                    await _ensure_repos_rebuild(hass, eid)
+                else:
+                    # Just sync the new update flags into the cached list —
+                    # no need to redo the expensive collection pass.
+                    _sync_update_flags_into_cache(coordinator)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1573,7 +1795,10 @@ class OnOffStoreAddCustomView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_add_custom_repo(o, r, source=source, repo_type=repo_type, repo_url=repo_url)
+                # New repo needs a real collection pass; start it right away
+                # so the frontend's follow-up reload picks it up.
                 _invalidate_repos_cache()
+                _ensure_repos_rebuild(hass, eid)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1635,6 +1860,7 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
             if coordinator:
                 await coordinator.async_remove_custom_repo(o, r)
                 _invalidate_repos_cache()
+                _ensure_repos_rebuild(hass, eid)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1665,7 +1891,7 @@ class OnOffStoreHideView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_hide_repo(o, r)
-                _invalidate_repos_cache()
+                _patch_repos_cache(o, r, is_hidden=True)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1697,7 +1923,7 @@ class OnOffStoreUnhideView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_unhide_repo(o, r)
-                _invalidate_repos_cache()
+                _patch_repos_cache(o, r, is_hidden=False)
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1741,7 +1967,12 @@ class OnOffStoreUninstallView(HomeAssistantView):
                 if "yidstore_requires_restart" in hass.data:
                     hass.data["yidstore_requires_restart"].discard(f"{o}/{r}".lower())
 
-                _invalidate_repos_cache()
+                _patch_repos_cache(
+                    o, r,
+                    is_installed=False,
+                    install_source=None,
+                    update_available=False,
+                )
                 return web.json_response({"success": True})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
@@ -1825,6 +2056,13 @@ class OnOffStoreStatusView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
+# Negative cache for brand icons that don't exist locally or upstream.
+# Without it every panel render retried the (slow) remote proxy chain for
+# each missing icon.
+_BRAND_ICON_MISS_CACHE: dict[str, float] = {}
+_BRAND_ICON_MISS_TTL = 60 * 60  # 1 hour
+
+
 class LocalBrandsIconView(HomeAssistantView):
     """Serve local brand icons for custom integrations."""
     url = "/api/yidstore/brands/{domain}/{filename}"
@@ -1881,6 +2119,13 @@ class LocalBrandsIconView(HomeAssistantView):
 
 
         # If not found locally, proxy from official Home Assistant Brands (same-origin for iframe/CSP).
+        # Skip the remote chain entirely if we recently learned this icon
+        # doesn't exist anywhere.
+        miss_key = f"{domain}/{filename}"
+        miss_ts = _BRAND_ICON_MISS_CACHE.get(miss_key)
+        if miss_ts and (time.time() - miss_ts) < _BRAND_ICON_MISS_TTL:
+            return web.Response(status=404, headers={"Cache-Control": "public, max-age=3600"})
+
         # Try HA brands GitHub repo custom_integrations path first, then brands CDN URL styles.
         remote_urls = [
             f"https://raw.githubusercontent.com/home-assistant/brands/master/custom_integrations/{domain}/{filename}",
@@ -1908,7 +2153,8 @@ class LocalBrandsIconView(HomeAssistantView):
             except Exception as e:
                 _LOGGER.debug("Remote brands fetch failed for %s: %s", remote_url, e)
 
-        return web.Response(status=404)
+        _BRAND_ICON_MISS_CACHE[miss_key] = time.time()
+        return web.Response(status=404, headers={"Cache-Control": "public, max-age=3600"})
 
 
 class LocalBrandsListView(HomeAssistantView):
