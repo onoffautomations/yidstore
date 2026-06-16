@@ -1381,6 +1381,57 @@
             border-radius: 0;
         }
 
+        /* Apps tab is gated behind "Coming soon" — grayed but still clickable. */
+        .view-tab.apps-soon {
+            opacity: 0.55;
+        }
+        .view-tab.apps-soon.active {
+            opacity: 1;
+        }
+        .soon-badge {
+            font-size: 0.55rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: var(--soft);
+            color: var(--dim);
+            border: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        /* Big "Coming Soon" screen inside the Apps view. */
+        #appsComingSoon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 4rem 1.5rem;
+            min-height: 50vh;
+            color: var(--dim);
+        }
+        #appsComingSoon i {
+            font-size: 4rem;
+            color: var(--primary);
+            opacity: 0.7;
+            margin-bottom: 0.5rem;
+        }
+        #appsComingSoon h1 {
+            font-size: clamp(2rem, 6vw, 3.5rem);
+            font-weight: 800;
+            color: var(--text);
+            margin: 0.5rem 0;
+            letter-spacing: -0.02em;
+        }
+        #appsComingSoon p {
+            max-width: 460px;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin: 0;
+        }
+
         .beta-chip {
             font-size: 0.6rem;
             padding: 2px 5px;
@@ -1737,11 +1788,11 @@
         }
 
         /* Automations, Dashboards, Helpers, Audio and Blueprints Views */
-        #automationsView, #dashboardsView, #helpersView, #audioView, #blueprintsView {
+        #appsView, #automationsView, #dashboardsView, #helpersView, #audioView, #blueprintsView {
             display: none;
         }
 
-        #automationsView.active, #dashboardsView.active, #helpersView.active, #audioView.active, #blueprintsView.active {
+        #appsView.active, #automationsView.active, #dashboardsView.active, #helpersView.active, #audioView.active, #blueprintsView.active {
             display: block;
         }
 
@@ -2007,12 +2058,9 @@
             <select id="mobileTabSelect" class="mobile-tab-select" onchange="switchView(this.value)"
                 title="Section" aria-label="Section">
                 <option value="store">Store</option>
+                <option value="apps">Apps (Coming soon)</option>
                 <option value="docs">Documentation</option>
-                <option value="audio">Audio</option>
-                <option value="blueprints">Blueprints</option>
-                <option value="automations">Automations</option>
-                <option value="dashboards">Dashboards</option>
-                <option value="helpers">Helpers</option>
+                <option value="audio" id="mobileAudioOption" hidden disabled>Audio</option>
             </select>
             <div class="controls">
                 <select id="filterF" onchange="apply()" title="Filter">
@@ -2020,7 +2068,7 @@
                     <option value="integration">Filter: Integrations</option>
                     <option value="lovelace">Filter: Cards</option>
                     <option value="blueprints">Filter: Blueprints</option>
-                    <option value="audio">Filter: Audio</option>
+                    <option value="audio" id="filterAudioOption" hidden disabled>Filter: Audio</option>
                     <option value="installed">Filter: Installed</option>
                     <option value="not_installed">Filter: Not Installed</option>
                     <option value="updates">Filter: Updates</option>
@@ -2074,24 +2122,17 @@
             <button class="view-tab active" id="storeTab" onclick="switchView('store')">
                 <i class="mdi mdi-storefront"></i> Store
             </button>
+            <button class="view-tab apps-soon" id="appsTab" onclick="switchView('apps')" title="Coming soon">
+                <i class="mdi mdi-apps"></i> Apps
+                <span class="soon-badge">Coming soon</span>
+            </button>
             <button class="view-tab" id="docsTab" onclick="switchView('docs')">
                 <i class="mdi mdi-book-open-page-variant"></i> Documentation
             </button>
-            <button class="view-tab" id="audioTab" onclick="switchView('audio')">
+            <button class="view-tab" id="audioTab" onclick="switchView('audio')" style="display:none;">
                 <i class="mdi mdi-music-note"></i> Audio
             </button>
-            <button class="view-tab" id="blueprintsTab" onclick="switchView('blueprints')">
-                <i class="mdi mdi-file-document-outline"></i> Blueprints <span class="beta-chip">BETA</span>
-            </button>
-            <button class="view-tab" id="automationsTab" onclick="switchView('automations')">
-                <i class="mdi mdi-robot"></i> Automations <span class="beta-chip">BETA</span>
-            </button>
-            <button class="view-tab" id="dashboardsTab" onclick="switchView('dashboards')">
-                <i class="mdi mdi-view-dashboard"></i> Dashboards <span class="beta-chip">BETA</span>
-            </button>
-            <button class="view-tab" id="helpersTab" onclick="switchView('helpers')">
-                <i class="mdi mdi-toggle-switch"></i> Helpers <span class="beta-chip">BETA</span>
-            </button>
+            <!-- Blueprints, Automations, Dashboards, Helpers tabs removed for now -->
         </div>
 
         <!-- Store View -->
@@ -2107,6 +2148,62 @@
             </div>
 
             <div id="grid" class="grid"></div>
+        </div>
+
+        <!-- Apps (Add-ons) View -->
+        <div id="appsView">
+            <!-- Coming soon gate: Apps is not ready for users yet. -->
+            <div id="appsComingSoon">
+                <i class="mdi mdi-apps"></i>
+                <h1>Coming Soon</h1>
+                <p>Add-ons (Apps) aren't available just yet — we're putting the finishing touches on them. Check back soon!</p>
+            </div>
+            <div id="appsFunctional" style="display:none;">
+            <div id="appsSupervisorBanner" class="contribute-banner" style="display:none; border-color:#f59e0b; background:rgba(245,158,11,0.06);">
+                <i class="mdi mdi-alert-outline" style="color:#f59e0b;"></i>
+                <span>
+                    <strong>Supervisor not detected.</strong> Add-on installation requires
+                    Home Assistant OS or a Supervised installation. You can still browse
+                    available apps below.
+                </span>
+            </div>
+            <div id="appsConnectorBanner" style="display:none; border:1px solid #f59e0b; background:rgba(245,158,11,0.06); border-radius:12px; padding:0.9rem 1rem; margin-bottom:1rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; font-weight:600;">
+                    <i class="mdi mdi-power-plug-off" style="color:#f59e0b;"></i>
+                    <span>One-time setup: install the YidStore Connector</span>
+                </div>
+                <p style="color:var(--dim); font-size:0.85rem; margin:0.5rem 0;">
+                    On Home Assistant OS, add-ons are installed through a small companion add-on.
+                    Click below and YidStore will install, configure, and start it for you — this
+                    can take a few minutes the first time.
+                </p>
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="btn btn-p btn-sm" id="connectorSetupBtn" onclick="setupConnector(this)"><i class="mdi mdi-rocket-launch"></i> Set up Connector</button>
+                    <button class="btn btn-o btn-sm" onclick="loadAppsRepos()"><i class="mdi mdi-refresh"></i> Re-check</button>
+                </div>
+                <details style="margin-top:0.6rem;">
+                    <summary style="cursor:pointer; color:var(--dim); font-size:0.8rem;">Manual setup</summary>
+                    <p style="color:var(--dim); font-size:0.8rem; margin:0.4rem 0;">
+                        Install the YidStore Connector add-on yourself, then paste this token into its configuration and start it:
+                    </p>
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        <code id="connectorToken" style="background:var(--card); border:1px solid var(--border); border-radius:6px; padding:0.35rem 0.6rem; font-size:0.8rem; user-select:all;">…</code>
+                        <button class="btn btn-o btn-sm" onclick="copyConnectorToken(this)"><i class="mdi mdi-content-copy"></i> Copy token</button>
+                    </div>
+                </details>
+            </div>
+            <div class="docs-controls" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <div class="search-box" style="flex: 1; min-width: 150px; max-width: 250px;">
+                    <i class="mdi mdi-magnify"></i>
+                    <input type="text" id="appsSearch" placeholder="Search apps..." oninput="filterApps()">
+                </div>
+                <select id="appsSort" onchange="sortApps()" style="padding: 0.5rem; border-radius: 50px; background: var(--card); border: 1px solid var(--border); color: var(--text);">
+                    <option value="name">Sort: Name</option>
+                    <option value="recent">Sort: Recent</option>
+                </select>
+            </div>
+            <div id="appsGrid" class="grid"></div>
+            </div><!-- /appsFunctional -->
         </div>
 
         <!-- Documentation View -->
@@ -2409,6 +2506,16 @@
         const AUDIO_LOCATION_KEY = 'yidstore_audio_location';
         const CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hours — matches server-side refresh schedule
         const LIVE_SYNC_INTERVAL = 5 * 60 * 1000; // status sync every 5 min (only while tab is visible)
+
+        // Apps (Add-ons) is not ready for users yet — show a "Coming soon"
+        // screen instead of the functional UI. Flip to false to re-enable.
+        const APPS_COMING_SOON = true;
+        function applyAppsGate() {
+            const cs = document.getElementById('appsComingSoon');
+            const fn = document.getElementById('appsFunctional');
+            if (cs) cs.style.display = APPS_COMING_SOON ? 'flex' : 'none';
+            if (fn) fn.style.display = APPS_COMING_SOON ? 'none' : 'block';
+        }
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
         function formatReleaseDate(dateString) {
@@ -2555,10 +2662,22 @@
             );
         }
 
+        let isAuthenticated = false;
+
         function applyLiveStatus(data) {
             requiresRestartSet = new Set(data.requires_restart_list || []);
             for (const k of requiresRestartSet) {
                 optimisticRestartUntil.delete(normalizeRestartKey(k));
+            }
+
+            if (data.is_authenticated !== undefined) {
+                isAuthenticated = !!data.is_authenticated;
+                const audioTab = document.getElementById('audioTab');
+                if (audioTab) audioTab.style.display = isAuthenticated ? '' : 'none';
+                ['mobileAudioOption', 'filterAudioOption'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.hidden = !isAuthenticated; el.disabled = !isAuthenticated; }
+                });
             }
 
             for (const [key, status] of Object.entries(data.status || {})) {
@@ -3166,29 +3285,22 @@
 
             // Icon handling - prefer Home Assistant brands by domain (theme-aware) with fallbacks
             let iconHtml;
-            if (i.type === 'lovelace' || i.type === 'audio') {
-                iconHtml = `
-                <div class="card-icon-fallback" style="display: flex; width: 40px; height: 40px; border-radius: 8px; background: rgba(168, 85, 247, 0.1); align-items: center; justify-content: center;">
-                    <i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: #a855f7;"></i>
-                </div>`;
-            } else {
-                const domain = getDomainFromItem(i);
-                const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
-                const primaryIcon = candidates[0] || '';
-                const dataCandidates = candidates.join('|');
-                const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
+            const domain = getDomainFromItem(i);
+            const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
+            const primaryIcon = candidates[0] || '';
+            const dataCandidates = candidates.join('|');
+            const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
 
-                iconHtml = `
-                    <img src="${primaryIcon}" alt="" class="card-icon"
-                         data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
-                         data-candidates="${dataCandidates}"
-                         onload="brandImgLoaded(this)"
-                         onerror="brandImgError(this)"
-                         style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                    <div class="card-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); align-items: center; justify-content: center;">
-                        <i class="mdi ${typeIcon}" style="font-size: 1.5rem; color: var(--primary);"></i>
-                    </div>`;
-            }
+            iconHtml = `
+                <img src="${primaryIcon || 'icon.png'}" alt="" class="card-icon"
+                     data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
+                     data-candidates="${dataCandidates}"
+                     onload="brandImgLoaded(this)"
+                     onerror="brandImgError(this)"
+                     style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                <div class="card-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; align-items: center; justify-content: center;">
+                    <img src="icon.png" alt="YidStore" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                </div>`;
 
             // HA add-on store style: bottom status row with colored dot
             const restartNeeded = i.type === 'integration' && needsRestart(i.owner, i.repo_name);
@@ -3272,36 +3384,21 @@
             const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
 
             let iconHtml;
-            if (i.type === 'lovelace' || i.type === 'audio') {
-                iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(168, 85, 247, 0.1); display: flex; align-items: center; justify-content: center;">
-                       <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: #a855f7;"></i>
-                   </div>`;
-            } else {
-                // Same brand-candidate handling as grid cards: try the local
-                // brands endpoint / HA brands / icon_url in order, cycling on
-                // 404 via brandImgError. (Using i.icon_url directly broke
-                // here — it's an unverified best-guess URL, so one 404 meant
-                // the generic puzzle icon forever.)
+            {
                 const domain = getDomainFromItem(i);
                 const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
                 const primaryIcon = candidates[0] || '';
-                if (primaryIcon) {
-                    const dataCandidates = candidates.join('|');
-                    const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
-                    iconHtml = `<img src="${primaryIcon}" alt="" class="list-icon"
-                         data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
-                         data-candidates="${dataCandidates}"
-                         onload="brandImgLoaded(this)"
-                         onerror="brandImgError(this)"
-                         style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
-                       <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); align-items: center; justify-content: center;">
-                           <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                       </div>`;
-                } else {
-                    iconHtml = `<div class="list-icon-fallback" style="width: 40px; height: 40px; border-radius: 8px; background: rgba(3,169,244,0.12); display: flex; align-items: center; justify-content: center;">
-                           <i class="mdi ${typeIcon}" style="font-size: 1.4rem; color: var(--primary);"></i>
-                       </div>`;
-                }
+                const dataCandidates = candidates.join('|');
+                const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
+                iconHtml = `<img src="${primaryIcon || 'icon.png'}" alt="" class="list-icon"
+                     data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
+                     data-candidates="${dataCandidates}"
+                     onload="brandImgLoaded(this)"
+                     onerror="brandImgError(this)"
+                     style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                   <div class="list-icon-fallback" style="display: none; width: 40px; height: 40px; border-radius: 8px; align-items: center; justify-content: center;">
+                       <img src="icon.png" alt="YidStore" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
+                   </div>`;
             }
 
             const actionLabel = i.update_available ? 'Update' : (i.is_installed ? 'Reinstall' : 'Install');
@@ -3392,7 +3489,7 @@
                 // Group by type
                 const types = ['integration', 'lovelace', 'blueprints', 'audio'];
                 const typeLabels = { 'integration': 'Integrations', 'lovelace': 'Lovelace Cards', 'blueprints': 'Blueprints', 'audio': 'Audio' };
-                const typeIcons = { 'integration': 'mdi-puzzle', 'lovelace': 'mdi-view-dashboard', 'blueprints': 'mdi-file-document-outline', 'audio': 'mdi-music-note' };
+                const typeIcons = { 'integration': 'mdi-chip', 'lovelace': 'mdi-view-dashboard', 'blueprints': 'mdi-file-document-outline', 'audio': 'mdi-music-note' };
 
                 types.forEach(type => {
                     const typeItems = nonUpdatesItems.filter(i => i.type === type);
@@ -4055,23 +4152,18 @@
             const mobileSel = document.getElementById('mobileTabSelect');
             if (mobileSel && mobileSel.value !== view) mobileSel.value = view;
 
-            // Update tabs
-            document.getElementById('storeTab').classList.toggle('active', view === 'store');
-            document.getElementById('docsTab').classList.toggle('active', view === 'docs');
-            document.getElementById('automationsTab').classList.toggle('active', view === 'automations');
-            document.getElementById('dashboardsTab').classList.toggle('active', view === 'dashboards');
-            document.getElementById('helpersTab').classList.toggle('active', view === 'helpers');
-            document.getElementById('audioTab').classList.toggle('active', view === 'audio');
-            document.getElementById('blueprintsTab').classList.toggle('active', view === 'blueprints');
+            // Update tabs (safe — elements may not exist if section is removed)
+            ['storeTab','appsTab','docsTab','audioTab','automationsTab','dashboardsTab','helpersTab','blueprintsTab'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('active', id === view + 'Tab');
+            });
 
             // Update views
             document.getElementById('storeView').classList.toggle('hidden', view !== 'store');
-            document.getElementById('docsView').classList.toggle('active', view === 'docs');
-            document.getElementById('automationsView').classList.toggle('active', view === 'automations');
-            document.getElementById('dashboardsView').classList.toggle('active', view === 'dashboards');
-            document.getElementById('helpersView').classList.toggle('active', view === 'helpers');
-            document.getElementById('audioView').classList.toggle('active', view === 'audio');
-            document.getElementById('blueprintsView').classList.toggle('active', view === 'blueprints');
+            ['appsView','docsView','audioView','automationsView','dashboardsView','helpersView','blueprintsView'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('active', id === view + 'View');
+            });
 
             // Hide store controls when not in store view
             const controls = document.querySelector('.controls');
@@ -4085,23 +4177,12 @@
                 headerSearch.style.display = view === 'store' ? '' : 'none';
             }
 
-            // Show beta popup for non-store sections (once per session per section).
-            // Docs and Audio are out of beta — no popup for them.
-            const betaSections = ['automations', 'dashboards', 'helpers', 'blueprints'];
-            if (betaSections.includes(view) && !betaPopupShown.has(view)) {
-                betaPopupShown.add(view);
-                pop('Beta Feature', `
-                    <p style="text-align: center;">
-                        <i class="mdi mdi-flask" style="font-size: 2rem; color: #f59e0b;"></i>
-                    </p>
-                    <p style="text-align: center; margin-top: 0.5rem;">This section is in <strong>test mode</strong>.</p>
-                    <p style="text-align: center; color: var(--dim); font-size: 0.85rem; margin-top: 0.5rem;">Some features may not work as expected.</p>
-                `, 'mdi-flask', false, [
-                    { t: 'Got it', c: 'btn-p', f: 'closePop()' }
-                ]);
-            }
-
-            if (view === 'docs') {
+            if (view === 'apps') {
+                // Apps is gated behind a "Coming soon" screen — skip loading.
+                // To re-enable, set APPS_COMING_SOON = false and the
+                // functional UI (and data load) come back.
+                if (!APPS_COMING_SOON) loadAppsRepos();
+            } else if (view === 'docs') {
                 loadDocsRepos();
             } else if (view === 'automations') {
                 loadAutomationsRepos();
@@ -4909,6 +4990,261 @@
                 window.top.location.href = '/config/lovelace/dashboards';
             } catch (e) {
                 pop('Error', 'Failed to copy YAML: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        // ========== Apps (Add-ons) Functions ==========
+        let appsData = [];
+
+        async function loadAppsRepos() {
+            const grid = document.getElementById('appsGrid');
+            grid.innerHTML = '<div class="docs-loading" style="padding:3rem; text-align:center;"><i class="mdi mdi-loading mdi-spin" style="font-size:2rem;"></i><p>Loading apps...</p></div>';
+
+            try {
+                const res = await fetch('/api/yidstore/apps');
+                if (!res.ok) throw new Error('Server error');
+                appsData = await res.json();
+
+                if (appsData.error) {
+                    grid.innerHTML = `<div class="docs-error"><i class="mdi mdi-server-off"></i><p>${appsData.error}</p></div>`;
+                    return;
+                }
+
+                if (!Array.isArray(appsData) || appsData.length === 0) {
+                    grid.innerHTML = '<div class="docs-coming-soon" style="padding:3rem; text-align:center;"><i class="mdi mdi-apps" style="font-size:2.5rem; color:var(--dim);"></i><p style="color:var(--dim); margin-top:0.5rem;">No apps available yet</p></div>';
+                    return;
+                }
+
+                // Show supervisor warning if needed
+                const supOk = appsData.length > 0 && appsData[0].supervisor_available;
+                const connectorOnline = appsData.length > 0 && appsData[0].connector_online;
+                const banner = document.getElementById('appsSupervisorBanner');
+                if (banner) banner.style.display = (!supOk && appsData.length > 0) ? 'flex' : 'none';
+
+                // On a Supervisor system, the connector add-on must be online
+                // before installs work. Guide the user to set it up.
+                const cb = document.getElementById('appsConnectorBanner');
+                if (cb) {
+                    if (supOk && !connectorOnline) {
+                        cb.style.display = 'block';
+                        loadConnectorToken();
+                    } else {
+                        cb.style.display = 'none';
+                    }
+                }
+
+                renderAppsCards();
+            } catch (e) {
+                grid.innerHTML = '<div class="docs-error"><i class="mdi mdi-server-off"></i><p>Server is not reachable. Please check your connection.</p><button class="btn btn-o" onclick="loadAppsRepos()"><i class="mdi mdi-refresh"></i> Retry</button></div>';
+            }
+        }
+
+        function renderAppsCards() {
+            const grid = document.getElementById('appsGrid');
+            const searchQuery = (document.getElementById('appsSearch')?.value || '').toLowerCase();
+            const sortBy = document.getElementById('appsSort')?.value || 'name';
+
+            let filtered = appsData.filter(app => {
+                if (!searchQuery) return true;
+                return app.repo_name.toLowerCase().includes(searchQuery) ||
+                       (app.description || '').toLowerCase().includes(searchQuery) ||
+                       (app.owner || '').toLowerCase().includes(searchQuery);
+            });
+
+            filtered.sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.updated_at) - new Date(a.updated_at);
+                return a.repo_name.localeCompare(b.repo_name);
+            });
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="docs-coming-soon" style="padding:3rem; text-align:center;"><i class="mdi mdi-magnify" style="font-size:2rem; color:var(--dim);"></i><p style="color:var(--dim);">No apps match your search</p></div>';
+                return;
+            }
+
+            grid.innerHTML = filtered.map(app => {
+                const name = formatName(app.repo_name);
+                const statusDot = app.is_installed
+                    ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;margin-right:6px;"></span>'
+                    : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9e9e9e;margin-right:6px;"></span>';
+                const statusLabel = app.is_installed ? 'Installed' : 'Available';
+                // Installs need both a Supervisor and the connector add-on online.
+                const canInstall = app.supervisor_available && app.connector_online;
+                let installDisabled = '';
+                if (!app.supervisor_available) installDisabled = 'disabled title="Requires HA OS / Supervised"';
+                else if (!app.connector_online) installDisabled = 'disabled title="Install the YidStore Connector add-on first (see banner above)"';
+                const btnHtml = app.is_installed
+                    ? `<button class="btn btn-o" style="font-size:0.78rem; padding:0.3rem 0.7rem;" onclick="uninstallApp('${app.owner}','${app.repo_name}',this)"><i class="mdi mdi-delete-outline"></i> Remove</button>`
+                    : `<button class="btn btn-p" style="font-size:0.78rem; padding:0.3rem 0.7rem;" onclick="installApp('${app.owner}','${app.repo_name}','${app.default_branch || 'main'}',this)" ${installDisabled}><i class="mdi mdi-download"></i> Install</button>`;
+
+                return `
+                <div class="card" style="cursor:default;">
+                    <div class="card-main">
+                        <div class="card-icon">
+                            <img src="icon.png" alt="" style="width:40px; height:40px; border-radius:8px; object-fit:contain;">
+                        </div>
+                        <div class="card-body">
+                            <div class="card-title">${name}</div>
+                            <div class="card-type-tag" style="background:rgba(3,169,244,0.10); color:#03a9f4;">Add-on</div>
+                            <div class="card-author">${app.owner}</div>
+                            <div class="card-desc">${app.description || 'No description'}</div>
+                        </div>
+                    </div>
+                    <div class="card-status">
+                        <div class="status-left">${statusDot}<span class="status-label">${statusLabel}</span></div>
+                        <div class="status-right">${btnHtml}</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterApps() { renderAppsCards(); }
+        function sortApps() { renderAppsCards(); }
+
+        let connectorTokenValue = '';
+        async function loadConnectorToken() {
+            try {
+                const res = await fetch('/api/yidstore/connector/token');
+                if (!res.ok) return;
+                const d = await res.json();
+                connectorTokenValue = d.token || '';
+                const el = document.getElementById('connectorToken');
+                if (el) el.textContent = connectorTokenValue || '(unavailable)';
+            } catch (_) {}
+        }
+        function copyConnectorToken(btn) {
+            const txt = connectorTokenValue || (document.getElementById('connectorToken')||{}).textContent || '';
+            const done = () => { const o = btn.innerHTML; btn.innerHTML = '<i class="mdi mdi-check"></i> Copied'; setTimeout(()=>btn.innerHTML=o, 1500); };
+            if (navigator.clipboard && txt) { navigator.clipboard.writeText(txt).then(done).catch(done); }
+            else { done(); }
+        }
+
+        async function setupConnector(btn) {
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i> Setting up… (a few min)';
+            try {
+                const res = await fetch('/api/yidstore/connector/setup', { method: 'POST' });
+                const data = await parseJsonSafe(res);
+                if (!res.ok || !data.success) {
+                    const failed = (data.steps || []).filter(s => !s.ok).map(s => `${s.step}: ${s.detail || 'failed'}`);
+                    throw new Error(data.error || failed.join(' · ') || `Setup failed (HTTP ${res.status})`);
+                }
+                pop('Connector Ready', `
+                    <p style="text-align:center;"><i class="mdi mdi-check-circle" style="font-size:2.5rem; color:#4caf50;"></i></p>
+                    <p style="text-align:center; margin-top:0.5rem;">The YidStore Connector is installed and running. You can now install add-ons.</p>
+                `, 'mdi-rocket-launch', false, [{ t: 'OK', c: 'btn-p', f: 'closePop(); loadAppsRepos()' }]);
+            } catch (e) {
+                pop('Connector Setup Failed', `
+                    <p style="text-align:center;"><i class="mdi mdi-alert-circle" style="font-size:2rem; color:#ef5350;"></i></p>
+                    <p style="text-align:center; margin-top:0.5rem;">${e.message}</p>
+                    <p style="text-align:center; color:var(--dim); font-size:0.8rem; margin-top:0.5rem;">You can also use Manual setup in the banner.</p>
+                `, 'mdi-alert', false, [{ t: 'OK', c: 'btn-o', f: 'closePop()' }]);
+                btn.disabled = false;
+                btn.innerHTML = orig;
+            }
+        }
+
+        // Parse a response as JSON, but never throw on an empty or non-JSON
+        // body (e.g. HA's "401: Unauthorized" text). Falls back to {error:text}.
+        async function parseJsonSafe(res) {
+            const text = await res.text();
+            if (!text) return {};
+            try {
+                return JSON.parse(text);
+            } catch (_) {
+                return { error: text.slice(0, 200) };
+            }
+        }
+
+        async function installApp(owner, repo, branch, btn) {
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i> Installing...';
+
+            try {
+                const res = await fetch('/api/yidstore/apps/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner, repo, branch })
+                });
+                const data = await parseJsonSafe(res);
+                if (!res.ok || data.error) throw new Error(data.error || `Install failed (HTTP ${res.status})`);
+
+                if (data.visible) {
+                    pop('Add-on Installed', `
+                        <p style="text-align:center;">
+                            <i class="mdi mdi-check-circle" style="font-size:2.5rem; color:#4caf50;"></i>
+                        </p>
+                        <p style="text-align:center; margin-top:0.5rem;"><strong>${formatName(repo)}</strong> is now available in Supervisor.</p>
+                        <p style="text-align:center; color:var(--dim); font-size:0.85rem; margin-top:0.5rem;">
+                            Go to <strong>Settings → Add-ons</strong> to configure and start it.
+                            ${data.config_found ? '' : '<br><span style="color:#f59e0b;">⚠ No config.yaml found — this repo may need a specific add-on structure.</span>'}
+                        </p>
+                    `, 'mdi-apps', false, [
+                        { t: 'Open Add-ons', c: 'btn-p', f: `window.open('/hassio/store','_top'); closePop()` },
+                        { t: 'OK', c: 'btn-o', f: 'closePop()' }
+                    ]);
+                } else {
+                    // Published to the YidStore store, but Supervisor didn't
+                    // surface it. Most likely it couldn't reach/clone the
+                    // local store URL, or registration was refused.
+                    const diag = [];
+                    diag.push(`Store registered: ${data.store_registered ? 'yes' : 'no'}`);
+                    diag.push(`Add-on found in store: ${data.store_slug ? 'yes' : 'no'}`);
+                    if (!data.config_found) diag.push('config.yaml: missing in repo');
+                    if (data.register_error) diag.push(`Register error: ${data.register_error}`);
+                    if (data.install_error) diag.push(`Install error: ${data.install_error}`);
+                    pop('Published, but not visible yet', `
+                        <p style="text-align:center;"><i class="mdi mdi-alert" style="font-size:2.2rem; color:#f59e0b;"></i></p>
+                        <p style="text-align:center; margin-top:0.5rem;"><strong>${formatName(repo)}</strong> was added to the YidStore add-on store, but Supervisor isn't showing it yet.</p>
+                        <p style="text-align:center; color:var(--dim); font-size:0.8rem; margin-top:0.6rem; line-height:1.5;">
+                            ${diag.join(' · ')}
+                        </p>
+                        <p style="text-align:center; color:var(--dim); font-size:0.82rem; margin-top:0.6rem;">
+                            Try <strong>Settings → Add-ons → Store → ⟳ Reload</strong>. ${!data.config_found ? 'An add-on must have a <code>config.yaml</code> at the repo root.' : 'If it still doesn\'t appear, the Supervisor may not be able to reach the local store URL — share this dialog with us.'}
+                        </p>
+                    `, 'mdi-alert', false, [
+                        { t: 'OK', c: 'btn-o', f: 'closePop()' }
+                    ]);
+                }
+
+                loadAppsRepos();
+            } catch (e) {
+                pop('Install Failed', `
+                    <p style="text-align:center;"><i class="mdi mdi-alert-circle" style="font-size:2rem; color:#ef5350;"></i></p>
+                    <p style="text-align:center; margin-top:0.5rem;">${e.message}</p>
+                `, 'mdi-alert', false, [
+                    { t: 'OK', c: 'btn-o', f: 'closePop()' }
+                ]);
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
+        }
+
+        async function uninstallApp(owner, repo, btn) {
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i> Removing...';
+
+            try {
+                const res = await fetch('/api/yidstore/apps/uninstall', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner, repo })
+                });
+                const data = await parseJsonSafe(res);
+                if (!res.ok || data.error) throw new Error(data.error || `Uninstall failed (HTTP ${res.status})`);
+
+                loadAppsRepos();
+            } catch (e) {
+                pop('Remove Failed', `
+                    <p style="text-align:center;"><i class="mdi mdi-alert-circle" style="font-size:2rem; color:#ef5350;"></i></p>
+                    <p style="text-align:center; margin-top:0.5rem;">${e.message}</p>
+                `, 'mdi-alert', false, [
+                    { t: 'OK', c: 'btn-o', f: 'closePop()' }
+                ]);
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
             }
         }
 
@@ -5756,6 +6092,7 @@
         initTheme();
         initSidebarToggle();
         initDocsBanner();
+        applyAppsGate();
         updateAudioLocationToggleLabel();
         loadRestartSet();
         triggerAutoFullReload();
