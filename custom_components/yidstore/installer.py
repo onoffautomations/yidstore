@@ -256,6 +256,52 @@ def _is_audio_file(path: Path) -> bool:
     return path.suffix.lower() in audio_exts
 
 
+def _install_addon_from_extracted(
+    extracted_root: Path,
+    repo_name: str,
+) -> dict:
+    """Install add-on files to the local add-ons directory for Supervisor discovery."""
+    import logging
+    _LOGGER = logging.getLogger(__name__)
+
+    addons_root: Path | None = None
+    for candidate in (Path("/addons"), Path("/config/addons")):
+        if candidate.is_dir():
+            addons_root = candidate
+            break
+    if addons_root is None:
+        # Create the local add-ons folder. Prefer /addons (the mount the
+        # Supervisor scans); fall back to /config/addons if that mount
+        # isn't writable from the Core container.
+        for candidate in (Path("/addons"), Path("/config/addons")):
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                addons_root = candidate
+                break
+            except Exception as exc:
+                _LOGGER.warning("Cannot create add-ons dir %s: %s", candidate, exc)
+        if addons_root is None:
+            raise RuntimeError(
+                "No writable local add-ons directory (/addons or /config/addons)."
+            )
+
+    slug = repo_name.lower().replace("-", "_")
+    dest = addons_root / slug
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    _copytree_merge(extracted_root, dest)
+
+    config_found = (
+        (dest / "config.yaml").exists()
+        or (dest / "config.json").exists()
+        or (dest / "config.yml").exists()
+    )
+    _LOGGER.info("Add-on installed to %s (config found: %s)", dest, config_found)
+    return {"addon_path": str(dest), "slug": slug, "config_found": config_found}
+
+
 def _install_audio_from_extracted(
     extracted_root: Path,
     ha_www_root: Path,
@@ -321,6 +367,10 @@ async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> b
                 if not rest.startswith("v"):
                     retry_url = prefix + "v" + rest
                     return await _get(retry_url)
+        # GitHub archive fallback: repo has no releases and its default
+        # branch is master, not main.
+        if "github.com/" in url and url.endswith("/archive/main.zip") and "404" in msg:
+            return await _get(url.replace("/archive/main.zip", "/archive/master.zip"))
         raise
 
 
@@ -339,6 +389,10 @@ async def install_package(
     ha_www_root = Path(hass.config.path("www"))
     ha_media_root = Path(hass.config.path("media"))
     ha_blueprints_root = Path(hass.config.path("blueprints"))
+    # /hacsfiles/ is served by HACS — only usable as a resource URL when
+    # HACS is actually installed. /local/community/ always works.
+    hacs_present = "hacs" in hass.data
+
     def _work() -> dict:
         with tempfile.TemporaryDirectory(prefix="yidstore_") as td:
             extract_dir = Path(td)
@@ -357,7 +411,7 @@ async def install_package(
                     repo_name,
                     use_vendor_folder=not is_github,
                 )
-                if is_github:
+                if is_github and hacs_present:
                     dest_url = f"/hacsfiles/{repo_name}/{main_js}"
                 else:
                     dest_url = f"/local/community/{relative_dest}/{main_js}"
@@ -381,7 +435,10 @@ async def install_package(
                     audio_location=audio_location,
                 )
 
-            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio.")
+            if package_type == "addon":
+                return _install_addon_from_extracted(root, repo_name)
+
+            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio|addon.")
 
     return await hass.async_add_executor_job(_work)
 
@@ -442,6 +499,14 @@ def uninstall_package(
             _LOGGER.info("Uninstalling audio package: %s", dest_media)
             shutil.rmtree(dest_media)
             
+    elif package_type == "addon":
+        slug = repo_name.lower().replace("-", "_")
+        for root in (Path("/addons"), Path("/config/addons")):
+            dest = root / slug
+            if dest.exists():
+                _LOGGER.info("Uninstalling add-on: %s", dest)
+                shutil.rmtree(dest)
+
     elif package_type == "integration":
         domains: list[str] = []
         if domain:

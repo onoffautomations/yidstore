@@ -30,6 +30,7 @@ from .const import (
 from .gitea import GiteaClient
 from .installer import download_and_install, uninstall_package
 from .dashboard import async_setup_dashboard
+from ._utils import async_github_latest_tag, github_archive_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -622,8 +623,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as e:
         _LOGGER.error("Failed to setup OnOff Store Dashboard: %s", e, exc_info=True)
 
-    # Check for updates on startup
-    await coordinator.async_check_updates()
+    # Check for updates on startup — run in the background so the network
+    # round-trips don't block integration setup / HA boot.
+    entry.async_create_background_task(
+        hass, coordinator.async_check_updates(), "yidstore_startup_update_check"
+    )
 
     # Load sensor, button, and update platforms
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button", "update"])
@@ -791,9 +795,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None, source: str | None) -> tuple[str, str]:
         if source == "github":
-            ref = tag or "main"
-            url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{ref}" if tag else f"https://api.github.com/repos/{owner}/{repo}/zipball"
-            return url, ref
+            # Never use api.github.com for downloads — unauthenticated REST
+            # API calls are capped at 60/hour per IP, which is what caused
+            # "Download failed: 403 rate limit". The archive endpoint
+            # (codeload) and the /releases/latest redirect are not limited.
+            ref = tag
+            if not ref:
+                ref = await async_github_latest_tag(hass, owner, repo)
+            if not ref:
+                # No releases — fall back to the default branch
+                # (installer retries master if main doesn't exist).
+                ref = "main"
+            return github_archive_url(owner, repo, ref), ref
 
         # Intelligent "Zipball First" logic with silent Asset recovery
         
@@ -900,7 +913,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("Creating repair issue for integration restart requirement")
                 try:
                     from homeassistant.helpers import issue_registry as ir
-                    # Create a fixable repair issue with restart button
+                    # Create a fixable repair issue with restart button.
+                    # issue_domain makes HA show the installed integration's
+                    # own brand icon on the repair instead of YidStore's.
                     ir.async_create_issue(
                         hass,
                         domain=DOMAIN,
@@ -910,6 +925,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         translation_key="integration_restart_required",
                         translation_placeholders={"integration_name": repo},
                         data={"integration_name": repo},
+                        issue_domain=installed_domain or repo.lower().replace("-", "_"),
                     )
                     _LOGGER.info("✓ Created fixable repair issue for restart")
                 except Exception as e:

@@ -13,6 +13,7 @@ TYPE_INTEGRATION = "integration"
 TYPE_LOVELACE = "lovelace"
 TYPE_BLUEPRINTS = "blueprints"
 TYPE_AUDIO = "audio"
+TYPE_ADDON = "addon"
 
 # /config/www/community/onoff/<repo>  ->  /local/community/onoff/<repo>
 LOVELACE_VENDOR_FOLDER = "onoff"

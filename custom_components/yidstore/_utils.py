@@ -28,3 +28,42 @@ def validate_endpoint(url: str) -> bool:
     if not url:
         return False
     return url.startswith("http://") or url.startswith("https://")
+
+
+async def async_github_latest_tag(hass, owner: str, repo: str) -> str | None:
+    """Resolve the latest GitHub release tag WITHOUT the REST API.
+
+    https://github.com/<owner>/<repo>/releases/latest redirects to
+    /releases/tag/<tag>. Unlike api.github.com, plain github.com is not
+    subject to the 60 requests/hour unauthenticated API rate limit, so
+    this works reliably (it's the same reason HACS-style downloads keep
+    working when the REST API returns 403).
+    """
+    from urllib.parse import unquote
+
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    sess = async_get_clientsession(hass)
+    try:
+        async with sess.get(
+            f"https://github.com/{owner}/{repo}/releases/latest",
+            allow_redirects=False,
+            timeout=20,
+            headers={"User-Agent": "YidStore"},
+        ) as resp:
+            loc = resp.headers.get("Location", "")
+            if "/releases/tag/" in loc:
+                tag = unquote(loc.split("/releases/tag/")[-1]).strip("/")
+                return tag or None
+    except Exception:
+        pass
+    return None
+
+
+def github_archive_url(owner: str, repo: str, ref: str) -> str:
+    """Zip download URL for a GitHub ref (tag or branch) WITHOUT the REST API.
+
+    github.com/<o>/<r>/archive/<ref>.zip redirects to codeload.github.com,
+    which is not API rate-limited (api.github.com/.../zipball is).
+    """
+    return f"https://github.com/{owner}/{repo}/archive/{ref}.zip"
