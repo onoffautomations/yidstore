@@ -1576,6 +1576,13 @@ class OnOffStoreInstallView(HomeAssistantView):
                 if audio_location not in {"www", "media"}:
                     return web.json_response({"error": "Invalid audio_location. Use 'www' or 'media'."}, status=400)
                 svc_data["audio_location"] = audio_location
+                # Optional: install only specific tracks into a chosen folder.
+                audio_files = body.get("audio_files")
+                if isinstance(audio_files, list) and audio_files:
+                    svc_data["audio_files"] = [str(f) for f in audio_files]
+                audio_subfolder = body.get("audio_subfolder")
+                if audio_subfolder:
+                    svc_data["audio_subfolder"] = str(audio_subfolder)
             
             # Support for installing specific versions (passed as tag to service)
             version = body.get("version")
@@ -2097,13 +2104,12 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "latest_version": pkg_data.get("latest_version"),
                 }
 
+            # "Authenticated" = a Gitea token is configured. We deliberately
+            # do NOT round-trip test_auth() here: that hit /api/v1/user and
+            # could return False for tokens that work fine for repos, which
+            # wrongly hid the Audio tab for authenticated users.
             client = hass.data[DOMAIN][eid].get("client")
-            is_authenticated = False
-            if client and client.token:
-                try:
-                    is_authenticated = await client.test_auth()
-                except Exception:
-                    pass
+            is_authenticated = bool(client and client.token)
 
             return web.json_response({
                 "status": status,

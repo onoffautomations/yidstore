@@ -309,8 +309,16 @@ def _install_audio_from_extracted(
     owner: str,
     repo_name: str,
     audio_location: str = "www",
+    selected_files: list | None = None,
+    subfolder: str | None = None,
 ) -> dict:
-    """Install audio files under /config/www/audio/... or /config/media/audio/... preserving repo paths."""
+    """Install audio files under /config/www/<folder>/... or /config/media/<folder>/...
+
+    ``selected_files`` (relative POSIX paths) limits the install to specific
+    tracks; when None, all audio files are installed. ``subfolder`` overrides
+    the default ``<owner>/<repo>`` destination so users can choose where the
+    tracks land.
+    """
     import logging
 
     _LOGGER = logging.getLogger(__name__)
@@ -319,30 +327,52 @@ def _install_audio_from_extracted(
         raise RuntimeError("Audio install requires a repository owner.")
 
     location = (audio_location or "www").strip().lower()
-    if location == "media":
-        dest = ha_media_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
-    else:
-        dest = ha_www_root / AUDIO_VENDOR_FOLDER / owner_slug / repo_name
+    base = ha_media_root if location == "media" else ha_www_root
 
-    if dest.exists():
-        shutil.rmtree(dest)
+    # Sanitize a user-chosen subfolder (no traversal, no leading slash).
+    if subfolder:
+        clean = "/".join(
+            p for p in str(subfolder).replace("\\", "/").split("/")
+            if p and p not in (".", "..")
+        )
+        rel_dest = clean or f"{owner_slug}/{repo_name}"
+    else:
+        rel_dest = f"{owner_slug}/{repo_name}"
+    dest = base / AUDIO_VENDOR_FOLDER / rel_dest
+
+    # Normalize the selected-file set for matching against repo-relative paths.
+    selected = None
+    if selected_files:
+        selected = {str(s).replace("\\", "/").lstrip("/") for s in selected_files}
+
+    # Merge into an existing folder rather than wiping it, so installing a few
+    # more tracks doesn't remove previously installed ones.
     dest.mkdir(parents=True, exist_ok=True)
 
     copied = 0
     for src in extracted_root.rglob("*"):
         if not src.is_file() or not _is_audio_file(src):
             continue
-        rel = src.relative_to(extracted_root)
-        target = dest / rel
+        rel = src.relative_to(extracted_root).as_posix()
+        if selected is not None and rel not in selected:
+            continue
+        # Flatten into the destination by filename when a subfolder was chosen;
+        # otherwise preserve the repo's structure.
+        target = dest / (Path(rel).name if subfolder else rel)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, target)
         copied += 1
 
     if copied == 0:
-        raise RuntimeError("Audio install: no audio files were found in the repository.")
+        raise RuntimeError("Audio install: no matching audio files were found.")
 
     _LOGGER.info("Installed %d audio files to %s", copied, dest)
-    return {"files_copied": copied, "dest_path": str(dest), "audio_location": location}
+    return {
+        "files_copied": copied,
+        "dest_path": str(dest),
+        "audio_location": location,
+        "subfolder": rel_dest,
+    }
 
 
 async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> bytes:
@@ -351,7 +381,13 @@ async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> b
     async def _get(u: str) -> bytes:
         async with sess.get(u, headers=headers, timeout=120) as resp:
             if resp.status != 200:
-                raise RuntimeError(f"Download failed: {resp.status} {await resp.text()}")
+                # Keep the body server-side only — it can contain the store URL.
+                body = await resp.text()
+                logging.getLogger(__name__).debug("Download failed %s: %s", resp.status, body)
+                # Preserve the marker the retry logic below looks for, without
+                # exposing the URL to the user.
+                hint = "unrecognized repository reference" if "unrecognized repository reference" in body else ""
+                raise RuntimeError(f"Download failed: {resp.status} {hint}".strip())
             return await resp.read()
 
     try:
@@ -382,6 +418,8 @@ async def install_package(
     repo_name: str,
     owner: str | None = None,
     audio_location: str = "www",
+    audio_files: list | None = None,
+    audio_subfolder: str | None = None,
     source: str | None = None,
 ) -> dict:
     ha_custom_components = Path(hass.config.path("custom_components"))
@@ -433,6 +471,8 @@ async def install_package(
                     owner or "",
                     repo_name,
                     audio_location=audio_location,
+                    selected_files=audio_files,
+                    subfolder=audio_subfolder,
                 )
 
             if package_type == "addon":
@@ -452,6 +492,8 @@ async def download_and_install(
     repo_name: str,
     owner: str | None = None,
     audio_location: str = "www",
+    audio_files: list | None = None,
+    audio_subfolder: str | None = None,
     source: str | None = None,
 ) -> dict:
     zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
@@ -462,6 +504,8 @@ async def download_and_install(
         repo_name=repo_name,
         owner=owner,
         audio_location=audio_location,
+        audio_files=audio_files,
+        audio_subfolder=audio_subfolder,
         source=source,
     )
 

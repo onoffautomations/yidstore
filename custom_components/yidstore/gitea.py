@@ -46,7 +46,10 @@ class GiteaClient:
         url = f"{self.base_url}/api/v1/repos/{owner}/{repo}"
         async with sess.get(url, headers=self._headers(), timeout=30) as resp:
             if resp.status != 200:
-                raise RuntimeError(f"Repo fetch failed: {resp.status} {await resp.text()}")
+                # Never include the response body in the raised error — it
+                # contains the store URL, which must not leak to users.
+                _LOGGER.debug("Repo fetch failed %s: %s", resp.status, await resp.text())
+                raise RuntimeError(f"Repo fetch failed ({resp.status})")
             return await resp.json()
 
     async def get_org_repos(self, org: str) -> list[dict]:
@@ -194,7 +197,8 @@ class GiteaClient:
         url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/releases/latest"
         async with sess.get(url, headers=self._headers(), timeout=30) as resp:
             if resp.status != 200:
-                raise RuntimeError(f"Latest release fetch failed: {resp.status} {await resp.text()}")
+                _LOGGER.debug("Latest release fetch failed %s: %s", resp.status, await resp.text())
+                raise RuntimeError(f"Latest release fetch failed ({resp.status})")
             return await resp.json()
 
     async def get_release_by_tag(self, owner: str, repo: str, tag: str) -> dict:
@@ -202,7 +206,8 @@ class GiteaClient:
         url = f"{self.base_url}/api/v1/repos/{owner}/{repo}/releases/tags/{tag}"
         async with sess.get(url, headers=self._headers(), timeout=30) as resp:
             if resp.status != 200:
-                raise RuntimeError(f"Release-by-tag fetch failed: {resp.status} {await resp.text()}")
+                _LOGGER.debug("Release-by-tag fetch failed %s: %s", resp.status, await resp.text())
+                raise RuntimeError(f"Release-by-tag fetch failed ({resp.status})")
             return await resp.json()
 
     def pick_asset(self, release: dict, asset_name: str | None = None) -> dict:

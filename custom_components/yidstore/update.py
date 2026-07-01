@@ -160,6 +160,8 @@ class PackageUpdateEntity(UpdateEntity):
         pkg_type = pkg.get("package_type", "integration")
         mode = pkg.get("mode")
         asset_name = pkg.get("asset_name")
+        source = pkg.get("source")
+        repo_url = pkg.get("repo_url")
 
         if not owner or not repo:
             _LOGGER.error("Cannot install update: missing owner or repo")
@@ -173,6 +175,13 @@ class PackageUpdateEntity(UpdateEntity):
             "repo": repo,
             "type": pkg_type,
         }
+        # Carry the source so GitHub-installed repos update via GitHub, not the
+        # Gitea store (otherwise the latest-release lookup hits the wrong server
+        # and 404s — and would leak the store URL in the error).
+        if source:
+            service_data["source"] = source
+        if repo_url:
+            service_data["repo_url"] = repo_url
         if mode:
             service_data["mode"] = mode
         if asset_name:

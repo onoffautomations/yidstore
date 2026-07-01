@@ -45,6 +45,8 @@ SERVICE_SCHEMA_GENERIC = vol.Schema(
         vol.Optional("source"): str,
         vol.Optional("repo_url"): str,
         vol.Optional("audio_location"): vol.In(["www", "media"]),
+        vol.Optional("audio_files"): [str],
+        vol.Optional("audio_subfolder"): str,
     }
 )
 
@@ -58,6 +60,8 @@ SERVICE_SCHEMA_SIMPLE = vol.Schema(
         vol.Optional("source"): str,
         vol.Optional("repo_url"): str,
         vol.Optional("audio_location"): vol.In(["www", "media"]),
+        vol.Optional("audio_files"): [str],
+        vol.Optional("audio_subfolder"): str,
     }
 )
 
@@ -865,6 +869,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             source = call.data.get("source")
             audio_location = (call.data.get("audio_location") or "www").strip().lower()
+            audio_files = call.data.get("audio_files")
+            audio_subfolder = call.data.get("audio_subfolder")
             url, version = await _download_url_for_call(owner, repo, mode, tag, asset_name, source)
             _LOGGER.info("")
             _LOGGER.info("=" * 60)
@@ -899,6 +905,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 repo_name=repo,
                 owner=owner,
                 audio_location=audio_location,
+                audio_files=audio_files,
+                audio_subfolder=audio_subfolder,
                 source=source,
             )
 
