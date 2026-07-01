@@ -5635,24 +5635,37 @@
                         </div>
                     `;
                 } else if (audioFiles.length > 0) {
-                    // Show available audio files from repo (not yet installed)
+                    // Available audio files — multi-select + choose a folder.
                     filesHtml = `
                         <div style="margin-top: 1.5rem;">
-                            <h3 style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <h3 style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
                                 <i class="mdi mdi-music-box-multiple" style="color: var(--text-secondary);"></i>
                                 Available Audio Files (${audioFiles.length})
                             </h3>
-                            <div style="background: var(--card); border-radius: 8px; padding: 1rem;">
-                                ${audioFiles.map(f => `
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                                        <i class="mdi mdi-music-note" style="color: var(--text-secondary);"></i>
-                                        <span>${f}</span>
-                                    </div>
-                                `).join('')}
-                                <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
-                                    <i class="mdi mdi-information-outline"></i> Install this audio pack to play files locally in Home Assistant.
-                                </p>
+                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
+                                <button class="btn btn-o btn-sm" onclick="toggleAllAudio(true)"><i class="mdi mdi-checkbox-multiple-marked"></i> Select all</button>
+                                <button class="btn btn-o btn-sm" onclick="toggleAllAudio(false)"><i class="mdi mdi-checkbox-multiple-blank-outline"></i> Clear</button>
+                                <div style="display:flex; align-items:center; gap:0.35rem; margin-left:auto;">
+                                    <span style="font-size:0.85rem; color:var(--text-secondary);">Folder:</span>
+                                    <input id="audioSubfolder" type="text" placeholder="${escapeHtml(repo)}" value="${escapeHtml(repo)}"
+                                        style="padding:0.35rem 0.6rem; border-radius:8px; background:var(--card); border:1px solid var(--border); color:var(--text); min-width:120px;">
+                                </div>
+                                <button class="btn btn-p btn-sm" onclick="executeAudioInstallSelected('${owner}','${repo}','${branch}')">
+                                    <i class="mdi mdi-download"></i> Install selected
+                                </button>
                             </div>
+                            <div style="background: var(--card); border-radius: 8px; padding: 0.5rem 1rem; max-height:340px; overflow:auto;">
+                                ${audioFiles.map(f => `
+                                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); cursor:pointer;">
+                                        <input type="checkbox" class="audio-file-cb" value="${escapeHtml(f)}">
+                                        <i class="mdi mdi-music-note" style="color: var(--text-secondary);"></i>
+                                        <span>${escapeHtml(f)}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                            <p style="margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.85rem;">
+                                <i class="mdi mdi-information-outline"></i> Tick the tracks you want, choose a folder, and install — or use the <strong>Install all</strong> button above.
+                            </p>
                         </div>
                     `;
                 }
@@ -5662,7 +5675,7 @@
                          <i class="mdi mdi-delete"></i> Uninstall
                        </button>`
                     : `<button class="btn btn-p" onclick="confirmAudioInstall('${owner}', '${repo}')">
-                         <i class="mdi mdi-download"></i> Install to ${audioLocation === 'media' ? 'Media' : 'WWW'}
+                         <i class="mdi mdi-download"></i> Install all to ${audioLocation === 'media' ? 'Media' : 'WWW'}
                        </button>`;
 
                 const statusBadge = isInstalled
@@ -5731,6 +5744,41 @@
                     await loadAudioRepoContent(owner, repo, branch);
                 } else {
                     pop('Error', data.error || 'Install failed', 'mdi-alert', false);
+                }
+            } catch (e) {
+                pop('Error', 'Install failed: ' + e.message, 'mdi-alert', false);
+            }
+        }
+
+        function toggleAllAudio(check) {
+            document.querySelectorAll('.audio-file-cb').forEach(cb => { cb.checked = check; });
+        }
+
+        async function executeAudioInstallSelected(owner, repo, branch) {
+            const selected = Array.from(document.querySelectorAll('.audio-file-cb:checked')).map(cb => cb.value);
+            if (selected.length === 0) {
+                pop('No tracks selected', 'Tick at least one track to install, or use "Install all".', 'mdi-information', false);
+                return;
+            }
+            const subfolder = (document.getElementById('audioSubfolder')?.value || '').trim();
+            try {
+                const body = {
+                    owner, repo, type: 'audio',
+                    audio_location: getAudioInstallLocation(),
+                    audio_files: selected,
+                };
+                if (subfolder) body.audio_subfolder = subfolder;
+                const res = await fetch('/api/yidstore/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await parseJsonSafe(res);
+                if (res.ok && data.success) {
+                    pop('Installed', `Installed ${selected.length} track${selected.length === 1 ? '' : 's'} from ${formatName(repo)}.`, 'mdi-check-circle', false);
+                    await loadAudioRepoContent(owner, repo, branch);
+                } else {
+                    pop('Error', data.error || `Install failed (HTTP ${res.status})`, 'mdi-alert', false);
                 }
             } catch (e) {
                 pop('Error', 'Install failed: ' + e.message, 'mdi-alert', false);
