@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test / tooling artifacts
+.pytest_cache/
+.coverage
+htmlcov/

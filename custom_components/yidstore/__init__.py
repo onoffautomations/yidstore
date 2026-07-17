@@ -30,7 +30,13 @@ from .const import (
 from .gitea import GiteaClient
 from .installer import download_and_install, uninstall_package
 from .dashboard import async_setup_dashboard
-from ._utils import async_github_latest_tag, github_archive_url
+from ._utils import (
+    MANAGED_BY_HACS,
+    async_github_latest_release,
+    async_github_latest_tag,
+    github_archive_url,
+    load_hacs_state,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +128,36 @@ def _alternate_lovelace_resource_urls(base_url_without_query: str) -> set[str]:
     return alternates
 
 
+async def _fetch_release_metadata(hass, client, owner: str, repo: str, source: str) -> dict | None:
+    """Fetch raw latest-release metadata from the package's own host.
+
+    GitHub packages hit GitHub; everything else uses the configured Gitea
+    client — a GitHub package never queries the Gitea server. Returns the raw
+    release dict (GitHub/Gitea share the same shape) or ``None`` on any failure.
+    """
+    try:
+        if source == "github":
+            result = await async_github_latest_release(hass, owner, repo)
+            release = result.get("release") if result.get("status") == "ok" else None
+            if not release:
+                return None
+            # Re-shape the normalized fields back into the raw keys the
+            # coordinator's normalizer expects.
+            return {
+                "tag_name": release.get("release_tag"),
+                "name": release.get("release_summary"),
+                "body": release.get("release_notes"),
+                "html_url": release.get("release_url"),
+                "published_at": release.get("release_published_at"),
+                "prerelease": release.get("prerelease"),
+                "draft": release.get("draft"),
+            }
+        return await client.get_latest_release(owner, repo)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Could not fetch release metadata for %s/%s: %s", owner, repo, err)
+        return None
+
+
 def _scan_custom_components_versions(hass: HomeAssistant) -> dict[str, str]:
     """Return installed custom_components domains mapped to their manifest versions."""
     cc_root = Path(hass.config.path("custom_components"))
@@ -151,144 +187,87 @@ def _scan_custom_components_versions(hass: HomeAssistant) -> dict[str, str]:
     return versions
 
 
-def _load_hacs_integrations(hass: HomeAssistant) -> set[str]:
-    """Return a set of installed HACS integration domains."""
-    hacs_path = Path(hass.config.path(".storage", "hacs"))
-    if not hacs_path.exists():
-        return set()
-
-    try:
-        raw = json.loads(hacs_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _LOGGER.debug("Failed to read HACS storage: %s", e)
-        return set()
-
-    data = raw.get("data", raw)
-    repos = data.get("repositories", [])
-    domains: set[str] = set()
-
-    for repo in repos:
-        try:
-            category = repo.get("category") or repo.get("data", {}).get("category")
-            installed = repo.get("installed")
-            if installed is None:
-                installed = repo.get("data", {}).get("installed")
-            if category != "integration" or not installed:
-                continue
-            domain = repo.get("domain") or repo.get("data", {}).get("domain")
-            if isinstance(domain, str) and domain:
-                domains.add(domain.lower())
-            else:
-                domains_list = repo.get("domains") or repo.get("data", {}).get("domains") or []
-                for d in domains_list:
-                    if isinstance(d, str) and d:
-                        domains.add(d.lower())
-        except Exception:
-            continue
-
-    return domains
-
-
 async def _sync_preinstalled_integrations(
     hass: HomeAssistant,
     coordinator,
     entry: ConfigEntry,
 ) -> None:
-    """Track custom_components integrations as installed when they already exist on disk."""
+    """Reconcile ownership/version for integrations found on disk.
+
+    IMPORTANT: detection is not ownership. Finding a matching folder in
+    custom_components/ (or a HACS catalog entry) does NOT mean YidStore
+    installed or manages it. This routine therefore never fabricates a
+    YidStore-managed package from a mere disk match.
+
+    What it does do:
+
+    * Reconcile the stored installed version of already-tracked packages
+      against the on-disk manifest / HACS metadata (so YidStore doesn't keep
+      showing a stale version — e.g. after HACS updates an integration).
+    * If a package YidStore already tracks is now clearly owned by HACS, mark
+      it HACS-managed so YidStore stops advertising its own update.
+
+    New disk-only integrations are left untracked; the store UI still shows
+    them as "Installed with HACS" / "Manually installed" via independent disk
+    detection, and the user must explicitly install/adopt through YidStore
+    before YidStore owns the update lifecycle.
+    """
     installed = await hass.async_add_executor_job(_scan_custom_components_versions, hass)
-    if not installed:
+    hacs_state = await hass.async_add_executor_job(load_hacs_state, hass.config.config_dir)
+    hacs_domains = hacs_state.get("domains", set())
+    hacs_versions = hacs_state.get("versions", {})
+
+    if not coordinator.packages:
         return
 
-    hacs_domains = await hass.async_add_executor_job(_load_hacs_integrations, hass)
-    from .config_flow import load_store_list
+    def _candidates(pkg: dict) -> list[str]:
+        cands: list[str] = []
+        for value in (pkg.get("domain"), pkg.get("repo_name")):
+            if not value:
+                continue
+            slug = str(value).strip().lower()
+            for cand in (slug, slug.replace("-", "_")):
+                if cand and cand not in cands:
+                    cands.append(cand)
+        return cands
 
-    default_owner: str | None = (entry.data.get("owner") or "").strip() or None
-    store_packages = await hass.async_add_executor_job(load_store_list, hass)
+    changed = False
+    for package_id, pkg in coordinator.packages.items():
+        if pkg.get("package_type", TYPE_INTEGRATION) != TYPE_INTEGRATION:
+            continue
+        candidates = _candidates(pkg)
+        match_domain = next((c for c in candidates if c in installed), None)
+        in_hacs = any(c in hacs_domains for c in candidates)
 
-    to_track: list[tuple[str, str, str, str | None, str | None, str]] = []
-
-    def _match_installed_domain(repo: str, pkg_domain: str | None = None) -> str | None:
-        candidates = []
-        if pkg_domain:
-            candidates.append(pkg_domain)
-        candidates.append(repo)
-        candidates.append(repo.replace("-", "_"))
-        for cand in candidates:
-            key = (cand or "").strip().lower()
-            if key and key in installed:
-                return key
-        return None
-
-    for pkg in store_packages:
-        repo = (pkg.get("repo") or "").strip()
-        if not repo:
-            continue
-        if pkg.get("type", TYPE_INTEGRATION) != TYPE_INTEGRATION:
-            continue
-        match_domain = _match_installed_domain(repo, pkg.get("domain"))
-        if not match_domain:
-            continue
-        owner = (pkg.get("owner") or default_owner or "").strip()
-        if not owner:
-            continue
-        if coordinator.get_package_by_repo(owner, repo) is not None:
-            continue
-        source = "hacs" if match_domain in hacs_domains else pkg.get("source", "gitea")
-        to_track.append(
-            (
-                owner,
-                repo,
-                installed.get(match_domain, "unknown"),
-                pkg.get("mode"),
-                pkg.get("asset_name"),
-                source,
-                match_domain,
+        # Reclaim ownership for packages HACS now owns, but never downgrade a
+        # package that YidStore itself installed (installed_by_yidstore proves
+        # it) just because HACS also recognizes the same domain.
+        if in_hacs and not pkg.get("installed_by_yidstore") and pkg.get("managed_by") != MANAGED_BY_HACS:
+            _LOGGER.info(
+                "Package %s is now managed by HACS; YidStore will not advertise its update",
+                package_id,
             )
-        )
+            pkg["managed_by"] = MANAGED_BY_HACS
+            changed = True
 
-    for cr in coordinator.get_custom_repos():
-        repo = (cr.get("repo") or "").strip()
-        if not repo:
-            continue
-        repo_type = cr.get("type") or TYPE_INTEGRATION
-        if repo_type != TYPE_INTEGRATION:
-            continue
-        match_domain = _match_installed_domain(repo, cr.get("domain"))
-        if not match_domain:
-            continue
-        owner = (cr.get("owner") or default_owner or "").strip()
-        if not owner:
-            continue
-        if coordinator.get_package_by_repo(owner, repo) is not None:
-            continue
-        source = "hacs" if match_domain in hacs_domains else cr.get("source", "gitea")
-        to_track.append(
-            (
-                owner,
-                repo,
-                installed.get(match_domain, "unknown"),
-                None,
-                None,
-                source,
-                match_domain,
+        # Reconcile the displayed installed version from the real source.
+        hacs_version = next((hacs_versions[c] for c in candidates if c in hacs_versions), None)
+        disk_version = installed.get(match_domain) if match_domain else None
+        if pkg.get("managed_by") == MANAGED_BY_HACS:
+            new_version = hacs_version or disk_version
+        else:
+            new_version = disk_version or hacs_version
+        if new_version and new_version not in ("unknown", "None") and new_version != pkg.get("installed_version"):
+            _LOGGER.info(
+                "Reconciling installed version for %s: %s -> %s",
+                package_id, pkg.get("installed_version"), new_version,
             )
-        )
+            pkg["installed_version"] = new_version
+            changed = True
 
-    if not to_track:
-        return
-
-    _LOGGER.info("Tracking %d pre-installed custom_components integrations", len(to_track))
-    for owner, repo, version, mode, asset_name, source, domain in to_track:
-        await coordinator.async_add_or_update_package(
-            repo_name=repo,
-            owner=owner,
-            package_type=TYPE_INTEGRATION,
-            installed_version=version,
-            mode=mode,
-            asset_name=asset_name,
-            source=source,
-            domain=domain,
-        )
+    if changed:
+        await coordinator.async_save_packages()
+        coordinator.async_update_listeners()
 
 
 async def _dump_resources_state(hass: HomeAssistant) -> None:
@@ -981,6 +960,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("Registering Package for Tracking")
             _LOGGER.info("=" * 60)
 
+            # Capture the release metadata for the installed version so its
+            # release notes/summary/URL survive a restart via storage and show
+            # in the update dialog immediately. Best-effort — install must not
+            # fail if the release lookup does. Route to the correct host.
+            release_meta = await _fetch_release_metadata(
+                hass, client, owner, repo, source or "gitea"
+            )
+
+            repo_url = call.data.get("repo_url")
+
             coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
             package_id = await coordinator.async_add_or_update_package(
                 repo_name=repo,
@@ -991,6 +980,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 asset_name=asset_name,
                 source=source or "gitea",
                 domain=installed_domain,
+                managed_by="yidstore",
+                installed_by_yidstore=True,
+                repo_url=repo_url,
+                release=release_meta,
             )
 
             _LOGGER.info("✓ Package registered with ID: %s", package_id)

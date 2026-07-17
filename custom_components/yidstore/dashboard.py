@@ -13,7 +13,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from aiohttp import web
 
-from homeassistant.components.http import HomeAssistantView, StaticPathConfig
+from homeassistant.components.http import HomeAssistantView
+
+try:  # HA 2024.7+ serves static paths via StaticPathConfig
+    from homeassistant.components.http import StaticPathConfig
+
+    _HAS_STATIC_PATH_CONFIG = True
+except ImportError:  # older HA (integration manifest supports 2023.8+)
+    StaticPathConfig = None
+    _HAS_STATIC_PATH_CONFIG = False
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -471,6 +479,48 @@ def _get_install_info(
     return (False, None)
 
 
+def _package_is_yidstore_managed(pkg: dict | None) -> bool:
+    """Whether a tracked package record is owned/managed by YidStore.
+
+    Mirrors the coordinator's ownership rule so the store UI agrees with the
+    update entity: a matching folder or HACS catalog entry does NOT make it
+    YidStore-managed — only durable install metadata does. Legacy records
+    without the field default to YidStore-managed (old behavior) until
+    migration stamps them.
+    """
+    if not pkg:
+        return False
+    managed_by = pkg.get("managed_by")
+    if managed_by is not None:
+        return managed_by == "yidstore"
+    return bool(pkg.get("installed_by_yidstore", True))
+
+
+def _install_source_for_package(pkg: dict | None, disk_source: str | None) -> str | None:
+    """Resolve the install-source label shown in the store UI.
+
+    Ownership is authoritative from the package record; only when there's no
+    proven ownership do we fall back to what's detected on disk (HACS/manual).
+    """
+    if not pkg:
+        return disk_source
+    managed_by = pkg.get("managed_by")
+    if managed_by == "hacs":
+        return "hacs"
+    if managed_by == "manual":
+        return disk_source or "manual"
+    if _package_is_yidstore_managed(pkg):
+        return "yidstore"
+    return disk_source or "manual"
+
+
+def _package_update_available(pkg: dict | None) -> bool:
+    """Only YidStore-managed packages expose an actionable YidStore update."""
+    if not pkg or not _package_is_yidstore_managed(pkg):
+        return False
+    return bool(pkg.get("update_available", False))
+
+
 def _is_repo_installed(
     *,
     local_state: dict,
@@ -688,7 +738,11 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     # icons instead of re-downloading them on every sidebar visit. The
     # panel URL carries a ?v=<startup time> cache-buster, so a new HTML is
     # fetched after each HA restart (i.e. after every update).
-    await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
+    if _HAS_STATIC_PATH_CONFIG:
+        await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
+    else:
+        # Older Home Assistant: synchronous static-path registration.
+        hass.http.register_static_path(URL_BASE, static_dir, True)
 
     if entry.data.get(CONF_SIDE_PANEL, True):
         # Sidebar entry for Admin users - Cache buster added
@@ -887,10 +941,11 @@ def _sync_update_flags_into_cache(coordinator) -> None:
         _patch_repos_cache(
             pkg.get("owner", ""),
             pkg.get("repo_name", ""),
-            update_available=pkg.get("update_available", False),
+            update_available=_package_update_available(pkg),
             installed_version=pkg.get("installed_version"),
             latest_version=pkg.get("latest_version"),
             release_notes=pkg.get("release_notes"),
+            release_url=pkg.get("release_url"),
         )
 
 
@@ -1196,7 +1251,7 @@ class OnOffStoreReposView(HomeAssistantView):
 
                     if tracked_pkg is not None:
                         is_installed = True
-                        install_source = "yidstore"
+                        install_source = _install_source_for_package(tracked_pkg, disk_source)
                     elif disk_installed:
                         is_installed = True
                         install_source = disk_source
@@ -1216,10 +1271,11 @@ class OnOffStoreReposView(HomeAssistantView):
                         "asset_name": None,
                         "is_installed": is_installed,
                         "install_source": install_source,
-                        "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
+                        "update_available": _package_update_available(tracked_pkg),
                         "installed_version": tracked_pkg.get("installed_version") if tracked_pkg else None,
                         "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
-                        "release_notes": None,
+                        "release_notes": tracked_pkg.get("release_notes") if tracked_pkg else None,
+                        "release_url": tracked_pkg.get("release_url") if tracked_pkg else None,
                         "is_hidden": coordinator.is_hidden_repo(owner, repo),
                         "icon_url": icon_url,
                         "domain": domain,
@@ -1259,11 +1315,12 @@ class OnOffStoreReposView(HomeAssistantView):
                     "mode": tracked_pkg.get("mode") if tracked_pkg else cr.get("mode"),
                     "asset_name": tracked_pkg.get("asset_name") if tracked_pkg else cr.get("asset_name"),
                     "is_installed": tracked_pkg is not None or disk_installed,
-                    "install_source": "yidstore" if tracked_pkg is not None else disk_source,
-                    "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
+                    "install_source": _install_source_for_package(tracked_pkg, disk_source),
+                    "update_available": _package_update_available(tracked_pkg),
                     "installed_version": tracked_pkg.get("installed_version") if tracked_pkg else None,
                     "latest_version": tracked_pkg.get("latest_version") if tracked_pkg else None,
                     "release_notes": tracked_pkg.get("release_notes") if tracked_pkg else None,
+                    "release_url": tracked_pkg.get("release_url") if tracked_pkg else None,
                     "is_hidden": coordinator.is_hidden_repo(owner, repo),
                     "icon_url": None,
                     "domain": domain,
@@ -1494,11 +1551,11 @@ class OnOffStoreReposView(HomeAssistantView):
             owner=owner,
         )
 
-        # If tracked by coordinator (p is not None), it's installed by YidStore
-        # Otherwise check disk detection
+        # Ownership is authoritative from the tracked package record; being on
+        # disk (or in the HACS catalog) is not proof YidStore owns it.
         if p is not None:
             installed = True
-            install_source = "yidstore"
+            install_source = _install_source_for_package(p, disk_source)
         elif disk_installed:
             installed = True
             install_source = disk_source  # 'hacs' or 'manual'
@@ -1518,10 +1575,11 @@ class OnOffStoreReposView(HomeAssistantView):
             "asset_name": p.get("asset_name") if p else y_asset,
             "is_installed": installed,
             "install_source": install_source,
-            "update_available": p.get("update_available", False) if p else False,
+            "update_available": _package_update_available(p),
             "installed_version": p.get("installed_version") if p else None,
             "latest_version": p.get("latest_version") if p else None,
             "release_notes": p.get("release_notes") if p else None,
+            "release_url": p.get("release_url") if p else None,
             "is_hidden": is_hidden,
             "icon_url": icon_url,
             "domain": domain_from_manifest,
@@ -2097,9 +2155,9 @@ class OnOffStoreStatusView(HomeAssistantView):
 
                 status[key] = {
                     "is_installed": disk_installed,
-                    "install_source": "yidstore" if disk_installed else None,
+                    "install_source": _install_source_for_package(pkg_data, disk_source) if disk_installed else None,
                     "requires_restart": needs_restart,
-                    "update_available": pkg_data.get("update_available", False) if disk_installed else False,
+                    "update_available": _package_update_available(pkg_data) if disk_installed else False,
                     "installed_version": pkg_data.get("installed_version"),
                     "latest_version": pkg_data.get("latest_version"),
                 }
