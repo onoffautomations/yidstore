@@ -2503,6 +2503,7 @@
         let items = [];
         const THEME_KEY = 'yidstore_theme';
         const CACHE_KEY = 'yidstore_cache';
+        const AUTHORS_CACHE_KEY = 'yidstore_authors';
         const AUDIO_LOCATION_KEY = 'yidstore_audio_location';
         const CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hours — matches server-side refresh schedule
         const LIVE_SYNC_INTERVAL = 5 * 60 * 1000; // status sync every 5 min (only while tab is visible)
@@ -2530,6 +2531,34 @@
                 });
             } catch (e) {
                 return '';
+            }
+        }
+
+        // username (lowercase) -> display name, from authors.md in the
+        // Github-Integrations repo. Seeded from localStorage so the cached
+        // render already shows the right names, then refreshed from the API.
+        let authorsMap = (() => {
+            try {
+                const raw = localStorage.getItem(AUTHORS_CACHE_KEY);
+                const parsed = raw ? JSON.parse(raw) : null;
+                return (parsed && typeof parsed === 'object') ? parsed : {};
+            } catch (e) {
+                return {};
+            }
+        })();
+
+        async function loadAuthorsMap(force = false) {
+            try {
+                const res = await fetch('/api/yidstore/authors' + (force ? '?force=1' : ''));
+                if (!res.ok) return false;
+                const data = await res.json();
+                const next = (data && data.authors && typeof data.authors === 'object') ? data.authors : {};
+                const changed = JSON.stringify(next) !== JSON.stringify(authorsMap);
+                authorsMap = next;
+                try { localStorage.setItem(AUTHORS_CACHE_KEY, JSON.stringify(next)); } catch (e) {}
+                return changed;
+            } catch (e) {
+                return false;
             }
         }
 
@@ -3071,6 +3100,11 @@
                     startAutoReload();
                     startLiveSync();
                     hasCompletedInitialLoad = true;
+                    // Author names live in their own (small) cache — refresh
+                    // them in the background and re-render if they changed.
+                    loadAuthorsMap()
+                        .then(changed => { if (changed && !isOverlayOpen()) apply(); })
+                        .catch(() => {});
                     fetch('/api/yidstore/status')
                         .then(res => res.ok ? res.json() : null)
                         .then(statusData => {
@@ -3091,7 +3125,8 @@
             try {
                 const [r, statusRes] = await Promise.all([
                     fetch('/api/yidstore/repos'),
-                    fetch('/api/yidstore/status').catch(() => null)
+                    fetch('/api/yidstore/status').catch(() => null),
+                    loadAuthorsMap(forceRefresh)
                 ]);
                 items = await r.json();
                 if (statusRes && statusRes.ok) {
@@ -3155,14 +3190,17 @@
             // Use visible items if provided, otherwise use all items
             const itemsToCheck = visibleItems || items;
 
-            // Get unique authors with display names - only from visible items
+            // Get unique authors with display names - only from visible items.
+            // Keyed by resolved display name so one person with a GitHub and a
+            // Gitea account gets a single entry.
             const authors = new Map();
             itemsToCheck.forEach(i => {
                 // Skip hidden items unless showHidden is true
                 if (!showHidden && i.is_hidden) return;
                 const displayName = getDisplayAuthor(i.owner, i.owner_display_name);
-                if (!authors.has(i.owner)) {
-                    authors.set(i.owner, displayName);
+                const key = getItemAuthorKey(i);
+                if (!authors.has(key)) {
+                    authors.set(key, displayName);
                 }
             });
 
@@ -3173,9 +3211,9 @@
 
             // Rebuild options
             authorF.innerHTML = '<option value="all">All Authors</option>';
-            sortedAuthors.forEach(([owner, displayName]) => {
+            sortedAuthors.forEach(([key, displayName]) => {
                 const opt = document.createElement('option');
-                opt.value = owner;
+                opt.value = key;
                 opt.textContent = displayName;
                 authorF.appendChild(opt);
             });
@@ -3223,7 +3261,7 @@
 
             // Now apply author filter too
             let filtered = preAuthorFiltered.filter(i => {
-                const matchAuthor = authorFilter === 'all' || i.owner === authorFilter;
+                const matchAuthor = authorFilter === 'all' || getItemAuthorKey(i) === authorFilter;
                 return matchAuthor;
             });
 
@@ -3241,8 +3279,8 @@
                     return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
                 }
                 if (s === 'author') {
-                    const authorA = (a.owner_display_name || a.owner).toLowerCase();
-                    const authorB = (b.owner_display_name || b.owner).toLowerCase();
+                    const authorA = getItemAuthorKey(a);
+                    const authorB = getItemAuthorKey(b);
                     const diff = authorA.localeCompare(authorB);
                     return diff !== 0 ? diff : a.repo_name.localeCompare(b.repo_name);
                 }
@@ -3260,11 +3298,26 @@
         }
 
         function getDisplayAuthor(owner, displayName) {
-            const o = (owner || '').toString().toLowerCase();
-            const d = (displayName || '').toString().toLowerCase();
+            const o = (owner || '').toString().trim();
+            const d = (displayName || '').toString().trim();
+            // authors.md wins: "igraph100: Moishe Miller" renames that author
+            // everywhere, whether the repo came from GitHub or from Gitea.
+            const mapped = authorsMap[o.toLowerCase()] || authorsMap[d.toLowerCase()];
+            if (mapped) return mapped;
             // Map admin to Joel - OnOff Automations
-            if (o === 'admin' || d === 'admin') return 'Joel - OnOff Automations';
-            return displayName || owner;
+            if (o.toLowerCase() === 'admin' || d.toLowerCase() === 'admin') return 'Joel - OnOff Automations';
+            return d || o;
+        }
+
+        // Group/filter key. Two accounts that resolve to the same display name
+        // (e.g. GitHub "igraph100" and a Gitea user named "Moishe Miller")
+        // share a key, so they show up as one author instead of two.
+        function getAuthorKey(owner, displayName) {
+            return getDisplayAuthor(owner, displayName).toLowerCase().replace(/\s+/g, ' ').trim();
+        }
+
+        function getItemAuthorKey(i) {
+            return getAuthorKey(i.owner, i.owner_display_name);
         }
 
         function createCard(i) {
@@ -3505,7 +3558,7 @@
                 // Group by author
                 const authors = new Map();
                 nonUpdatesItems.forEach(i => {
-                    const author = i.owner;
+                    const author = getItemAuthorKey(i);
                     if (!authors.has(author)) {
                         authors.set(author, { displayName: getDisplayAuthor(i.owner, i.owner_display_name), items: [] });
                     }
@@ -3750,7 +3803,7 @@
                             ${logoMarkup}
                             <div class="modal-top-text">
                                 <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
-                                <div class="modal-top-author">by ${item.owner_display_name || item.owner}</div>
+                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}</div>
                             </div>
                         </div>
                         <div class="modal-divider"></div>
@@ -4432,7 +4485,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
@@ -4635,7 +4688,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
@@ -4906,7 +4959,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${data.last_modified_by}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
