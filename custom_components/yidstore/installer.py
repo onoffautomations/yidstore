@@ -42,17 +42,50 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
     import logging
     _LOGGER = logging.getLogger(__name__)
 
-    cc = extracted_root / "custom_components"
-    if not cc.exists():
-        raise RuntimeError("Integration install expected 'custom_components/<domain>/' in the zip/zipball.")
-
     ha_custom_components.mkdir(parents=True, exist_ok=True)
-
     installed_domains: list[str] = []
 
-    for domain_dir in cc.iterdir():
-        if not domain_dir.is_dir():
-            continue
+    # Standard repository/source archive layout:
+    #   custom_components/<domain>/...
+    cc = extracted_root / "custom_components"
+    if cc.exists() and cc.is_dir():
+        domain_dirs = [p for p in cc.iterdir() if p.is_dir()]
+    else:
+        # HACS zip_release layout. HACS release ZIPs contain the *contents* of
+        # custom_components/<domain> at the archive root (manifest.json,
+        # __init__.py, etc.), not a custom_components/ wrapper.
+        manifest_path = extracted_root / "manifest.json"
+        if not manifest_path.is_file():
+            raise RuntimeError(
+                "Integration install expected either 'custom_components/<domain>/' "
+                "or a HACS zip_release archive with manifest.json at its root."
+            )
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as err:
+            raise RuntimeError("HACS zip_release contains an invalid manifest.json.") from err
+
+        domain = manifest.get("domain") if isinstance(manifest, dict) else None
+        if (
+            not isinstance(domain, str)
+            or not domain.strip()
+            or "/" in domain
+            or "\\" in domain
+            or domain in {".", ".."}
+        ):
+            raise RuntimeError("HACS zip_release manifest.json is missing a valid integration domain.")
+
+        domain = domain.strip()
+        target = ha_custom_components / domain
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(extracted_root, target)
+        installed_domains.append(domain)
+        _LOGGER.info("Installed HACS zip_release integration: %s", domain)
+        return installed_domains
+
+    for domain_dir in domain_dirs:
         target = ha_custom_components / domain_dir.name
         if target.exists():
             shutil.rmtree(target)

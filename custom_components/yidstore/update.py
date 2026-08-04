@@ -101,9 +101,23 @@ class PackageUpdateEntity(UpdateEntity):
 
     @property
     def release_summary(self) -> str | None:
-        """Return the release summary."""
+        """Return the release title/summary for the offered update only.
+
+        Gated on update_available so an up-to-date entity never shows
+        misleading release information (requirement 1).
+        """
         pkg = self.coordinator.packages.get(self.package_id, {})
+        if not pkg.get("update_available"):
+            return None
         return pkg.get("release_summary")
+
+    @property
+    def release_url(self) -> str | None:
+        """Return the URL of the release currently being offered."""
+        pkg = self.coordinator.packages.get(self.package_id, {})
+        if not pkg.get("update_available"):
+            return None
+        return pkg.get("release_url")
 
     @property
     def title(self) -> str | None:
@@ -130,25 +144,28 @@ class PackageUpdateEntity(UpdateEntity):
         return f"/api/yidstore/brands/{domain}/icon.png"
 
     async def async_release_notes(self) -> str | None:
-        """Return the release notes."""
-        pkg = self.coordinator.packages.get(self.package_id, {})
-        notes = pkg.get("release_notes")
+        """Return the release notes for the update currently being offered.
 
-        if notes:
+        Served entirely from the notes cached on the package during the
+        update check, so:
+          * they display exactly the version being offered (requirement 6),
+          * they survive a Home Assistant restart and cost no extra API
+            request when the dialog is opened (requirement 9),
+          * the Gitea client is never called for a GitHub package and
+            api.github.com is never called for a Gitea one (requirements
+            7 & 8) — no source-specific fetch happens here at all.
+        """
+        pkg = self.coordinator.packages.get(self.package_id, {})
+
+        # No update offered → show nothing rather than stale/misleading notes.
+        if not pkg.get("update_available"):
+            return None
+
+        notes = pkg.get("release_notes")
+        if notes and notes.strip():
             return notes
 
-        # Try to fetch release notes from the latest release
-        try:
-            owner = pkg.get("owner")
-            repo = pkg.get("repo_name")
-            if owner and repo:
-                release = await self.coordinator.client.get_latest_release(owner, repo)
-                if release:
-                    return release.get("body", "No release notes available.")
-        except Exception as e:
-            _LOGGER.debug("Failed to fetch release notes: %s", e)
-
-        return "No release notes available."
+        return "No release notes were published for this version."
 
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any

@@ -36,6 +36,39 @@ def _is_version_comparable(installed: str | None) -> bool:
     return _norm_version(installed) not in {"", "main", "master", "unknown", "none"}
 
 
+# Release-note fields cached on each tracked package. Kept together so
+# install/check/clear all touch exactly the same keys — that's what lets the
+# notes survive a Home Assistant restart (they're persisted with the package)
+# and stay in lock-step with the version currently being offered.
+_RELEASE_FIELDS = (
+    "release_summary",
+    "release_notes",
+    "release_url",
+    "release_published_at",
+    "release_version",
+)
+
+
+def _store_release_notes(package_data: dict[str, Any], release: dict[str, Any]) -> None:
+    """Cache a release's notes on the package (GitHub or Gitea shape).
+
+    Both the GitHub REST release and the Gitea release API expose the same
+    keys — ``tag_name``, ``name``, ``body``, ``html_url``, ``published_at`` —
+    so one mapping serves both sources.
+    """
+    package_data["release_summary"] = release.get("name")
+    package_data["release_notes"] = release.get("body")
+    package_data["release_url"] = release.get("html_url")
+    package_data["release_published_at"] = release.get("published_at")
+    package_data["release_version"] = release.get("tag_name") or release.get("name")
+
+
+def _clear_release_notes(package_data: dict[str, Any]) -> None:
+    """Drop any cached release notes so nothing stale/misleading is shown."""
+    for field in _RELEASE_FIELDS:
+        package_data[field] = None
+
+
 class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
     """Coordinator to manage package tracking and updates."""
 
@@ -124,6 +157,13 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             "asset_name": asset_name,
             "source": source or existing_data.get("source", "gitea"),
             "domain": domain or existing_data.get("domain"),
+            # Freshly installed: latest == installed, so clear any release
+            # notes/state left over from the update that was just applied.
+            "release_summary": None,
+            "release_notes": None,
+            "release_url": None,
+            "release_published_at": None,
+            "release_version": None,
         }
 
         _LOGGER.info("Package data for %s: installed=%s, latest=%s, update_available=%s",
@@ -257,12 +297,24 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                 installed_version = package_data["installed_version"]
 
                 if source == "github":
-                    # Resolve via the /releases/latest redirect — no REST
-                    # API, so no unauthenticated rate limit.
-                    from ._utils import async_github_latest_tag
+                    # GitHub-only path — the Gitea client is never used here.
+                    # Fetch the FULL release (tag_name/name/body/html_url/
+                    # published_at) so we can show notes like HACS does. If
+                    # the REST API is rate-limited we fall back to the
+                    # /releases/latest redirect for the tag alone, so update
+                    # *detection* still works even without the notes.
+                    from ._utils import (
+                        async_github_latest_release,
+                        async_github_latest_tag,
+                    )
 
-                    latest_tag = await async_github_latest_tag(self.hass, owner, repo)
                     package_data["last_check"] = datetime.now().isoformat()
+
+                    release = await async_github_latest_release(self.hass, owner, repo)
+                    latest_tag = release.get("tag_name") if release else None
+                    if not latest_tag:
+                        latest_tag = await async_github_latest_tag(self.hass, owner, repo)
+
                     if latest_tag:
                         update_available = (
                             _is_version_comparable(installed_version)
@@ -271,12 +323,22 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                         package_data["latest_version"] = latest_tag
                         package_data["update_available"] = update_available
                         if update_available:
+                            if release:
+                                _store_release_notes(package_data, release)
+                            elif _norm_version(package_data.get("release_version")) != _norm_version(latest_tag):
+                                # Couldn't fetch fresh notes and what we have
+                                # cached is for a different version — don't
+                                # show stale notes for the offered update.
+                                _clear_release_notes(package_data)
                             _LOGGER.info(
                                 "✓ Update available for %s (GitHub): %s → %s",
                                 repo, installed_version, latest_tag,
                             )
+                        else:
+                            _clear_release_notes(package_data)
                     else:
                         _LOGGER.debug("No GitHub releases found for %s/%s", owner, repo)
+                        _clear_release_notes(package_data)
                     continue
 
                 _LOGGER.debug("Checking %s/%s (installed: %s)", owner, repo, installed_version)
@@ -300,13 +362,15 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     package_data["latest_version"] = latest_version
                     package_data["update_available"] = update_available
                     package_data["last_check"] = datetime.now().isoformat()
-                    package_data["release_summary"] = latest_release.get("name")
-                    package_data["release_notes"] = latest_release.get("body")
-
+                    # Only cache the Gitea release notes when an update is
+                    # actually offered, so an up-to-date entity never shows
+                    # misleading release information.
                     if update_available:
+                        _store_release_notes(package_data, latest_release)
                         _LOGGER.info("✓ Update available for %s: %s → %s",
                                    repo, installed_version, latest_version)
                     else:
+                        _clear_release_notes(package_data)
                         _LOGGER.debug("No update available for %s", repo)
                 else:
                     # No release found

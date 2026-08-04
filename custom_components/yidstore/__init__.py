@@ -30,7 +30,12 @@ from .const import (
 from .gitea import GiteaClient
 from .installer import download_and_install, uninstall_package
 from .dashboard import async_setup_dashboard
-from ._utils import async_github_latest_tag, github_archive_url
+from ._utils import (
+    async_github_hacs_manifest,
+    async_github_latest_tag,
+    github_archive_url,
+    github_release_asset_url,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -797,27 +802,70 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Using latest release tag: %s", resolved)
         return resolved
 
-    async def _download_url_for_call(owner: str, repo: str, mode: str, tag: str | None, asset_name: str | None, source: str | None) -> tuple[str, str]:
+    async def _download_url_for_call(
+        owner: str,
+        repo: str,
+        mode: str,
+        tag: str | None,
+        asset_name: str | None,
+        source: str | None,
+        package_type: str,
+    ) -> tuple[str, str, str, str | None]:
         if source == "github":
             # Never use api.github.com for downloads — unauthenticated REST
-            # API calls are capped at 60/hour per IP, which is what caused
-            # "Download failed: 403 rate limit". The archive endpoint
-            # (codeload) and the /releases/latest redirect are not limited.
+            # API calls are capped at 60/hour per IP. Resolve the latest tag via
+            # github.com redirect, then read hacs.json from raw.githubusercontent.
             ref = tag
             if not ref:
                 ref = await async_github_latest_tag(hass, owner, repo)
+
+            # HACS zip_release is supported only for integrations. If hacs.json
+            # opts in, download the named GitHub Release asset exactly like HACS
+            # instead of GitHub's auto-generated source archive.
+            if package_type == TYPE_INTEGRATION and ref:
+                hacs_manifest = await async_github_hacs_manifest(hass, owner, repo, ref)
+                if isinstance(hacs_manifest, dict) and hacs_manifest.get("zip_release") is True:
+                    filename = hacs_manifest.get("filename")
+                    if not isinstance(filename, str) or not filename.strip():
+                        raise RuntimeError(
+                            "hacs.json has zip_release=true but does not define a release asset filename."
+                        )
+                    filename = filename.strip()
+                    if (
+                        "/" in filename
+                        or "\\" in filename
+                        or filename in {".", ".."}
+                        or not filename.lower().endswith(".zip")
+                    ):
+                        raise RuntimeError(
+                            "hacs.json zip_release filename must be a .zip release asset filename."
+                        )
+
+                    _LOGGER.info(
+                        "GitHub HACS zip_release detected for %s/%s: %s",
+                        owner,
+                        repo,
+                        filename,
+                    )
+                    return (
+                        github_release_asset_url(owner, repo, ref, filename),
+                        ref,
+                        MODE_ASSET,
+                        filename,
+                    )
+
             if not ref:
                 # No releases — fall back to the default branch
                 # (installer retries master if main doesn't exist).
                 ref = "main"
-            return github_archive_url(owner, repo, ref), ref
+            return github_archive_url(owner, repo, ref), ref, MODE_ZIPBALL, None
 
         # Intelligent "Zipball First" logic with silent Asset recovery
         
         # 1. Always try Zipball first as requested
         try:
             ref = await _resolve_ref_for_zipball(owner, repo, tag)
-            return client.archive_zip_url(owner, repo, ref), ref
+            return client.archive_zip_url(owner, repo, ref), ref, MODE_ZIPBALL, None
         except Exception as e:
             _LOGGER.debug("Zipball method failed for %s/%s, trying Release Asset: %s", owner, repo, e)
 
@@ -826,7 +874,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             resolved_tag = await _resolve_tag_for_asset(owner, repo, tag)
             release = await client.get_release_by_tag(owner, repo, resolved_tag)
             asset = client.pick_asset(release, asset_name=asset_name)
-            return asset["browser_download_url"], resolved_tag
+            return asset["browser_download_url"], resolved_tag, MODE_ASSET, asset.get("name") or asset_name
         except Exception as final_err:
             _LOGGER.error("Both installation modes (Zipball & Asset) failed for %s/%s.", owner, repo)
             raise final_err
@@ -871,7 +919,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             audio_location = (call.data.get("audio_location") or "www").strip().lower()
             audio_files = call.data.get("audio_files")
             audio_subfolder = call.data.get("audio_subfolder")
-            url, version = await _download_url_for_call(owner, repo, mode, tag, asset_name, source)
+            url, version, effective_mode, effective_asset_name = await _download_url_for_call(
+                owner, repo, mode, tag, asset_name, source, package_type
+            )
+            mode = effective_mode
+            asset_name = effective_asset_name
             _LOGGER.info("")
             _LOGGER.info("=" * 60)
             _LOGGER.info("Installing Package")
@@ -889,7 +941,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             download_headers = {}
             current_token = client.token  # Get from client instance
             if source == "github":
-                download_headers["Accept"] = "application/vnd.github+json"
+                download_headers["Accept"] = "application/octet-stream"
                 download_headers["User-Agent"] = "YidStore"
             elif current_token:
                 download_headers["Authorization"] = f"token {current_token}"

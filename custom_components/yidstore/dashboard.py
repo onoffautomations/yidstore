@@ -269,6 +269,92 @@ async def _fetch_github_integrations_list(hass: HomeAssistant, client) -> list[d
     return result
 
 
+# authors.md in the Github-Integrations repo maps a GitHub (or Gitea)
+# username to the name the store should show for it. Cached separately from
+# the repo list so an edit shows up within minutes instead of waiting for the
+# 12h store rebuild.
+AUTHORS_FILE = "authors.md"
+_AUTHORS_CACHE: dict[str, tuple[float, dict]] = {}
+_AUTHORS_CACHE_TTL = 15 * 60  # seconds
+
+# GitHub allows [A-Za-z0-9-]; Gitea also allows '.' and '_'.
+_AUTHOR_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
+_AUTHOR_HEADER_KEYS = {"username", "user", "github", "gitea", "account", "login", "name"}
+
+
+def _parse_authors_md(content: str) -> dict[str, str]:
+    """Parse authors.md into {username_lower: display_name}.
+
+    One mapping per line. All of these are accepted::
+
+        igraph100: Moishe Miller
+        - igraph100: Moishe Miller
+        * `igraph100` = Moishe Miller
+        | igraph100 | Moishe Miller |
+    """
+    authors: dict[str, str] = {}
+
+    for raw in (content or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("<!--"):
+            continue
+
+        # Drop markdown list bullets / blockquote markers
+        line = re.sub(r"^[-*+>]\s+", "", line).strip()
+        if not line:
+            continue
+
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) < 2:
+                continue
+            key, value = cells[0], cells[1]
+        else:
+            parts = re.split(r"\s*[:=]\s*", line, maxsplit=1)
+            if len(parts) != 2:
+                continue
+            key, value = parts
+
+        key = key.strip().strip("`").strip("*").strip()
+        value = value.strip().strip("`").strip()
+
+        if not key or not value:
+            continue
+        # A bare URL splits on its scheme ("https" : "//github.com/..."),
+        # so drop anything whose value looks like the rest of a URL.
+        if value.startswith("//"):
+            continue
+        # Skips table separator rows and anything that isn't a username
+        if not _AUTHOR_KEY_RE.match(key):
+            continue
+        if key.lower() in _AUTHOR_HEADER_KEYS:
+            continue
+
+        authors[key.lower()] = value
+
+    return authors
+
+
+async def _fetch_authors_map(hass: HomeAssistant, client, force: bool = False) -> dict[str, str]:
+    """Fetch + parse authors.md from the Github-Integrations repo (cached)."""
+    cached = _AUTHORS_CACHE.get("map")
+    if cached and not force and (time.time() - cached[0]) < _AUTHORS_CACHE_TTL:
+        return cached[1]
+
+    gi_owner, gi_repo = GITHUB_INTEGRATIONS_REPO.split("/", 1)
+    try:
+        content = await client.get_file_content(gi_owner, gi_repo, AUTHORS_FILE, branch="main")
+    except Exception as e:
+        _LOGGER.debug("Failed to fetch %s from Github-Integrations: %s", AUTHORS_FILE, e)
+        # Keep serving the last good map rather than dropping every name.
+        return cached[1] if cached else {}
+
+    authors = _parse_authors_md(content) if content else {}
+    _AUTHORS_CACHE["map"] = (time.time(), authors)
+    _LOGGER.debug("Loaded %d author display names from %s", len(authors), AUTHORS_FILE)
+    return authors
+
+
 URL_BASE = "/yidstore_static"
 BRANDS_PATCHER_URL = "/yidstore_static/yidstore-brands.js"
 
@@ -711,6 +797,7 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     # Register API views
     eid = entry.entry_id
     hass.http.register_view(OnOffStoreReposView(eid))
+    hass.http.register_view(OnOffStoreAuthorsView(eid))
     hass.http.register_view(OnOffStoreInstallView(eid))
     hass.http.register_view(OnOffStoreReadmeView(eid))
     hass.http.register_view(OnOffStoreReleasesView(eid))
@@ -891,6 +978,8 @@ def _sync_update_flags_into_cache(coordinator) -> None:
             installed_version=pkg.get("installed_version"),
             latest_version=pkg.get("latest_version"),
             release_notes=pkg.get("release_notes"),
+            mode=pkg.get("mode"),
+            asset_name=pkg.get("asset_name"),
         )
 
 
@@ -1212,8 +1301,12 @@ class OnOffStoreReposView(HomeAssistantView):
                         "type": repo_type,
                         "description": "",
                         "updated_at": "",
-                        "mode": "zipball",
-                        "asset_name": None,
+                        # For installed YidStore packages, show the effective
+                        # mode saved by the installer (asset vs zipball). The
+                        # old code hard-coded every GitHub row to zipball, which
+                        # made successful release-asset installs look wrong.
+                        "mode": tracked_pkg.get("mode") if tracked_pkg else "zipball",
+                        "asset_name": tracked_pkg.get("asset_name") if tracked_pkg else None,
                         "is_installed": is_installed,
                         "install_source": install_source,
                         "update_available": tracked_pkg.get("update_available", False) if tracked_pkg else False,
@@ -1530,6 +1623,41 @@ class OnOffStoreReposView(HomeAssistantView):
         }
 
 
+class OnOffStoreAuthorsView(HomeAssistantView):
+    """Author display names, from authors.md in the Github-Integrations repo.
+
+    Returns {"authors": {"<username lower>": "<display name>"}}. The frontend
+    resolves names through this map, so the same person coming from GitHub and
+    from Gitea ends up under one author.
+    """
+    url = "/api/yidstore/authors"
+    name = "api:yidstore:authors"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app.get("hass")
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"authors": {}})
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"authors": {}})
+                eid = eids[0]
+
+            client = hass.data[DOMAIN][eid]["client"]
+            force = request.query.get("force") in ("1", "true", "yes")
+            authors = await _fetch_authors_map(hass, client, force=force)
+            return web.json_response({"authors": authors})
+        except Exception as e:
+            _LOGGER.debug("Authors map request failed: %s", e)
+            return web.json_response({"authors": {}})
+
+
 class OnOffStoreInstallView(HomeAssistantView):
     """API to install integration."""
     url = "/api/yidstore/install"
@@ -1595,14 +1723,33 @@ class OnOffStoreInstallView(HomeAssistantView):
                 hass.data["yidstore_requires_restart"] = set()
             hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
 
+            # The service resolves the *effective* download mode. For GitHub
+            # integrations this may change the frontend's requested zipball
+            # mode to a HACS release asset. Read the tracked package back so
+            # the API/cache reports what was actually downloaded.
+            coordinator = hass.data[DOMAIN][eid]["coordinator"]
+            tracked_pkg = coordinator.get_package_by_repo(o, r) or {}
+            effective_mode = tracked_pkg.get("mode")
+            effective_asset_name = tracked_pkg.get("asset_name")
+
             _patch_repos_cache(
                 o, r,
                 is_installed=True,
                 install_source="yidstore",
                 update_available=False,
+                installed_version=tracked_pkg.get("installed_version"),
+                latest_version=tracked_pkg.get("latest_version"),
+                mode=effective_mode,
+                asset_name=effective_asset_name,
             )
             _invalidate_local_state_cache()
-            return web.json_response({"success": True, "requires_restart": True})
+            return web.json_response({
+                "success": True,
+                "requires_restart": True,
+                "mode": effective_mode,
+                "asset_name": effective_asset_name,
+                "installed_version": tracked_pkg.get("installed_version"),
+            })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
