@@ -2508,6 +2508,128 @@
         const CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hours — matches server-side refresh schedule
         const LIVE_SYNC_INTERVAL = 5 * 60 * 1000; // status sync every 5 min (only while tab is visible)
 
+        // Mobile-style navigation: every meaningful in-panel destination gets
+        // a hash route. This gives Android/iOS/HA Back a real history entry to
+        // pop instead of leaving the YidStore panel immediately.
+        const ROUTE_VIEWS = new Set(['store', 'apps', 'docs', 'audio', 'automations', 'dashboards', 'helpers', 'blueprints']);
+        let lastAppliedRouteKey = '';
+
+        function routePart(value) {
+            return encodeURIComponent(String(value ?? ''));
+        }
+
+        function routeHash(parts) {
+            return '#/' + parts.map(routePart).join('/');
+        }
+
+        function routeParts() {
+            const raw = (window.location.hash || '').replace(/^#\/?/, '');
+            if (!raw) return ['store'];
+            return raw.split('/').filter(Boolean).map(part => {
+                try { return decodeURIComponent(part); } catch (e) { return part; }
+            });
+        }
+
+        function routeDepth() {
+            const n = Number(window.history.state?.yidstoreRouteDepth ?? 0);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+        }
+
+        function navigateHash(parts, { replace = false } = {}) {
+            const next = routeHash(parts);
+            const currentDepth = routeDepth();
+            const state = {
+                ...(window.history.state || {}),
+                yidstoreRouteDepth: replace ? currentDepth : currentDepth + 1,
+            };
+            if (window.location.hash === next) {
+                applyHashRoute();
+                return;
+            }
+            if (replace) window.history.replaceState(state, '', next);
+            else window.history.pushState(state, '', next);
+            applyHashRoute();
+        }
+
+        function backOrRoute(parts) {
+            if (routeDepth() > 0) {
+                window.history.back();
+            } else {
+                navigateHash(parts, { replace: true });
+            }
+        }
+
+        function hideDetailModalVisual(restoreScroll = true) {
+            const modal = document.getElementById('modal');
+            const wasOpen = !!modal && modal.style.display === 'flex';
+            if (modal) modal.style.display = 'none';
+            updateScrollLock();
+            if (restoreScroll && wasOpen) requestAnimationFrame(() => window.scrollTo(0, detailReturnScrollY));
+        }
+
+        function hideCustomModalVisual() {
+            const modal = document.getElementById('customModal');
+            if (modal) modal.style.display = 'none';
+            updateScrollLock();
+        }
+
+        async function applyHashRoute() {
+            const key = `${window.location.hash}|${routeDepth()}`;
+            if (key === lastAppliedRouteKey) return;
+            lastAppliedRouteKey = key;
+
+            const parts = routeParts();
+            let view = parts[0] || 'store';
+            if (!ROUTE_VIEWS.has(view)) view = 'store';
+
+            const isDetail = view === 'store' && parts[1] === 'detail' && parts[2] && parts[3];
+            const isCustom = view === 'store' && parts[1] === 'custom';
+            if (!isDetail) hideDetailModalVisual(true);
+            if (!isCustom) hideCustomModalVisual();
+
+            switchView(view, true);
+
+            try {
+                if (isDetail) {
+                    await openDet(parts[2], parts[3], null, true);
+                } else if (isCustom) {
+                    await openCustomModal(true);
+                } else if (parts[1] === 'file' && parts.length >= 6) {
+                    const [owner, repo, branch, path] = [parts[2], parts[3], parts[4], parts.slice(5).join('/')];
+                    if (view === 'docs') await loadDocContent(owner, repo, path, branch, true);
+                    else if (view === 'automations') await loadAutomationContent(owner, repo, path, branch, true);
+                    else if (view === 'dashboards') await loadDashboardContent(owner, repo, path, branch, true);
+                    else if (view === 'helpers') await loadHelperContent(owner, repo, branch, path, true);
+                    else if (view === 'blueprints') await loadBlueprintContent(owner, repo, branch, path, true);
+                } else if (view === 'audio' && parts[1] === 'repo' && parts.length >= 5) {
+                    await loadAudioRepoContent(parts[2], parts[3], parts[4], true);
+                }
+            } catch (e) {
+                console.error('YidStore route failed:', e);
+            }
+        }
+
+        function initRouting() {
+            const currentState = window.history.state || {};
+            if (currentState.yidstoreRouteDepth == null) {
+                window.history.replaceState({ ...currentState, yidstoreRouteDepth: 0 }, '', window.location.href);
+            }
+            if (!window.location.hash) {
+                navigateHash(['store'], { replace: true });
+            } else {
+                applyHashRoute();
+            }
+        }
+
+        window.addEventListener('popstate', () => {
+            lastAppliedRouteKey = '';
+            applyHashRoute();
+        });
+        window.addEventListener('hashchange', () => {
+            lastAppliedRouteKey = '';
+            applyHashRoute();
+        });
+
         // Apps (Add-ons) is not ready for users yet — show a "Coming soon"
         // screen instead of the functional UI. Flip to false to re-enable.
         const APPS_COMING_SOON = true;
@@ -3729,10 +3851,22 @@
             }
         }
 
-        async function openDet(o, r, e) {
+        async function openDet(o, r, e, fromRoute = false) {
             if (e) e.stopPropagation();
-            detailReturnScrollY = window.scrollY || document.documentElement.scrollTop || 0;
-            const item = items.find(x => x.owner === o && x.repo_name === r);
+            if (!fromRoute) {
+                detailReturnScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+                navigateHash(['store', 'detail', o, r]);
+                return;
+            }
+            let item = items.find(x => x.owner === o && x.repo_name === r);
+            if (!item) {
+                await load(false, false);
+                item = items.find(x => x.owner === o && x.repo_name === r);
+            }
+            if (!item) {
+                pop('Not Found', `${formatName(r)} is not available in the current store list.`, 'mdi-alert', false);
+                return;
+            }
             const body = document.getElementById('mb');
             body.innerHTML = '<center style="padding:3rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2.5rem;"></i><br><br>Loading...</center>';
             document.getElementById('modal').style.display = 'flex';
@@ -3930,8 +4064,12 @@
             d.style.display = d.style.display === 'block' ? 'none' : 'block';
         }
 
-        async function openCustomModal() {
+        async function openCustomModal(fromRoute = false) {
             document.getElementById('dropdown').style.display = 'none';
+            if (!fromRoute) {
+                navigateHash(['store', 'custom']);
+                return;
+            }
             document.getElementById('customModal').style.display = 'flex';
             updateScrollLock();
             toggleCustomRepoFields();
@@ -3986,9 +4124,12 @@
             }
         }
 
-        function closeCustomModal() {
-            document.getElementById('customModal').style.display = 'none';
-            updateScrollLock();
+        function closeCustomModal(fromRoute = false) {
+            if (!fromRoute && routeParts()[0] === 'store' && routeParts()[1] === 'custom') {
+                backOrRoute(['store']);
+                return;
+            }
+            hideCustomModalVisual();
         }
 
         async function addCustomRepo() {
@@ -4160,10 +4301,13 @@
             document.getElementById('pop-o').style.display = 'none';
             updateScrollLock();
         }
-        function closeModal() {
-            document.getElementById('modal').style.display = 'none';
-            updateScrollLock();
-            requestAnimationFrame(() => window.scrollTo(0, detailReturnScrollY));
+        function closeModal(fromRoute = false) {
+            const parts = routeParts();
+            if (!fromRoute && parts[0] === 'store' && parts[1] === 'detail') {
+                backOrRoute(['store']);
+                return;
+            }
+            hideDetailModalVisual(true);
         }
 
         window.onclick = (e) => {
@@ -4198,7 +4342,12 @@
         // Track which beta sections have shown the popup this session
         const betaPopupShown = new Set();
 
-        function switchView(view) {
+        function switchView(view, fromRoute = false) {
+            if (!ROUTE_VIEWS.has(view)) view = 'store';
+            if (!fromRoute) {
+                navigateHash([view]);
+                return;
+            }
             currentDocsView = view;
 
             // Keep the mobile section dropdown in sync
@@ -4453,7 +4602,8 @@
             return 'mdi-file-document';
         }
 
-        async function loadDocContent(owner, repo, path, branch) {
+        async function loadDocContent(owner, repo, path, branch, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['docs', 'file', owner, repo, branch || 'main', path]); return; }
             const contentEl = document.getElementById('docsContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading document...</div>';
 
@@ -4472,7 +4622,7 @@
                 }
 
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a onclick="switchView('docs')">Documentation</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadDocsRepos()">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/docs" onclick="event.preventDefault(); switchView('docs')">Documentation</a> <i class="mdi mdi-chevron-right"></i> <a href="#/docs" onclick="event.preventDefault(); switchView('docs')">${formatName(repo)}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
                         breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
@@ -4655,7 +4805,8 @@
             }
         }
 
-        async function loadAutomationContent(owner, repo, path, branch) {
+        async function loadAutomationContent(owner, repo, path, branch, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['automations', 'file', owner, repo, branch || 'main', path]); return; }
             const contentEl = document.getElementById('automationsContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading automation...</div>';
 
@@ -4675,7 +4826,7 @@
 
                 const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a onclick="switchView('automations')">Automations</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadAutomationsRepos()">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/automations" onclick="event.preventDefault(); switchView('automations')">Automations</a> <i class="mdi mdi-chevron-right"></i> <a href="#/automations" onclick="event.preventDefault(); switchView('automations')">${formatName(repo)}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
                         breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
@@ -4926,7 +5077,8 @@
             }
         }
 
-        async function loadDashboardContent(owner, repo, path, branch) {
+        async function loadDashboardContent(owner, repo, path, branch, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['dashboards', 'file', owner, repo, branch || 'main', path]); return; }
             const contentEl = document.getElementById('dashboardsContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading dashboard...</div>';
 
@@ -4946,7 +5098,7 @@
 
                 const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a onclick="switchView('dashboards')">Dashboards</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadDashboardsRepos()">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">Dashboards</a> <i class="mdi mdi-chevron-right"></i> <a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">${formatName(repo)}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
                         breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
@@ -5449,7 +5601,8 @@
             await loadHelpersFolderContents(folderId, owner, repo, branch, path);
         }
 
-        async function loadHelperContent(owner, repo, branch, filePath) {
+        async function loadHelperContent(owner, repo, branch, filePath, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['helpers', 'file', owner, repo, branch || 'main', filePath]); return; }
             const contentEl = document.getElementById('helpersContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
 
@@ -5468,7 +5621,7 @@
                 }
 
                 const fileName = filePath.split('/').pop();
-                let breadcrumbHtml = `<a onclick="switchView('helpers')">Helpers</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadHelpersRepos()">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+                let breadcrumbHtml = `<a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">Helpers</a> <i class="mdi mdi-chevron-right"></i> <a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
 
                 // Meta info
                 let metaHtml = '';
@@ -5638,7 +5791,8 @@
             document.getElementById(folderId)?.classList.add('active');
         }
 
-        async function loadAudioRepoContent(owner, repo, branch) {
+        async function loadAudioRepoContent(owner, repo, branch, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['audio', 'repo', owner, repo, branch || 'main']); return; }
             const contentEl = document.getElementById('audioContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
 
@@ -5652,7 +5806,7 @@
                     return;
                 }
 
-                const breadcrumbHtml = `<a onclick="switchView('audio')">Audio</a> <i class="mdi mdi-chevron-right"></i> ${formatName(repo)}`;
+                const breadcrumbHtml = `<a href="#/audio" onclick="event.preventDefault(); switchView('audio')">Audio</a> <i class="mdi mdi-chevron-right"></i> ${formatName(repo)}`;
                 const isInstalled = data.is_installed;
                 const localFiles = data.local_files || [];
                 const audioFiles = data.audio_files || [];
@@ -6016,7 +6170,8 @@
             await loadBlueprintsFolderContents(folderId, owner, repo, branch, path);
         }
 
-        async function loadBlueprintContent(owner, repo, branch, filePath) {
+        async function loadBlueprintContent(owner, repo, branch, filePath, fromRoute = false) {
+            if (!fromRoute) { navigateHash(['blueprints', 'file', owner, repo, branch || 'main', filePath]); return; }
             const contentEl = document.getElementById('blueprintsContent');
             contentEl.innerHTML = '<div class="docs-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading...</div>';
 
@@ -6034,7 +6189,7 @@
                 }
 
                 const fileName = filePath.split('/').pop();
-                let breadcrumbHtml = `<a onclick="switchView('blueprints')">Blueprints</a> <i class="mdi mdi-chevron-right"></i> <a onclick="loadBlueprintsRepos()">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+                let breadcrumbHtml = `<a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">Blueprints</a> <i class="mdi mdi-chevron-right"></i> <a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
 
                 let metaHtml = '';
                 if (data.last_modified_by || data.last_modified_at) {
@@ -6197,6 +6352,7 @@
         updateAudioLocationToggleLabel();
         loadRestartSet();
         triggerAutoFullReload();
+        initRouting();
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
