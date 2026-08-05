@@ -293,6 +293,7 @@ async def _sync_preinstalled_integrations(
             asset_name=asset_name,
             source=source,
             domain=domain,
+            managed_by_yidstore=False,
         )
 
 
@@ -1073,6 +1074,78 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, SERVICE_CHECK_UPDATES, _handle_check_updates)
 
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry
+) -> bool:
+    """Uninstall a YidStore-managed package when its HA device is deleted.
+
+    Home Assistant calls this hook from the device page's Delete action.
+    Packages merely discovered as pre-existing/HACS installs are protected and
+    cannot be uninstalled by deleting their YidStore tracking device.
+    """
+    package_id = next(
+        (value for domain, value in device_entry.identifiers if domain == DOMAIN),
+        None,
+    )
+    if not package_id:
+        return False
+
+    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
+    coordinator = entry_data.get("coordinator")
+    if coordinator is None:
+        return False
+
+    package = coordinator.packages.get(package_id)
+    if package is None:
+        # Nothing remains to uninstall; allow HA to clean up the stale device.
+        return True
+
+    if not package.get("managed_by_yidstore", True):
+        _LOGGER.warning(
+            "Refusing device-delete uninstall for unmanaged package %s", package_id
+        )
+        return False
+
+    owner = package.get("owner")
+    repo = package.get("repo_name")
+    package_type = package.get("package_type", TYPE_INTEGRATION)
+    domain = package.get("domain")
+    if not owner or not repo:
+        return False
+
+    try:
+        await hass.async_add_executor_job(
+            uninstall_package, hass, package_type, repo, owner, domain
+        )
+        # HA itself removes the device after this hook returns True, so don't
+        # race it by deleting the device registry entry here.
+        await coordinator.async_remove_package(owner, repo, remove_device=False)
+
+        if "yidstore_requires_restart" in hass.data:
+            hass.data["yidstore_requires_restart"].discard(f"{owner}/{repo}".lower())
+
+        try:
+            from .dashboard import _invalidate_local_state_cache, _patch_repos_cache
+            _patch_repos_cache(
+                owner, repo,
+                is_installed=False,
+                install_source=None,
+                update_available=False,
+            )
+            _invalidate_local_state_cache()
+        except Exception:
+            pass
+
+        _LOGGER.info("Uninstalled %s/%s from device delete", owner, repo)
+        return True
+    except Exception as err:
+        _LOGGER.error(
+            "Failed to uninstall %s/%s from device delete: %s",
+            owner, repo, err, exc_info=True,
+        )
+        return False
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
