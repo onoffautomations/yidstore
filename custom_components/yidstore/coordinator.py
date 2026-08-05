@@ -101,6 +101,15 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
 
         if data:
             self.packages = data.get("packages", {})
+            # One-time migration for packages tracked before per-device delete
+            # ownership was recorded. HACS packages are never YidStore-managed.
+            migrated = False
+            for package_data in self.packages.values():
+                if "managed_by_yidstore" not in package_data:
+                    package_data["managed_by_yidstore"] = package_data.get("source") != "hacs"
+                    migrated = True
+            if migrated:
+                await self.async_save_packages()
             _LOGGER.info("Loaded %d tracked packages", len(self.packages))
         else:
             self.packages = {}
@@ -116,11 +125,53 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         self.hidden_repos = hidden_data.get("repos", []) if hidden_data else []
         _LOGGER.info("Loaded %d hidden repositories", len(self.hidden_repos))
 
+        # Create devices even before entity platforms finish loading. This is
+        # what makes the HA Devices page accurately show one device per package.
+        self.async_sync_package_devices()
+
     async def async_save_packages(self) -> None:
         """Save tracked packages to storage."""
         _LOGGER.info("Saving %d tracked packages...", len(self.packages))
         await self._store.async_save({"packages": self.packages})
         _LOGGER.info("✓ Packages saved")
+
+    def _get_package_device(self, package_id: str):
+        """Return this config entry's device for a tracked package."""
+        from homeassistant.helpers import device_registry as dr
+
+        registry = dr.async_get(self.hass)
+        identifier = (DOMAIN, package_id)
+        # Home Assistant 2026.8+ scopes identifiers by config entry. Keep a
+        # fallback for older supported HA versions.
+        getter = getattr(registry, "async_get_device_by_identifier", None)
+        if getter is not None:
+            try:
+                return getter(identifier, self.entry_id)
+            except TypeError:
+                pass
+        return registry.async_get_device(identifiers={identifier})
+
+    def _ensure_package_device(self, package_id: str, package_data: dict) -> None:
+        """Create/update one Home Assistant device per downloaded package."""
+        from homeassistant.helpers import device_registry as dr
+
+        registry = dr.async_get(self.hass)
+        registry.async_get_or_create(
+            config_entry_id=self.entry_id,
+            identifiers={(DOMAIN, package_id)},
+            name=package_data.get("repo_name") or package_id,
+            manufacturer="OnOff Integration Store",
+            model=(package_data.get("package_type") or "package").title(),
+            sw_version=package_data.get("installed_version") or "unknown",
+        )
+
+    def async_sync_package_devices(self) -> None:
+        """Ensure every tracked package has its own device registry entry."""
+        for package_id, package_data in self.packages.items():
+            try:
+                self._ensure_package_device(package_id, package_data)
+            except Exception as err:
+                _LOGGER.warning("Could not create device for %s: %s", package_id, err)
 
     async def async_add_or_update_package(
         self,
@@ -132,6 +183,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         asset_name: str = None,
         source: str = "gitea",
         domain: str | None = None,
+        managed_by_yidstore: bool | None = None,
     ) -> str:
         """Add or update a tracked package."""
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
@@ -157,6 +209,14 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             "asset_name": asset_name,
             "source": source or existing_data.get("source", "gitea"),
             "domain": domain or existing_data.get("domain"),
+            # Packages downloaded by YidStore are user-removable from the
+            # Home Assistant device page. Pre-existing/HACS packages that are
+            # only discovered by YidStore are deliberately not removable here.
+            "managed_by_yidstore": (
+                existing_data.get("managed_by_yidstore", True)
+                if managed_by_yidstore is None
+                else bool(managed_by_yidstore)
+            ),
             # Freshly installed: latest == installed, so clear any release
             # notes/state left over from the update that was just applied.
             "release_summary": None,
@@ -172,6 +232,11 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         self.packages[package_id] = package_data
         await self.async_save_packages()
 
+        # Device creation is explicit instead of depending on an entity being
+        # added first. This guarantees every YidStore package (integration,
+        # card, blueprint, audio, etc.) gets its own HA device.
+        self._ensure_package_device(package_id, package_data)
+
         _LOGGER.info("✓ Package %s tracked", package_id)
 
         # If this is a new package and we have the callback, create sensors immediately
@@ -179,20 +244,10 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             _LOGGER.info("Creating sensors for new package: %s", package_id)
             await self._create_sensors_for_package(package_id, package_data)
         else:
-            # If updating existing package, notify sensors to refresh
+            # If updating existing package, notify entities to refresh. The
+            # explicit device sync above already updates its software version.
             _LOGGER.info("Notifying sensors to update for: %s", package_id)
             self.async_update_listeners()
-
-            # Update device registry with new version
-            from homeassistant.helpers import device_registry as dr
-            device_registry = dr.async_get(self.hass)
-            device = device_registry.async_get_device(identifiers={(DOMAIN, package_id)})
-            if device:
-                device_registry.async_update_device(
-                    device.id,
-                    sw_version=installed_version
-                )
-                _LOGGER.info("✓ Updated device registry sw_version to %s", installed_version)
 
         return package_id
 
@@ -449,11 +504,40 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         """Check if a repo is manually hidden."""
         return any(r["owner"].lower() == owner.lower() and r["repo"].lower() == repo.lower() for r in self.hidden_repos)
 
-    async def async_remove_package(self, owner: str, repo_name: str) -> None:
-        """Remove a tracked package from storage."""
+    async def async_remove_package(
+        self, owner: str, repo_name: str, *, remove_device: bool = True
+    ) -> None:
+        """Remove a tracked package and, normally, its YidStore device."""
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
-        if package_id in self.packages:
-            _LOGGER.info("Removing tracking for package: %s", package_id)
-            self.packages.pop(package_id)
-            await self.async_save_packages()
-            self.async_update_listeners()
+        if package_id not in self.packages:
+            return
+
+        _LOGGER.info("Removing tracking for package: %s", package_id)
+        device = self._get_package_device(package_id)
+        self.packages.pop(package_id)
+        self._created_entities.discard(package_id)
+        await self.async_save_packages()
+        self.async_update_listeners()
+
+        if device is not None:
+            # Remove YidStore's package entities from the registry as part of
+            # uninstall so a deleted package does not leave unavailable
+            # Version/Update/Type/Button entities behind.
+            try:
+                from homeassistant.helpers import entity_registry as er
+                entity_registry = er.async_get(self.hass)
+                for entity in er.async_entries_for_device(
+                    entity_registry, device.id, include_disabled_entities=True
+                ):
+                    if entity.config_entry_id == self.entry_id:
+                        entity_registry.async_remove(entity.entity_id)
+            except Exception as err:
+                _LOGGER.warning("Could not remove entities for %s: %s", package_id, err)
+
+            if remove_device:
+                try:
+                    from homeassistant.helpers import device_registry as dr
+                    dr.async_get(self.hass).async_remove_device(device.id)
+                    _LOGGER.info("Removed YidStore device for %s", package_id)
+                except Exception as err:
+                    _LOGGER.warning("Could not remove device for %s: %s", package_id, err)
