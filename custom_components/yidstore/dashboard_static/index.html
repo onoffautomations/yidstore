@@ -261,6 +261,24 @@
             text-decoration: underline;
         }
 
+        .powered-by .support-line {
+            white-space: nowrap;
+        }
+
+        /* Support number for the narrow/side-panel layout; the desktop header
+           shows it inside .powered-by instead. */
+        .logo-support {
+            display: none;
+            font-size: 0.58rem;
+            color: var(--dim);
+            white-space: nowrap;
+        }
+
+        .logo-support a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
         .controls {
             display: flex;
             gap: 0.5rem;
@@ -389,6 +407,11 @@
         .dropdown div:hover {
             background: var(--hover-bg);
             color: var(--primary);
+        }
+
+        /* `.dropdown div { display: flex }` beats the UA [hidden] rule */
+        .dropdown div[hidden] {
+            display: none;
         }
 
         .grid {
@@ -688,6 +711,24 @@
         .badge-restart {
             background: rgba(255, 152, 0, 0.12);
             color: var(--warning);
+        }
+
+        .badge-new {
+            background: rgba(76, 175, 80, 0.14);
+            color: var(--success);
+        }
+
+        .chip-new {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 50px;
+            background: rgba(76, 175, 80, 0.14);
+            color: var(--success);
+            font-size: 0.72rem;
+            font-weight: 500;
+            white-space: nowrap;
         }
 
         .card-title {
@@ -1245,6 +1286,10 @@
                 display: block;
                 font-size: 0.58rem;
                 white-space: nowrap;
+            }
+
+            .logo-support {
+                display: block;
             }
 
             /* Middle: search bar, always visible */
@@ -2043,11 +2088,17 @@
                         <span class="store-title">YidStore</span>
                     </div>
                     <div class="logo-desc">by: OnOff Automations</div>
+                    <!-- Shown only on the narrow/side-panel layout, where
+                         .powered-by (which carries the same number) is hidden -->
+                    <div class="logo-support">Support: <a href="tel:+18454008199">845.400.8199</a></div>
                 </div>
             </div>
             <div class="powered-by">
-                Powered by: <strong><a href="https://onoffautomations.com/" target="_blank" rel="noopener noreferrer"
-                        style="color: inherit; text-decoration: none;">OnOff Automations</a></strong></div>
+                <div>Powered by: <strong><a href="https://onoffautomations.com/" target="_blank"
+                            rel="noopener noreferrer"
+                            style="color: inherit; text-decoration: none;">OnOff Automations</a></strong></div>
+                <div class="support-line">For support reach out to <a href="tel:+18454008199">845.400.8199</a></div>
+            </div>
             <!-- Search lives at header level so it can sit between the brand
                  and the section dropdown on mobile -->
             <div class="search-box">
@@ -2090,6 +2141,10 @@
                             class="mdi mdi-format-list-bulleted"></i></button>
                     <button class="btn-icon" onclick="toggleMenu()"><i class="mdi mdi-dots-vertical"></i></button>
                     <div id="dropdown" class="dropdown">
+                        <!-- Authenticated store accounts only; shown by applyLiveStatus -->
+                        <div id="autoInstallBtn" onclick="openAutoInstall()" hidden>
+                            <i class="mdi mdi-auto-download"></i> Auto-Install All
+                        </div>
                         <div id="addCustomBtn" onclick="openCustomModal()"><i class="mdi mdi-folder-plus-outline"></i>
                             Custom Repos
                         </div>
@@ -2829,6 +2884,8 @@
                     const el = document.getElementById(id);
                     if (el) { el.hidden = !isAuthenticated; el.disabled = !isAuthenticated; }
                 });
+                const autoBtn = document.getElementById('autoInstallBtn');
+                if (autoBtn) autoBtn.hidden = !isAuthenticated;
             }
 
             for (const [key, status] of Object.entries(data.status || {})) {
@@ -3419,6 +3476,30 @@
             try { _lastRenderDigest = computeRenderDigest(); } catch (e) {}
         }
 
+        // A package is new for 7 days after the backend first saw it in the
+        // store list, or after it published a release we hadn't seen before.
+        // The expiry is computed here (not baked into the API response) so an
+        // item stops being new on time instead of waiting for the next
+        // 12-hourly server sweep.
+        const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+        function isNewItem(i) {
+            const since = Number(i && i.new_since);
+            if (!since || !isFinite(since)) return false;
+            const age = Date.now() - since * 1000;
+            return age >= 0 && age < NEW_WINDOW_MS;
+        }
+
+        // Only *uninstalled* packages get the New treatment — anything already
+        // installed belongs in the Updates section instead.
+        function showsAsNew(i) {
+            return !i.is_installed && isNewItem(i);
+        }
+
+        function newBadgeLabel(i) {
+            return i.new_reason === 'release' ? 'New release' : 'New';
+        }
+
         function getDisplayAuthor(owner, displayName) {
             const o = (owner || '').toString().trim();
             const d = (displayName || '').toString().trim();
@@ -3504,6 +3585,9 @@
             const sourceLabel = i.source === 'github'
                 ? '<i class="mdi mdi-github"></i> GitHub'
                 : '<i class="mdi mdi-store"></i> OnOff Store';
+            const newChip = showsAsNew(i)
+                ? `<span class="chip-new"><i class="mdi mdi-star-four-points"></i> ${newBadgeLabel(i)}</span>`
+                : '';
 
             card.innerHTML = `
             <div class="select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
@@ -3525,6 +3609,7 @@
                 <span class="${dotClass}"></span>
                 <span>${statusLabel}</span>
                 <span style="flex:1;"></span>
+                ${newChip}
                 ${updateChip}
                 ${i.is_installed ? `
                 <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
@@ -3587,6 +3672,7 @@
                     <div class="list-title">
                         <span class="title-text">${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
+                        ${showsAsNew(i) ? `<span class="badge badge-new">${newBadgeLabel(i)}</span>` : ''}
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
                         ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${i.installed_version} → ${i.latest_version}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
@@ -3647,9 +3733,22 @@
                 return;
             }
 
-            // Always show Updates section at top if there are updates
-            const updatesItems = data.filter(i => i.update_available);
-            const nonUpdatesItems = data.filter(i => !i.update_available);
+            // New (uninstalled) packages pin to the very top for 7 days;
+            // installed packages with an update stay in Updates Available.
+            const newItems = data.filter(i => showsAsNew(i));
+            const rest = data.filter(i => !showsAsNew(i));
+            const updatesItems = rest.filter(i => i.update_available);
+            const nonUpdatesItems = rest.filter(i => !i.update_available);
+
+            if (newItems.length > 0) {
+                const key = 'section_new';
+                // Newest first inside the section, whatever the global sort is.
+                newItems.sort((a, b) => (Number(b.new_since) || 0) - (Number(a.new_since) || 0));
+                grid.appendChild(createSectionHeaderWithToggle('New', 'mdi-star-four-points-outline', newItems.length, key));
+                if (!collapsedSections.has(key)) {
+                    newItems.forEach(i => grid.appendChild(viewMode === 'list' ? createListRow(i) : createCard(i)));
+                }
+            }
 
             if (updatesItems.length > 0) {
                 const key = 'section_updates';
@@ -3701,7 +3800,7 @@
                 });
             } else {
                 // Default rendering (no sections for non-updates)
-                if (updatesItems.length > 0 && nonUpdatesItems.length > 0) {
+                if ((updatesItems.length > 0 || newItems.length > 0) && nonUpdatesItems.length > 0) {
                     const key = 'section_all';
                     grid.appendChild(createSectionHeaderWithToggle('All Packages', 'mdi-package-variant', nonUpdatesItems.length, key));
                     if (!collapsedSections.has(key)) {
@@ -3791,6 +3890,148 @@
                 pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed. Reload to see card changes.`, 'mdi-check-circle', true);
             } else if (installedCount > 0) {
                 pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed successfully.`, 'mdi-check-circle', false);
+            }
+        }
+
+        // ---- Auto-Install -------------------------------------------------
+        // Installs everything listed in Auto-Install/autoinstall.md. The list
+        // is server-side and authenticated-only; each entry goes through the
+        // same /api/yidstore/install call a manual install uses.
+        let autoInstallEntries = [];
+        let autoInstallRunning = false;
+
+        function autoInstallRowHtml(e, idx, state) {
+            const icons = {
+                pending: '<i class="mdi mdi-circle-outline" style="color:var(--dim);"></i>',
+                running: '<i class="mdi mdi-loading mdi-spin" style="color:var(--primary);"></i>',
+                done: '<i class="mdi mdi-check-circle" style="color:var(--success);"></i>',
+                skipped: '<i class="mdi mdi-check" style="color:var(--dim);"></i>',
+                failed: '<i class="mdi mdi-alert-circle" style="color:var(--danger);"></i>'
+            };
+            const typeLabel = e.type === 'lovelace'
+                ? 'Card'
+                : (e.type === 'blueprints' ? 'Blueprint' : (e.type === 'audio' ? 'Audio' : 'Integration'));
+            const note = state === 'skipped'
+                ? ' <span style="color:var(--dim);">already installed</span>'
+                : (state === 'failed' ? ` <span style="color:var(--danger);">${escapeHtml(e._error || 'failed')}</span>` : '');
+            return `
+                <div id="autoInstallRow${idx}" style="display:flex; align-items:center; gap:0.6rem; padding:0.35rem 0; font-size:0.85rem; text-align:left;">
+                    <span style="width:1.2rem; flex:0 0 auto;">${icons[state] || icons.pending}</span>
+                    <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        ${escapeHtml(formatName(e.repo_name))}
+                        <span style="color:var(--dim);">· ${typeLabel}${note}</span>
+                    </span>
+                </div>`;
+        }
+
+        function renderAutoInstallList(states, heading) {
+            const rows = autoInstallEntries.map((e, idx) => autoInstallRowHtml(e, idx, states[idx])).join('');
+            return `<div style="text-align:left;">${heading}<div style="max-height:45vh; overflow-y:auto; margin-top:0.6rem;">${rows}</div></div>`;
+        }
+
+        async function openAutoInstall() {
+            document.getElementById('dropdown').style.display = 'none';
+            if (autoInstallRunning) return;
+
+            pop('Auto-Install', '<div style="text-align:center; padding:1rem;"><i class="mdi mdi-loading mdi-spin" style="font-size:2rem;"></i><br><br>Loading list…</div>',
+                'mdi-auto-download', false, [{ t: 'Cancel', c: 'btn-o', f: 'closePop()' }]);
+
+            let entries;
+            try {
+                const res = await fetch('/api/yidstore/autoinstall');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+                entries = Array.isArray(data.entries) ? data.entries : [];
+            } catch (err) {
+                pop('Auto-Install', escapeHtml(err.message || 'Could not load the Auto-Install list.'), 'mdi-alert', false);
+                return;
+            }
+
+            if (!entries.length) {
+                pop('Auto-Install', 'The Auto-Install list is empty.', 'mdi-information-outline', false);
+                return;
+            }
+
+            autoInstallEntries = entries;
+            const states = entries.map(e => (e.is_installed && !e.update_available) ? 'skipped' : 'pending');
+            const todo = states.filter(s => s === 'pending').length;
+            const heading = todo > 0
+                ? `<div>Install <strong>${todo}</strong> of ${entries.length} listed package${entries.length > 1 ? 's' : ''}?</div>`
+                : `<div>All ${entries.length} listed packages are already installed. Reinstall them?</div>`;
+
+            pop('Auto-Install', renderAutoInstallList(states, heading), 'mdi-auto-download', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: todo > 0 ? `Install ${todo}` : 'Reinstall All', c: 'btn-p', f: `runAutoInstall(${todo > 0 ? 'false' : 'true'})` }
+            ]);
+        }
+
+        async function runAutoInstall(includeInstalled) {
+            if (autoInstallRunning || !autoInstallEntries.length) return;
+            autoInstallRunning = true;
+
+            const states = autoInstallEntries.map(e =>
+                (!includeInstalled && e.is_installed && !e.update_available) ? 'skipped' : 'pending'
+            );
+            const paint = (heading) => {
+                const msg = document.getElementById('pm');
+                if (msg) msg.innerHTML = renderAutoInstallList(states, heading);
+            };
+
+            // Re-open the popup with no dismiss action while it runs.
+            pop('Auto-Install', '', 'mdi-auto-download', false, [
+                { t: 'Installing…', c: 'btn-o', f: 'void 0' }
+            ]);
+            const actionBar = document.getElementById('pa');
+            if (actionBar) actionBar.querySelectorAll('button').forEach(b => b.disabled = true);
+
+            let installed = 0, failed = 0, hasCards = false;
+            for (let idx = 0; idx < autoInstallEntries.length; idx++) {
+                const e = autoInstallEntries[idx];
+                if (states[idx] === 'skipped') continue;
+
+                states[idx] = 'running';
+                paint(`<div>Installing ${idx + 1} of ${autoInstallEntries.length}…</div>`);
+                try {
+                    await executeInstDirect(e.owner, e.repo_name, e.type, e.mode, e.asset_name, e);
+                    states[idx] = 'done';
+                    installed++;
+                    if (e.type === 'integration') {
+                        addToRestartSet(e.owner, e.repo_name);
+                    } else {
+                        hasCards = true;
+                    }
+                    // Keep the store list in step with what we just installed.
+                    const item = items.find(x =>
+                        (x.owner || '').toLowerCase() === e.owner.toLowerCase() &&
+                        (x.repo_name || '').toLowerCase() === e.repo_name.toLowerCase());
+                    if (item) {
+                        item.is_installed = true;
+                        item.install_source = 'yidstore';
+                        item.update_available = false;
+                    }
+                } catch (err) {
+                    states[idx] = 'failed';
+                    e._error = err && err.message ? err.message : 'failed';
+                    failed++;
+                }
+                paint(`<div>Installing ${Math.min(idx + 2, autoInstallEntries.length)} of ${autoInstallEntries.length}…</div>`);
+            }
+
+            autoInstallRunning = false;
+            await syncBackendAfterAction();
+            // refreshDashboard() skips re-rendering while an overlay is open,
+            // so redraw explicitly — otherwise the packages we just installed
+            // stay in the New section until the next full load.
+            apply();
+
+            const summary = `<div>Installed <strong>${installed}</strong> package${installed === 1 ? '' : 's'}${failed ? `, <span style="color:var(--danger);">${failed} failed</span>` : ''}.</div>`;
+            const body = renderAutoInstallList(states, summary);
+            if (failed > 0) {
+                pop('Auto-Install', body, 'mdi-alert', false);
+            } else if (hasCards) {
+                pop('Auto-Install', body, 'mdi-check-circle', true);
+            } else {
+                pop('Auto-Install', body, 'mdi-check-circle', false);
             }
         }
 
