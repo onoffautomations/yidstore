@@ -10,6 +10,7 @@ YidStore is a Home Assistant integration that adds a full in-app “store” for
 - Local branding support for custom integrations (icon/logo files in the repo)
 
 ## Installation (HACS Custom Repository)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=onoffautomations&repository=yidstore&category=Integration)
 1) In Home Assistant, open HACS.
 2) Go to **Integrations**.
 3) Click the three dots in the top-right and choose **Custom repositories**.
