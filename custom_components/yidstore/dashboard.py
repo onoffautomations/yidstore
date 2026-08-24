@@ -212,6 +212,28 @@ def _waiting_restart_from_sensor(hass: HomeAssistant, repo: str) -> bool:
 GITHUB_INTEGRATIONS_REPO = "OnOffPublic/Github-Integrations"
 GITHUB_INTEGRATIONS_BASE_URL = "https://git.onoffapi.com"
 
+# Auto-Install list repo on Gitea. autoinstall.md lists the packages an
+# authenticated (staff) user can install in one click.
+AUTO_INSTALL_OWNER = "Privat-Integrations"
+AUTO_INSTALL_REPO = "Auto-Install"
+AUTO_INSTALL_FILE = "autoinstall.md"
+
+# Repos that only exist to configure YidStore itself. They are never
+# installable packages, so they must never show up in the Store list.
+_CONFIG_ONLY_REPOS = {
+    ("onoffpublic", "github-integrations"),
+    (AUTO_INSTALL_OWNER.lower(), AUTO_INSTALL_REPO.lower()),
+}
+
+
+def _is_config_only_repo(owner: str, repo: str) -> bool:
+    """True for control repos (Github-Integrations, Auto-Install)."""
+    return (
+        (owner or "").strip().lower(),
+        (repo or "").strip().lower(),
+    ) in _CONFIG_ONLY_REPOS
+
+
 async def _fetch_github_integrations_list(hass: HomeAssistant, client) -> list[dict]:
     """Fetch GitHub integrations/cards list from the Gitea repo.
 
@@ -799,6 +821,7 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(OnOffStoreReposView(eid))
     hass.http.register_view(OnOffStoreAuthorsView(eid))
     hass.http.register_view(OnOffStoreInstallView(eid))
+    hass.http.register_view(OnOffStoreAutoInstallView(eid))
     hass.http.register_view(OnOffStoreReadmeView(eid))
     hass.http.register_view(OnOffStoreReleasesView(eid))
     hass.http.register_view(OnOffStoreRefreshView(eid))
@@ -927,10 +950,180 @@ async def _async_load_repos_snapshot(hass: HomeAssistant, eid: str) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# "New" tracking
+#
+# A package counts as new for 7 days after either (a) the first time YidStore
+# ever saw it in the store list — which is what makes an old GitHub repo count
+# as new the moment it is added to integrations.md/Cards.md — or (b) the first
+# time we see a release tag it didn't have before.
+#
+# Both are derived from a persisted per-repo record so the flag survives
+# restarts, and the expiry is computed in the frontend from `new_since` so a
+# package stops being new on time instead of waiting for the next 12h sweep.
+# ---------------------------------------------------------------------------
+NEW_WINDOW_SECONDS = 7 * 24 * 60 * 60
+_SEEN_STORE_VERSION = 1
+_SEEN_STORE_KEY = f"{DOMAIN}.repo_seen"
+_SEEN_PRUNE_SECONDS = 180 * 24 * 60 * 60
+_SEEN_RELEASE_CONCURRENCY = 8
+_SEEN_MAX_RELEASE_CHECKS = 500
+
+# {"owner/repo": {"first_seen": float, "last_seen": float,
+#                 "version": str, "version_seen": float}}
+_SEEN_STATE: dict[str, dict] = {}
+_SEEN_SEEDED = False
+_SEEN_LOADED = False
+
+
+def _seen_store(hass: HomeAssistant) -> Store:
+    return Store(hass, _SEEN_STORE_VERSION, _SEEN_STORE_KEY)
+
+
+async def _async_load_seen_state(hass: HomeAssistant) -> None:
+    """Load the persisted first-seen/last-release map once per HA run."""
+    global _SEEN_SEEDED, _SEEN_LOADED
+    if _SEEN_LOADED:
+        return
+    _SEEN_LOADED = True
+    try:
+        data = await _seen_store(hass).async_load()
+    except Exception as e:
+        _LOGGER.debug("Could not load repo-seen state: %s", e)
+        return
+    if not isinstance(data, dict):
+        return
+    repos = data.get("repos")
+    if isinstance(repos, dict):
+        _SEEN_STATE.update({k: v for k, v in repos.items() if isinstance(v, dict)})
+    _SEEN_SEEDED = bool(data.get("seeded"))
+
+
+async def _latest_release_tag(hass: HomeAssistant, client, item: dict) -> str | None:
+    """Latest release tag for a store item, or None when it can't be read.
+
+    GitHub goes through the /releases/latest redirect rather than
+    api.github.com so a store with many GitHub packages can't burn through
+    the 60 req/hour unauthenticated REST limit.
+    """
+    owner = item.get("owner") or ""
+    repo = item.get("repo_name") or ""
+    if not owner or not repo:
+        return None
+    try:
+        if item.get("source") == "github":
+            from ._utils import async_github_latest_tag
+
+            return await async_github_latest_tag(hass, owner, repo)
+        release = await client.get_latest_release(owner, repo)
+        if isinstance(release, dict):
+            return (release.get("tag_name") or release.get("name") or "").strip() or None
+    except Exception:
+        # No release, private repo, network hiccup — all mean "nothing new".
+        return None
+    return None
+
+
+async def _apply_new_flags(hass: HomeAssistant, client, items: list[dict]) -> None:
+    """Stamp `new_since`/`new_reason` on each item and persist the seen map.
+
+    On a brand-new install every repo would otherwise look new, so the first
+    sweep only seeds the map and flags nothing.
+    """
+    global _SEEN_SEEDED
+
+    await _async_load_seen_state(hass)
+    now = time.time()
+    seeding = not _SEEN_SEEDED
+
+    keyed: list[tuple[str, dict]] = []
+    for item in items:
+        owner = (item.get("owner") or "").strip()
+        repo = (item.get("repo_name") or "").strip()
+        if not owner or not repo:
+            continue
+        keyed.append((f"{owner}/{repo}".lower(), item))
+
+    # Look up release tags for everything except the seeding sweep, where the
+    # answer can't make anything new anyway.
+    tags: dict[str, str | None] = {}
+    if not seeding:
+        sem = asyncio.Semaphore(_SEEN_RELEASE_CONCURRENCY)
+
+        async def _one(key: str, item: dict) -> None:
+            async with sem:
+                tags[key] = await _latest_release_tag(hass, client, item)
+
+        checks = keyed[:_SEEN_MAX_RELEASE_CHECKS]
+        if len(keyed) > _SEEN_MAX_RELEASE_CHECKS:
+            _LOGGER.debug(
+                "New-check: only the first %d of %d repos checked for releases",
+                _SEEN_MAX_RELEASE_CHECKS,
+                len(keyed),
+            )
+        await asyncio.gather(*[_one(k, i) for k, i in checks], return_exceptions=True)
+
+    for key, item in keyed:
+        rec = _SEEN_STATE.get(key)
+        if rec is None:
+            rec = {"first_seen": 0.0 if seeding else now}
+            _SEEN_STATE[key] = rec
+        rec["last_seen"] = now
+
+        tag = tags.get(key)
+        if tag:
+            known = rec.get("version")
+            if known and known != tag:
+                rec["version_seen"] = now
+            elif not known:
+                # First tag we've ever recorded — not a new release, just the
+                # first observation of an existing one.
+                rec.setdefault("version_seen", 0.0)
+            rec["version"] = tag
+
+        first_seen = float(rec.get("first_seen") or 0.0)
+        version_seen = float(rec.get("version_seen") or 0.0)
+
+        new_since = None
+        reason = None
+        if first_seen and (now - first_seen) < NEW_WINDOW_SECONDS:
+            new_since = first_seen
+            reason = "added"
+        if version_seen and (now - version_seen) < NEW_WINDOW_SECONDS:
+            if new_since is None or version_seen > new_since:
+                new_since = version_seen
+                reason = "release"
+
+        item["new_since"] = new_since
+        item["new_reason"] = reason
+
+    # Drop records for repos that have been gone for a long time. Keeping them
+    # for a while matters: a repo temporarily missing from a failed org fetch
+    # must not come back flagged as new.
+    stale = [
+        k
+        for k, v in _SEEN_STATE.items()
+        if (now - float((v or {}).get("last_seen") or 0.0)) > _SEEN_PRUNE_SECONDS
+    ]
+    for k in stale:
+        _SEEN_STATE.pop(k, None)
+
+    _SEEN_SEEDED = True
+    try:
+        await _seen_store(hass).async_save({"seeded": True, "repos": _SEEN_STATE})
+    except Exception as e:
+        _LOGGER.debug("Could not persist repo-seen state: %s", e)
+
+
 async def _async_rebuild_repos_cache(hass: HomeAssistant, eid: str) -> list:
     """Run the full collection pass and refresh memory + persistent caches."""
     view = OnOffStoreReposView(eid)
     data = await view._build_repos(hass, eid)
+    try:
+        client = hass.data[DOMAIN][eid]["client"]
+        await _apply_new_flags(hass, client, data)
+    except Exception as e:
+        _LOGGER.debug("Could not compute new-package flags: %s", e)
     _REPOS_CACHE[eid] = (time.time(), data)
     _REPOS_PREV_ITEMS[eid] = data
     try:
@@ -1097,6 +1290,8 @@ class OnOffStoreReposView(HomeAssistantView):
                 owner = repo_obj.get("owner", {}).get("login", "")
                 if _is_hidden_org(owner):
                     return
+                if _is_config_only_repo(owner, repo_obj.get("name") or ""):
+                    return
                 seen_repos.add(full_name)
                 prev = prev_map.get((owner.lower(), (repo_obj.get("name") or "").lower()))
                 tasks.append(self._process_repo(repo_obj, coordinator, yaml_items, bypass, auth, local_state, prev))
@@ -1252,6 +1447,8 @@ class OnOffStoreReposView(HomeAssistantView):
                 # Store flow.
                 if _is_hidden_org(owner) and owner.lower() != "audio":
                     continue
+                if _is_config_only_repo(owner, repo):
+                    continue
                 if (owner.lower(), repo.lower()) in existing_keys:
                     continue
                 missing_custom.append((cr, owner, repo))
@@ -1392,8 +1589,9 @@ class OnOffStoreReposView(HomeAssistantView):
         if r.get("archived", False):
             return None
 
-        # Skip Github-Integrations repo (it's just a config repo for GitHub links)
-        if owner.lower() == "onoffpublic" and rn.lower() == "github-integrations":
+        # Skip control repos (Github-Integrations, Auto-Install) — they only
+        # carry lists for the store, they aren't installable packages.
+        if _is_config_only_repo(owner, rn):
             return None
 
         # Skip if MANUALLY hidden (unless we are showing hidden ones - logic will be in UI)
@@ -1751,6 +1949,273 @@ class OnOffStoreInstallView(HomeAssistantView):
                 "installed_version": tracked_pkg.get("installed_version"),
             })
         except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+
+def _parse_autoinstall_md(content: str, gitea_base_url: str = "") -> list[dict]:
+    """Parse autoinstall.md into a list of {owner, repo, source, url}.
+
+    One package per line. All of these are accepted::
+
+        PrivateCards/picture-clear-card
+        - Privat-Integrations/scene_controller_manager
+        https://github.com/igraph100/ha-restart-guard
+        [Restart Guard](https://github.com/igraph100/ha-restart-guard)
+
+    A bare ``owner/repo`` (no GitHub URL) means the package lives on the
+    OnOff store, matching how the list is written today.
+    """
+    entries: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    base_host = ""
+    if gitea_base_url:
+        base_host = gitea_base_url.split("://", 1)[-1].strip("/").lower()
+
+    for raw in (content or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("<!--"):
+            continue
+
+        # Drop markdown list bullets / blockquote markers
+        line = re.sub(r"^[-*+>]\s+", "", line).strip()
+        # [label](target) -> target
+        md_link = re.match(r"^\[[^\]]*\]\(\s*([^)\s]+)\s*\)$", line)
+        if md_link:
+            line = md_link.group(1).strip()
+        line = line.strip("`").strip().rstrip(",;")
+        if not line:
+            continue
+
+        gh = _parse_github_url(line)
+        if gh:
+            owner, repo = gh
+            source = "github"
+        else:
+            candidate = line
+            if "://" in candidate:
+                host_and_path = candidate.split("://", 1)[1]
+                host = host_and_path.split("/", 1)[0].lower()
+                # Only accept URLs pointing at our own store; anything else is
+                # a host we have no client for.
+                if base_host and host != base_host:
+                    continue
+                if not base_host:
+                    continue
+                parts = [p for p in host_and_path.split("/")[1:] if p]
+                if len(parts) < 2:
+                    continue
+                candidate = f"{parts[0]}/{parts[1]}"
+
+            m = re.match(
+                r"^([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)/?$",
+                candidate,
+            )
+            if not m:
+                continue
+            owner, repo = m.group(1), m.group(2)
+            source = "gitea"
+
+        repo = repo.rstrip("/")
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+        repo = repo.rstrip(".")
+        if not owner or not repo:
+            continue
+
+        key = (source, owner.lower(), repo.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            {
+                "owner": owner,
+                "repo": repo,
+                "source": source,
+                "url": f"https://github.com/{owner}/{repo}" if source == "github" else None,
+            }
+        )
+
+    return entries
+
+
+async def _detect_gitea_repo_type(client, owner: str, repo: str, branch: str = "main") -> str:
+    """Best-effort package type for a Gitea repo, from its root layout."""
+    name_hint = None
+    lowered = repo.lower()
+    if "blueprint" in lowered:
+        name_hint = "blueprints"
+    elif "card" in lowered or "lovelace" in lowered or "theme" in lowered:
+        name_hint = "lovelace"
+
+    try:
+        entries = await client.list_dir(owner, repo, path="", branch=branch)
+    except Exception:
+        entries = None
+
+    if isinstance(entries, list) and entries:
+        def _has_dir(name: str) -> bool:
+            return any(
+                isinstance(e, dict)
+                and e.get("type") == "dir"
+                and (e.get("name") or "").lower() == name
+                for e in entries
+            )
+
+        if _has_dir("custom_components"):
+            return "integration"
+        if _has_dir("blueprints"):
+            return "blueprints"
+        if any(
+            isinstance(e, dict)
+            and e.get("type") == "file"
+            and str(e.get("name") or "").lower().endswith(".js")
+            for e in entries
+        ):
+            return "lovelace"
+
+    return name_hint or "integration"
+
+
+class OnOffStoreAutoInstallView(HomeAssistantView):
+    """List the packages in Auto-Install/autoinstall.md.
+
+    Authenticated (token-configured) installs only — the list lives in a
+    private org and is meant for staff setting up a new system. The frontend
+    installs each entry through the normal /api/yidstore/install flow, so
+    tracking, restart flags and cache patching all behave identically to a
+    manual install.
+    """
+
+    url = "/api/yidstore/autoinstall"
+    name = "api:yidstore:autoinstall"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            eid = self.entry_id
+            if DOMAIN not in hass.data:
+                return web.json_response({"error": "Integration not ready"}, status=503)
+            if eid not in hass.data[DOMAIN]:
+                eids = list(hass.data[DOMAIN].keys())
+                if not eids:
+                    return web.json_response({"error": "Integration not ready"}, status=503)
+                eid = eids[0]
+
+            comp = hass.data[DOMAIN][eid]
+            client = comp["client"]
+            coordinator = comp["coordinator"]
+
+            if not client or not client.token:
+                return web.json_response(
+                    {"error": "Auto-Install requires an authenticated store account."},
+                    status=403,
+                )
+
+            content = await client.get_file_content(
+                AUTO_INSTALL_OWNER, AUTO_INSTALL_REPO, AUTO_INSTALL_FILE, branch="main"
+            )
+            if content is None:
+                return web.json_response(
+                    {"error": "Auto-Install list is not available."}, status=404
+                )
+
+            parsed = _parse_autoinstall_md(content, client.base_url)
+
+            # Reuse everything the store sweep already resolved (type, mode,
+            # icon, install state) so the common case costs zero extra calls.
+            cached = _REPOS_CACHE.get(eid)
+            store_items = cached[1] if cached else _REPOS_PREV_ITEMS.get(eid) or []
+            store_map = {
+                ((it.get("owner") or "").lower(), (it.get("repo_name") or "").lower()): it
+                for it in store_items
+                if isinstance(it, dict)
+            }
+            local_state = await _collect_local_installed(hass)
+
+            async def _resolve(entry: dict) -> dict:
+                owner, repo, source = entry["owner"], entry["repo"], entry["source"]
+                known = store_map.get((owner.lower(), repo.lower()))
+
+                if known:
+                    pkg_type = known.get("type") or "integration"
+                    domain = known.get("domain")
+                    # autoinstall.md is the authority on where a package comes
+                    # from: a github.com line means GitHub even if a store row
+                    # with the same owner/repo says otherwise.
+                    out_source = "github" if source == "github" else (known.get("source") or source)
+                    mode = known.get("mode")
+                    asset_name = known.get("asset_name")
+                    repo_url = entry.get("url") or known.get("repo_url")
+                    icon_url = known.get("icon_url")
+                elif source == "github":
+                    domain = await _resolve_github_integration_domain(hass, owner, repo)
+                    lowered = repo.lower()
+                    if domain:
+                        pkg_type = "integration"
+                    elif "card" in lowered or "lovelace" in lowered or "theme" in lowered:
+                        pkg_type = "lovelace"
+                    elif "blueprint" in lowered:
+                        pkg_type = "blueprints"
+                    else:
+                        pkg_type = "integration"
+                    out_source = "github"
+                    mode = None
+                    asset_name = None
+                    repo_url = entry.get("url")
+                    icon_url = _github_brand_icon_url(owner, repo, domain, "main")
+                else:
+                    pkg_type = await _detect_gitea_repo_type(client, owner, repo)
+                    domain = None
+                    out_source = "gitea"
+                    mode = None
+                    asset_name = None
+                    repo_url = None
+                    icon_url = None
+
+                tracked = coordinator.get_package_by_repo(owner, repo)
+                if tracked:
+                    domain = domain or tracked.get("domain")
+                disk_installed, disk_source = _get_install_info(
+                    local_state=local_state,
+                    pkg_type=pkg_type,
+                    domain=domain,
+                    repo_name=repo,
+                    owner=owner,
+                )
+
+                return {
+                    "owner": owner,
+                    "repo_name": repo,
+                    "type": pkg_type,
+                    "domain": domain,
+                    "source": out_source,
+                    "repo_url": repo_url,
+                    "mode": (tracked or {}).get("mode") or mode,
+                    "asset_name": (tracked or {}).get("asset_name") or asset_name,
+                    "icon_url": icon_url,
+                    "is_installed": tracked is not None or disk_installed,
+                    "install_source": (
+                        "yidstore" if tracked is not None else (disk_source or None)
+                    ),
+                    "update_available": (tracked or {}).get("update_available", False),
+                    "in_store": known is not None,
+                }
+
+            entries = await asyncio.gather(
+                *[_resolve(e) for e in parsed], return_exceptions=True
+            )
+            resolved = [e for e in entries if isinstance(e, dict)]
+            for e in entries:
+                if isinstance(e, Exception):
+                    _LOGGER.debug("Auto-Install entry resolution failed: %s", e)
+
+            return web.json_response({"entries": resolved})
+        except Exception as e:
+            _LOGGER.debug("Auto-Install list failed: %s", e)
             return web.json_response({"error": str(e)}, status=500)
 
 
