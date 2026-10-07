@@ -848,7 +848,8 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(BlueprintsContentView(eid))
     from .apps import async_setup_apps
 
-    await async_setup_apps(hass, eid)
+    for unsub in await async_setup_apps(hass, eid) or []:
+        entry.async_on_unload(unsub)
     hass.http.register_view(AddAutomationView())
     hass.http.register_view(AddDashboardView())
     hass.http.register_view(AddHelperView())

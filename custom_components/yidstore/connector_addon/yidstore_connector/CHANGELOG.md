@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- App updates show up in Home Assistant (add-on page and Settings → Updates): new versions are put in place so Home Assistant can update them itself.
+
 ## 1.1.0
 
 - Now ships inside the YidStore integration. YidStore installs and updates it for you.

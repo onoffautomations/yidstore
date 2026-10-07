@@ -151,6 +151,15 @@ def install(job: dict) -> dict:
     return {"ok": True, "config_found": config_found, "addon_slug": addon_slug}
 
 
+def stage(job: dict) -> dict:
+    """Put a newer version in place for an app installed here, so the
+    Supervisor offers the update. Never creates a new folder (that could
+    clash with an add-on installed some other way)."""
+    if not (ADDONS_DIR / job["slug"]).is_dir():
+        raise RuntimeError("Not installed by YidStore here; nothing staged")
+    return install(job)
+
+
 def uninstall(job: dict) -> dict:
     dest = ADDONS_DIR / job["slug"]
     if dest.exists():
@@ -167,6 +176,8 @@ def handle(job: dict) -> None:
         action = job.get("action")
         if action == "install":
             result.update(install(job))
+        elif action == "stage":
+            result.update(stage(job))
         elif action == "uninstall":
             result.update(uninstall(job))
         else:

@@ -789,6 +789,115 @@ async def _run_uninstall(hass, app_id: str, owner: str, repo: str, addon_slug: s
 
 
 # ---------------------------------------------------------------------------
+# Updates in Home Assistant: stage new versions so the Supervisor offers them
+# ---------------------------------------------------------------------------
+#
+# The Supervisor only knows a local add-on has an update once the newer files
+# are in its folder. So when a newer release of an installed app exists,
+# YidStore has the connector put the new files in place ("stage"). The
+# running add-on keeps using its built image; Home Assistant then shows the
+# update on the add-on page and under Settings -> Updates, and updates it
+# with its own Update button (or the add-on's auto-update setting).
+
+_STAGE_LOCK: asyncio.Lock | None = None
+_STAGE_LAST: dict[str, float] = {"run": 0.0}
+_STAGE_MIN_GAP = 600  # seconds between runs triggered by the Apps tab
+
+
+def _bundled_connector_version() -> str | None:
+    """Version of the connector shipped with this integration."""
+    try:
+        import yaml
+
+        with open(_CONNECTOR_SRC / "config.yaml", encoding="utf-8") as fh:
+            return str((yaml.safe_load(fh) or {}).get("version") or "") or None
+    except Exception:
+        return None
+
+
+async def ensure_connector_current(hass) -> bool:
+    """Update the connector from the built-in store when this integration
+    ships a newer one. Returns True when an update was started."""
+    bundled = await hass.async_add_executor_job(_bundled_connector_version)
+    if not bundled:
+        return False
+    addon = next(
+        (a for a in await _installed_addons(hass)
+         if str(a.get("slug", "")).lower().endswith(f"_{CONNECTOR_SLUG}")
+         and not str(a.get("slug", "")).startswith("local_")),
+        None,
+    )
+    if not addon or not _is_newer(bundled, addon.get("version")):
+        return False
+    await hass.async_add_executor_job(_publish_store, _store_root(hass))
+    await _store_reload(hass)
+    _LOGGER.info("Updating the YidStore Connector to %s", bundled)
+    ok, err = await _install_or_update(hass, addon["slug"], update=True)
+    if not ok:
+        _LOGGER.warning("Could not update the YidStore Connector: %s", err)
+    return ok
+
+
+async def stage_app_updates(hass, entry_id: str) -> list[str]:
+    """Stage newer versions of installed apps; returns the repos staged."""
+    global _STAGE_LOCK
+    if _STAGE_LOCK is None:
+        _STAGE_LOCK = asyncio.Lock()
+    client = _client(hass, entry_id)
+    if client is None or not supervisor_available(hass) or not connector_online():
+        return []
+    if _STAGE_LOCK.locked():
+        return []
+    async with _STAGE_LOCK:
+        _STAGE_LAST["run"] = time.time()
+        installed = {
+            str(a.get("slug", "")).lower(): a for a in await _installed_addons(hass)
+            if str(a.get("slug", "")).startswith("local_")
+        }
+        if not installed:
+            return []
+        staged: list[str] = []
+        for owner, repo in await _list_app_repos(client):
+            name = repo.get("name", "")
+            if not name or repo.get("access_stopped"):
+                continue
+            try:
+                manifest = await _app_manifest(hass, client, owner, repo)
+            except Exception:
+                continue
+            latest = manifest.get("version")  # what the Supervisor will read
+            if not latest or not manifest.get("has_config"):
+                continue
+            addon = installed.get(f"local_{(manifest.get('slug') or _addon_slug(name)).lower()}")
+            if not addon or not _is_newer(latest, addon.get("version")):
+                continue
+            if not _is_newer(latest, addon.get("version_latest")):
+                continue  # already staged: the Supervisor offers it
+            app_id = _app_id(owner, name)
+            busy = _task(app_id)
+            if busy and busy["state"] not in ("done", "error"):
+                continue
+            job_id = _enqueue_job("stage", owner, name, _addon_slug(name), manifest.get("ref"))
+            job = await _wait_for_job(job_id, timeout=300)
+            if job.get("status") == "done":
+                staged.append(f"{owner}/{name}")
+            else:
+                _LOGGER.debug("Staging %s/%s skipped: %s", owner, name, job.get("error") or job.get("status"))
+        if staged:
+            await _store_reload(hass)
+            _LOGGER.info("App updates ready in Home Assistant: %s", ", ".join(staged))
+        return staged
+
+
+def _maybe_stage_soon(hass, entry_id: str) -> None:
+    """From the Apps tab: stage at most every few minutes, in the background."""
+    if time.time() - _STAGE_LAST["run"] < _STAGE_MIN_GAP:
+        return
+    _STAGE_LAST["run"] = time.time()
+    hass.async_create_background_task(stage_app_updates(hass, entry_id), "yidstore_stage_app_updates")
+
+
+# ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
 
@@ -952,6 +1061,8 @@ class AppsReposView(HomeAssistantView):
                 "webui": info.get("webui") if sup_slug and not ingress else None,
                 "task": _task(app_id),
             })
+        if any(a.get("update_available") for a in out["apps"]):
+            _maybe_stage_soon(hass, self.entry_id)
         return web.json_response(out)
 
 
@@ -1129,7 +1240,7 @@ class ConnectorFetchView(HomeAssistantView):
             return web.json_response({"error": "unauthorized"}, status=403)
         _CONNECTOR_STATE["last_seen"] = time.time()
         job = _CONNECTOR_JOBS.get(job_id)
-        if not job or job["action"] != "install":
+        if not job or job["action"] not in ("install", "stage"):
             return web.json_response({"error": "Unknown job"}, status=404)
         client = _client(hass, self.entry_id)
         if client is None:
@@ -1188,8 +1299,9 @@ class AppsDiagView(HomeAssistantView):
         })
 
 
-async def async_setup_apps(hass: HomeAssistant, entry_id: str) -> None:
-    """Register the Apps views and refresh the built-in store."""
+async def async_setup_apps(hass: HomeAssistant, entry_id: str) -> list:
+    """Register the Apps views, refresh the built-in store and schedule app
+    update staging. Returns unsubscribe callbacks for the config entry."""
     for view in (
         AppsReposView(entry_id),
         AppsActionView(entry_id),
@@ -1213,3 +1325,20 @@ async def async_setup_apps(hass: HomeAssistant, entry_id: str) -> None:
             _LOGGER.debug("Could not publish the YidStore add-on store: %s", exc)
 
     hass.async_create_background_task(_refresh_store(), "yidstore_publish_store")
+
+    from datetime import timedelta
+
+    from homeassistant.helpers.event import async_call_later, async_track_time_interval
+
+    async def _stage(_now=None) -> None:
+        try:
+            if supervisor_available(hass) and await ensure_connector_current(hass):
+                return  # connector restarting; staging runs next time
+            await stage_app_updates(hass, entry_id)
+        except Exception as exc:
+            _LOGGER.debug("App update staging failed: %s", exc)
+
+    return [
+        async_call_later(hass, 120, _stage),
+        async_track_time_interval(hass, _stage, timedelta(hours=6)),
+    ]
