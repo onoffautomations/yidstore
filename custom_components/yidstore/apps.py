@@ -648,6 +648,16 @@ async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) 
         installed = _find_slug(await _installed_addons(hass), addon_slug, local=True)
         ok, err = await _install_or_update(hass, store_slug, update=bool(installed))
         if not ok and installed and "no update" in (err or "").lower():
+            # Already on the latest version (e.g. updated from Home
+            # Assistant's own Updates in the meantime): nothing to do.
+            current = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
+            try:
+                latest = (await _app_manifest(hass, client, owner, {"name": repo})).get("version")
+            except Exception:
+                latest = None
+            if latest and not _is_newer(latest, current.get("version")):
+                ok, err = True, None
+        if not ok and installed and "no update" in (err or "").lower():
             # The Supervisor may not have read the new files yet: reload and
             # try once more before reporting what it still sees.
             await asyncio.sleep(3)
