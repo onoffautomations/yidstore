@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import shutil
 import tempfile
 import zipfile
@@ -409,19 +410,20 @@ def _install_audio_from_extracted(
 
 
 async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> bytes:
-    sess = async_get_clientsession(hass)
+    from .gitea import safe_get
 
     async def _get(u: str) -> bytes:
-        async with sess.get(u, headers=headers, timeout=120) as resp:
-            if resp.status != 200:
-                # Keep the body server-side only — it can contain the store URL.
-                body = await resp.text()
-                logging.getLogger(__name__).debug("Download failed %s: %s", resp.status, body)
-                # Preserve the marker the retry logic below looks for, without
-                # exposing the URL to the user.
-                hint = "unrecognized repository reference" if "unrecognized repository reference" in body else ""
-                raise RuntimeError(f"Download failed: {resp.status} {hint}".strip())
-            return await resp.read()
+        # safe_get never follows redirects with a credential to another
+        # host, and only sends one to the store host at all.
+        status, body, _final = await safe_get(hass, u, headers, timeout=120)
+        if status != 200:
+            text = body[:2000].decode("utf-8", "replace")
+            logging.getLogger(__name__).debug("Download failed: HTTP %s", status)
+            # Preserve the marker the retry logic below looks for, without
+            # exposing the URL to the user.
+            hint = "unrecognized repository reference" if "unrecognized repository reference" in text else ""
+            raise RuntimeError(f"Download failed: {status} {hint}".strip())
+        return body
 
     try:
         return await _get(url)
@@ -460,9 +462,12 @@ async def install_package(
     ha_www_root = Path(hass.config.path("www"))
     ha_media_root = Path(hass.config.path("media"))
     ha_blueprints_root = Path(hass.config.path("blueprints"))
-    # /hacsfiles/ is served by HACS — only usable as a resource URL when
-    # HACS is actually installed. /local/community/ always works.
-    hacs_present = "hacs" in hass.data
+    # /hacsfiles/ is served only by the legacy HACS custom integration. The
+    # built-in Marketplace (HA 2026.11+) uses /local/community/, which
+    # always works, so prefer that whenever HACS isn't the one serving files.
+    from ._utils import community_store_serves_hacsfiles
+
+    hacs_present = community_store_serves_hacsfiles(hass)
 
     def _work() -> dict:
         with tempfile.TemporaryDirectory(prefix="yidstore_") as td:

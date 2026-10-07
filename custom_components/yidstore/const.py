@@ -5,6 +5,10 @@ SERVICE_INSTALL_INTEGRATION = "install_integration"
 SERVICE_INSTALL_LOVELACE = "install_lovelace"
 SERVICE_INSTALL_BLUEPRINTS = "install_blueprints"
 SERVICE_CHECK_UPDATES = "check_updates"
+SERVICE_INSTALL_APP = "install_app"
+
+# "Beta releases" (pre-releases) setting; authenticated installs only.
+CONF_BETA_RELEASES = "beta_releases"
 
 MODE_ASSET = "asset"
 MODE_ZIPBALL = "zipball"

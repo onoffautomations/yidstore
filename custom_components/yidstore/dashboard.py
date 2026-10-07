@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import secrets
 import shutil
 import time
 import uuid
@@ -458,22 +457,13 @@ def _collect_local_installed_sync(config_path: str) -> dict:
     except Exception:
         pass
 
-    # C) Detect HACS-installed items by checking HACS data
+    # C) Detect items installed by HACS or the built-in HA Marketplace
     try:
-        hacs_file = Path(config_path) / ".storage" / "hacs.repositories"
-        if hacs_file.is_file():
-            with open(hacs_file, 'r', encoding='utf-8') as f:
-                hacs_data = json_module.load(f)
-            repos = hacs_data.get("data", {})
-            if isinstance(repos, dict):
-                for repo_id, repo_info in repos.items():
-                    if isinstance(repo_info, dict):
-                        domain = repo_info.get("domain") or repo_info.get("name", "")
-                        if domain:
-                            hacs_domains.add(_normalize_slug(domain))
-                        full_name = repo_info.get("full_name", "")
-                        if full_name:
-                            hacs_repos.add(full_name.lower())
+        from ._utils import community_store_installed
+
+        cs_domains, cs_repos = community_store_installed(config_path)
+        hacs_domains.update(_normalize_slug(d) for d in cs_domains)
+        hacs_repos.update(cs_repos)
     except Exception:
         pass
 
@@ -828,11 +818,14 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(OnOffStoreAddCustomView(eid))
     hass.http.register_view(OnOffStoreListCustomView(eid))
     hass.http.register_view(OnOffStoreRemoveCustomView(eid))
+    hass.http.register_view(OnOffStoreCustomKeyView(eid))
     hass.http.register_view(OnOffStoreHideView(eid))
     hass.http.register_view(OnOffStoreUnhideView(eid))
     hass.http.register_view(OnOffStoreUninstallView(eid))
     hass.http.register_view(OnOffStoreStatusView(eid))
     hass.http.register_view(LocalBrandsIconView())
+    hass.http.register_view(RepoIconView(eid))
+    hass.http.register_view(BetaReleasesView(eid))
     hass.http.register_view(LocalBrandsListView())
     hass.http.register_view(LocalBrandsUploadView())
     hass.http.register_view(DocumentationReposView(eid))
@@ -853,16 +846,9 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(BlueprintsReposView(eid))
     hass.http.register_view(BlueprintsFilesView(eid))
     hass.http.register_view(BlueprintsContentView(eid))
-    hass.http.register_view(AppsReposView(eid))
-    hass.http.register_view(AppsInstallView(eid))
-    hass.http.register_view(AppsUninstallView(eid))
-    hass.http.register_view(AppsDiagView())
-    hass.http.register_view(AddonStoreGitView())
-    hass.http.register_view(ConnectorTokenView())
-    hass.http.register_view(ConnectorJobsView())
-    hass.http.register_view(ConnectorFetchView(eid))
-    hass.http.register_view(ConnectorResultView())
-    hass.http.register_view(ConnectorSetupView())
+    from .apps import async_setup_apps
+
+    await async_setup_apps(hass, eid)
     hass.http.register_view(AddAutomationView())
     hass.http.register_view(AddDashboardView())
     hass.http.register_view(AddHelperView())
@@ -916,6 +902,39 @@ _REPOS_STORE_KEY = f"{DOMAIN}.repos_cache"
 # updated_at hasn't changed, skipping the per-repo directory listings that
 # made a full rebuild take ~30 seconds.
 _REPOS_PREV_ITEMS: dict[str, list] = {}
+# Whether the cached list was built with a working token. A list built while
+# the token check failed (e.g. Gitea unreachable right after a restart) lacks
+# every private package, so it is rebuilt soon instead of kept for 12 hours.
+_REPOS_BUILT_AUTH: dict[str, bool] = {}
+_REPOS_AUTH_RETRY_SECONDS = 120
+_REPOS_AUTH_RETRY_AT: dict[str, float] = {}
+
+
+def _repos_missing_auth(hass: HomeAssistant, eid: str) -> bool:
+    """True when a token is configured but the cached list was built without it."""
+    try:
+        client = hass.data[DOMAIN][eid]["client"]
+    except Exception:
+        return False
+    # A token the server clearly rejected (401) isn't retried until it is
+    # changed; only failed or unanswered checks are.
+    return (
+        bool(client.token)
+        and getattr(client, "_token_valid", True)
+        and not _REPOS_BUILT_AUTH.get(eid, False)
+    )
+
+
+def _maybe_retry_auth_rebuild(hass: HomeAssistant, eid: str) -> None:
+    """Rebuild in the background, at most every couple of minutes, while the
+    cached list is missing the authenticated packages."""
+    if not _repos_missing_auth(hass, eid):
+        return
+    now = time.time()
+    if now < _REPOS_AUTH_RETRY_AT.get(eid, 0.0):
+        return
+    _REPOS_AUTH_RETRY_AT[eid] = now + _REPOS_AUTH_RETRY_SECONDS
+    _ensure_repos_rebuild(hass, eid)
 
 
 def _invalidate_repos_cache(eid: str | None = None) -> None:
@@ -943,6 +962,7 @@ async def _async_load_repos_snapshot(hass: HomeAssistant, eid: str) -> None:
         return
     ts = float(data.get("ts") or 0)
     _REPOS_CACHE[eid] = (ts, data["items"])
+    _REPOS_BUILT_AUTH[eid] = bool(data.get("authenticated", False))
     _LOGGER.info(
         "Loaded store snapshot with %d items (age: %.0f min)",
         len(data["items"]),
@@ -1014,7 +1034,9 @@ async def _latest_release_tag(hass: HomeAssistant, client, item: dict) -> str | 
         if item.get("source") == "github":
             from ._utils import async_github_latest_tag
 
-            return await async_github_latest_tag(hass, owner, repo)
+            return await async_github_latest_tag(
+                hass, owner, repo, include_prereleases=getattr(client, "beta_enabled", False)
+            )
         release = await client.get_latest_release(owner, repo)
         if isinstance(release, dict):
             return (release.get("tag_name") or release.get("name") or "").strip() or None
@@ -1118,7 +1140,7 @@ async def _apply_new_flags(hass: HomeAssistant, client, items: list[dict]) -> No
 async def _async_rebuild_repos_cache(hass: HomeAssistant, eid: str) -> list:
     """Run the full collection pass and refresh memory + persistent caches."""
     view = OnOffStoreReposView(eid)
-    data = await view._build_repos(hass, eid)
+    data, built_auth = await view._build_repos(hass, eid)
     try:
         client = hass.data[DOMAIN][eid]["client"]
         await _apply_new_flags(hass, client, data)
@@ -1126,11 +1148,30 @@ async def _async_rebuild_repos_cache(hass: HomeAssistant, eid: str) -> list:
         _LOGGER.debug("Could not compute new-package flags: %s", e)
     _REPOS_CACHE[eid] = (time.time(), data)
     _REPOS_PREV_ITEMS[eid] = data
+    _REPOS_BUILT_AUTH[eid] = built_auth
     try:
-        await _repos_store(hass).async_save({"ts": time.time(), "items": data})
+        await _repos_store(hass).async_save(
+            {"ts": time.time(), "items": data, "authenticated": built_auth}
+        )
     except Exception as e:
         _LOGGER.debug("Could not persist repos snapshot: %s", e)
     _LOGGER.info("Store list refreshed from server (%d items)", len(data))
+
+    if _repos_missing_auth(hass, eid):
+        # The token check failed during this build. Try again shortly rather
+        # than serving a list without the private packages for 12 hours.
+        from homeassistant.helpers.event import async_call_later
+
+        _LOGGER.info(
+            "Store list was built without authentication; retrying in %ss",
+            _REPOS_AUTH_RETRY_SECONDS,
+        )
+
+        def _retry(_now) -> None:
+            _maybe_retry_auth_rebuild(hass, eid)
+
+        _REPOS_AUTH_RETRY_AT[eid] = 0.0
+        async_call_later(hass, _REPOS_AUTH_RETRY_SECONDS, _retry)
     return data
 
 
@@ -1210,9 +1251,9 @@ class OnOffStoreReposView(HomeAssistantView):
                     resp_data = await _ensure_repos_rebuild(hass, eid)
                 except Exception:
                     if cached:
-                        return web.json_response(cached[1])
+                        return web.json_response(public_items(hass, eid, cached[1]))
                     raise
-                return web.json_response(resp_data)
+                return web.json_response(public_items(hass, eid, resp_data))
 
             if cached:
                 # Serve instantly. If the snapshot is older than the refresh
@@ -1220,17 +1261,22 @@ class OnOffStoreReposView(HomeAssistantView):
                 # so no panel open ever waits on the network.
                 if time.time() - cached[0] >= _REPOS_CACHE_TTL:
                     _ensure_repos_rebuild(hass, eid)
-                return web.json_response(cached[1])
+                else:
+                    _maybe_retry_auth_rebuild(hass, eid)
+                return web.json_response(public_items(hass, eid, cached[1]))
 
             # Nothing cached yet (first run) — build now, coalesced across
             # concurrent requests.
             resp_data = await _ensure_repos_rebuild(hass, eid)
-            return web.json_response(resp_data)
+            return web.json_response(public_items(hass, eid, resp_data))
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
     async def _build_repos(self, hass, eid):
-        # Raises on failure so we don't cache a broken empty list.
+        """Return (items, built_with_token).
+
+        Raises on failure so we don't cache a broken empty list.
+        """
         try:
             comp = hass.data[DOMAIN][eid]
             client = comp["client"]
@@ -1256,7 +1302,13 @@ class OnOffStoreReposView(HomeAssistantView):
             if auth_task:
                 is_authenticated = await auth_task
                 if not is_authenticated:
-                    _LOGGER.warning("Gitea token provided but authentication failed (expired or revoked). Using public access.")
+                    _LOGGER.warning("Store token was rejected. Showing the public store only.")
+
+            # What the token can see (a repo key: only its repositories).
+            # Added on top of the public store, never instead of it.
+            token_repos_task = (
+                asyncio.create_task(client.refresh_token_repos()) if is_authenticated else None
+            )
 
             # A. Load from store_list.yaml first (Ensures these are ALWAYS visible)
             yaml_items, local_state, github_integrations_list = await asyncio.gather(
@@ -1311,111 +1363,40 @@ class OnOffStoreReposView(HomeAssistantView):
 
             yaml_fetch_task = asyncio.gather(*[_safe_get_repo(y["owner"], y["repo"]) for y in yaml_items])
 
-            # Kick off search immediately — it's the slowest single call and now paginates.
+            # Public search (no token), the slowest single call; paginated.
             search_task = asyncio.create_task(client.search_repos(limit=500))
 
-            # Authenticated metadata (orgs membership + following) can run in parallel too.
-            user_orgs_task = asyncio.create_task(client.get_user_orgs()) if is_authenticated else None
-            following_task = asyncio.create_task(client.get_user_following()) if is_authenticated else None
-
-            # Authenticated user's own repos
-            async def _fetch_own_repos():
+            # Repositories the token sees come first, so they keep auth=True
+            # (shown even in "private*" orgs or named "x-*").
+            token_repos: dict = {}
+            if token_repos_task is not None:
                 try:
-                    sess = async_get_clientsession(hass)
-                    async with sess.get(f"{client.base_url}/api/v1/user/repos", headers=client._headers()) as resp:
-                        if resp.status == 200:
-                            return await resp.json()
+                    token_repos = await token_repos_task or {}
                 except Exception as e:
-                    _LOGGER.debug("Failed to fetch own repos: %s", e)
-                return None
-            own_repos_task = asyncio.create_task(_fetch_own_repos()) if is_authenticated else None
+                    _LOGGER.debug("Store: token repositories failed: %s", type(e).__name__)
+            for repo in token_repos.values():
+                add_repo_task(repo, bypass=True, auth=True)
 
-            # B. Determine which orgs to fetch from
-            default_orgs = ["Zing", "OnOffPublic"]
-            orgs_to_fetch = set(default_orgs)
-            if user_orgs_task is not None:
-                try:
-                    user_orgs = await user_orgs_task
-                    for org in user_orgs:
-                        org_name = org.get("username") or org.get("name")
-                        if org_name and not _is_hidden_org(org_name):
-                            orgs_to_fetch.add(org_name)
-                    _LOGGER.debug("Fetching repos from %d organizations", len(orgs_to_fetch))
-                except Exception as e:
-                    _LOGGER.debug("Failed to fetch user orgs: %s", e)
-
-            orgs_to_fetch = {o for o in orgs_to_fetch if not _is_hidden_org(o)}
-
-            # Fan out org repos + org members concurrently across ALL orgs.
+            # B. Public organizations (no token)
+            orgs_to_fetch = {o for o in ("Zing", "OnOffPublic") if not _is_hidden_org(o)}
             org_repos_tasks = {o: asyncio.create_task(client.get_org_repos(o)) for o in orgs_to_fetch}
-            org_members_tasks = (
-                {o: asyncio.create_task(client.get_org_members(o)) for o in orgs_to_fetch}
-                if is_authenticated else {}
-            )
 
             # Collect YAML repos as soon as they're all back.
             yaml_results = await yaml_fetch_task
             for r in yaml_results:
                 if r:
-                    add_repo_task(r, bypass=True, auth=is_authenticated)
+                    add_repo_task(r, bypass=True, auth=bool(client.credential_for(
+                        (r.get("owner") or {}).get("login", ""), r.get("name", ""))))
 
             # Collect org repos
-            users_from_orgs = set()
             for o, task in org_repos_tasks.items():
                 try:
                     repos = await task
                     if isinstance(repos, list):
                         for r in repos:
-                            add_repo_task(r, auth=is_authenticated)
+                            add_repo_task(r, auth=False)
                 except Exception as e:
                     _LOGGER.debug("Store: Org %s repos error: %s", o, e)
-
-            for o, task in org_members_tasks.items():
-                try:
-                    members = await task
-                    if isinstance(members, list):
-                        for member in members:
-                            username = member.get("username") or member.get("login")
-                            if username:
-                                users_from_orgs.add(username)
-                except Exception as e:
-                    _LOGGER.debug("Store: Org %s members error: %s", o, e)
-
-            # C. Determine which users to fetch from
-            users_to_fetch = set()
-            if is_authenticated:
-                users_to_fetch.update(users_from_orgs)
-                if following_task is not None:
-                    try:
-                        following = await following_task
-                        for user in following:
-                            username = user.get("login") or user.get("username")
-                            if username:
-                                users_to_fetch.add(username)
-                    except Exception as e:
-                        _LOGGER.debug("Failed to fetch following users: %s", e)
-                _LOGGER.debug("Fetching repos from %d users (org members + following)", len(users_to_fetch))
-
-            # Fan out user repos
-            user_repos_tasks = {u: asyncio.create_task(client.get_user_repos(u)) for u in users_to_fetch}
-            for u, task in user_repos_tasks.items():
-                try:
-                    repos = await task
-                    if isinstance(repos, list):
-                        for r in repos:
-                            add_repo_task(r, auth=is_authenticated)
-                except Exception as e:
-                    _LOGGER.debug("Store: User %s error: %s", u, e)
-
-            # D. Authenticated user's own repos
-            if own_repos_task is not None:
-                try:
-                    u_repos = await own_repos_task
-                    if isinstance(u_repos, list):
-                        for repo in u_repos:
-                            add_repo_task(repo, bypass=True, auth=True)
-                except Exception as e:
-                    _LOGGER.debug("Store: Own repos error: %s", e)
 
             # E. Global search (now paginated — previously silently capped at one page)
             try:
@@ -1423,7 +1404,7 @@ class OnOffStoreReposView(HomeAssistantView):
                 if isinstance(search_repos, list):
                     _LOGGER.debug("Store: search returned %d repos", len(search_repos))
                     for repo in search_repos:
-                        add_repo_task(repo, auth=is_authenticated)
+                        add_repo_task(repo, auth=False)
             except Exception as e:
                 _LOGGER.debug("Store: Search repos error: %s", e)
 
@@ -1573,7 +1554,7 @@ class OnOffStoreReposView(HomeAssistantView):
                     if item is not None:
                         resp_data.append(item)
 
-            return resp_data
+            return resp_data, is_authenticated
         except Exception:
             # Let the caller decide what to do — never cache a partial result.
             raise
@@ -2115,6 +2096,8 @@ class OnOffStoreAutoInstallView(HomeAssistantView):
                     status=403,
                 )
 
+            # The list lives in a private repository the token must see.
+            await client.refresh_token_repos(max_age=300)
             content = await client.get_file_content(
                 AUTO_INSTALL_OWNER, AUTO_INSTALL_REPO, AUTO_INSTALL_FILE, branch="main"
             )
@@ -2138,6 +2121,10 @@ class OnOffStoreAutoInstallView(HomeAssistantView):
 
             async def _resolve(entry: dict) -> dict:
                 owner, repo, source = entry["owner"], entry["repo"], entry["source"]
+                if source != "github" and owner.lower() in (APPS_ORG.lower(), PRIVATE_APPS_ORG.lower()):
+                    from .apps import autoinstall_app_entry
+
+                    return await autoinstall_app_entry(hass, client, owner, repo)
                 known = store_map.get((owner.lower(), repo.lower()))
 
                 if known:
@@ -2208,7 +2195,7 @@ class OnOffStoreAutoInstallView(HomeAssistantView):
             entries = await asyncio.gather(
                 *[_resolve(e) for e in parsed], return_exceptions=True
             )
-            resolved = [e for e in entries if isinstance(e, dict)]
+            resolved = public_items(hass, eid, [e for e in entries if isinstance(e, dict)])
             for e in entries:
                 if isinstance(e, Exception):
                     _LOGGER.debug("Auto-Install entry resolution failed: %s", e)
@@ -2308,6 +2295,7 @@ class OnOffStoreReleasesView(HomeAssistantView):
                 github_releases = await _github_json(hass, f"https://api.github.com/repos/{owner}/{repo}/releases")
                 out: list[dict] = []
                 seen_tags: set[str] = set()
+                beta = getattr(client, "beta_enabled", False)
 
                 if isinstance(github_releases, list):
                     for rel in github_releases[:30]:
@@ -2315,6 +2303,11 @@ class OnOffStoreReleasesView(HomeAssistantView):
                         if not tag:
                             continue
                         seen_tags.add(tag)
+                        # Drafts never; pre-releases only with beta releases on.
+                        # (Their tags stay in seen_tags so the tag list below
+                        # doesn't bring them back.)
+                        if rel.get("draft") or (rel.get("prerelease") and not beta):
+                            continue
                         out.append(
                             {
                                 "tag_name": tag,
@@ -2352,7 +2345,7 @@ class OnOffStoreReleasesView(HomeAssistantView):
                     # latest release via the redirect trick so installs of
                     # the newest version still work from the UI.
                     from ._utils import async_github_latest_tag
-                    latest = await async_github_latest_tag(hass, owner, repo)
+                    latest = await async_github_latest_tag(hass, owner, repo, include_prereleases=beta)
                     if latest:
                         out.append(
                             {
@@ -2420,6 +2413,26 @@ class OnOffStoreRefreshView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
+# Repo key check results -> what the user sees.
+REPO_KEY_ERRORS = {
+    "key_invalid": "This key isn't valid or was removed",
+    "key_no_access": "This key doesn't open this repository (or it's paused)",
+    "cannot_connect": "Couldn't reach the store to check the key. Try again.",
+    "key_github": "Repo keys only work for repositories on the OnOff store.",
+}
+
+
+def _is_admin_request(request) -> bool:
+    user = request.get("hass_user")
+    return bool(user and user.is_admin)
+
+
+async def _check_repo_key(client, owner: str, repo: str, key: str) -> str | None:
+    """None when the key opens the repository, else an error message."""
+    ok, reason = await client.validate_key(owner, repo, key)
+    return None if ok else REPO_KEY_ERRORS.get(reason or "", REPO_KEY_ERRORS["cannot_connect"])
+
+
 class OnOffStoreAddCustomView(HomeAssistantView):
     """API to add a custom repository."""
     url = "/api/yidstore/custom/add"
@@ -2458,8 +2471,20 @@ class OnOffStoreAddCustomView(HomeAssistantView):
                 else: return web.json_response({"error": "Not ready"}, status=503)
 
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
+            repo_key = str(body.get("repo_key") or "").strip()
+            if repo_key:
+                # Keys protect paid code: admins only, store host only.
+                if not _is_admin_request(request):
+                    return web.json_response({"error": "Only an administrator can add a repo key."}, status=403)
+                if source == "github":
+                    return web.json_response({"error": REPO_KEY_ERRORS["key_github"]}, status=400)
+                err = await _check_repo_key(hass.data[DOMAIN][eid]["client"], o, r, repo_key)
+                if err:
+                    return web.json_response({"error": err, "field": "repo_key"}, status=400)
             if coordinator:
                 await coordinator.async_add_custom_repo(o, r, source=source, repo_type=repo_type, repo_url=repo_url)
+                if repo_key and hass.data[DOMAIN][eid].get("access") is not None:
+                    await hass.data[DOMAIN][eid]["access"].async_set_key(o, r, repo_key)
                 # New repo needs a real collection pass; start it right away
                 # so the frontend's follow-up reload picks it up.
                 _invalidate_repos_cache()
@@ -2491,10 +2516,57 @@ class OnOffStoreListCustomView(HomeAssistantView):
 
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
-                return web.json_response(coordinator.get_custom_repos())
+                access = hass.data[DOMAIN][eid].get("access")
+                out = []
+                for cr in coordinator.get_custom_repos():
+                    item = {k: v for k, v in dict(cr).items() if k != "repo_key"}
+                    item["key_last4"] = (
+                        access.key_last4(cr.get("owner", ""), cr.get("repo", "")) if access else None
+                    )
+                    out.append(item)
+                return web.json_response(out)
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
+
+
+class OnOffStoreCustomKeyView(HomeAssistantView):
+    """Set, replace or remove the repo key of a custom repository."""
+    url = "/api/yidstore/custom/key"
+    name = "api:yidstore:custom:key"
+    requires_auth = True
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Only an administrator can change a repo key."}, status=403)
+        body = await request.json()
+        o, r = str(body.get("owner") or ""), str(body.get("repo") or "")
+        key = str(body.get("repo_key") or "").strip() or None
+        comp = hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not o or not r or not isinstance(comp, dict):
+            return web.json_response({"error": "Missing params"}, status=400)
+        coordinator, access, client = comp.get("coordinator"), comp.get("access"), comp["client"]
+        cr = next(
+            (c for c in (coordinator.get_custom_repos() if coordinator else [])
+             if (c.get("owner") or "").lower() == o.lower() and (c.get("repo") or "").lower() == r.lower()),
+            None,
+        )
+        if cr is None:
+            return web.json_response({"error": "This custom repository wasn't found."}, status=404)
+        if key:
+            if cr.get("source") == "github":
+                return web.json_response({"error": REPO_KEY_ERRORS["key_github"]}, status=400)
+            err = await _check_repo_key(client, o, r, key)
+            if err:
+                return web.json_response({"error": err, "field": "repo_key"}, status=400)
+        await access.async_set_key(cr.get("owner") or o, cr.get("repo") or r, key)
+        _invalidate_repos_cache(self.entry_id)
+        _ensure_repos_rebuild(hass, self.entry_id)
+        return web.json_response({"success": True, "key_last4": access.key_last4(o, r)})
 
 
 class OnOffStoreRemoveCustomView(HomeAssistantView):
@@ -2524,6 +2596,9 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
                 await coordinator.async_remove_custom_repo(o, r)
+                access = hass.data[DOMAIN][eid].get("access")
+                if access is not None:
+                    await access.async_set_key(o, r, None)
                 _invalidate_repos_cache()
                 _ensure_repos_rebuild(hass, eid)
                 return web.json_response({"success": True})
@@ -2723,10 +2798,18 @@ class OnOffStoreStatusView(HomeAssistantView):
             client = hass.data[DOMAIN][eid].get("client")
             is_authenticated = bool(client and client.token)
 
+            # When the server's store list was last rebuilt. The panel keeps
+            # its own copy in the browser and refetches when this is newer,
+            # e.g. after a token was added or a retry picked up the token.
+            cached = _REPOS_CACHE.get(eid)
+            _maybe_retry_auth_rebuild(hass, eid)
+
             return web.json_response({
                 "status": status,
                 "requires_restart_list": restart_list,
                 "is_authenticated": is_authenticated,
+                "beta_releases": bool(client and client.beta_enabled),
+                "repos_built_at": cached[0] if cached else None,
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -2737,6 +2820,173 @@ class OnOffStoreStatusView(HomeAssistantView):
 # each missing icon.
 _BRAND_ICON_MISS_CACHE: dict[str, float] = {}
 _BRAND_ICON_MISS_TTL = 60 * 60  # 1 hour
+
+
+# ---------------------------------------------------------------------------
+# Package icons from the store server, served by YidStore: the browser never
+# sees the store address, and private repositories work (fetched with the
+# token). Only repositories in the current store list are served.
+# ---------------------------------------------------------------------------
+_REPO_ICON_CACHE: dict[str, tuple[float, bytes | None, str]] = {}
+_REPO_ICON_TTL = 6 * 60 * 60
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF8", "image/gif"),
+    (b"RIFF", "image/webp"),
+)
+
+
+def _image_type(data: bytes) -> str | None:
+    for sig, ctype in _IMAGE_SIGNATURES:
+        if data.startswith(sig):
+            return ctype
+    head = data[:512].lstrip().lower()
+    if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in head):
+        return "image/svg+xml"
+    return None
+
+
+def _repo_icon_paths(domain: str | None) -> list[str]:
+    paths = []
+    if domain:
+        paths += [
+            f"custom_components/{domain}/brand/icon.png",
+            f"custom_components/{domain}/icon.png",
+            f"custom_components/{domain}/brand/logo.png",
+        ]
+    paths += [
+        "brand/icon.png", "icon.png", "icons/icon.png", "logo.png",
+        "images/icon.png", "assets/icon.png", "icon.svg",
+    ]
+    return paths
+
+
+def public_icon_url(item: dict, base_url: str) -> dict:
+    """Swap a store-server icon URL for YidStore's own icon address."""
+    url = item.get("icon_url")
+    if not (isinstance(url, str) and base_url and url.startswith(base_url)):
+        return item
+    from urllib.parse import quote
+
+    owner, repo = item.get("owner") or "", item.get("repo_name") or ""
+    domain = item.get("domain") or ""
+    out = dict(item)
+    out["icon_url"] = (
+        f"/api/yidstore/repo_icon/{quote(owner, safe='')}/{quote(repo, safe='')}"
+        + (f"?d={quote(domain, safe='')}" if domain else "")
+    )
+    return out
+
+
+def public_items(hass, eid: str, items: list) -> list:
+    try:
+        base = hass.data[DOMAIN][eid]["client"].base_url
+    except Exception:
+        return items
+    return [public_icon_url(i, base) if isinstance(i, dict) else i for i in items]
+
+
+class BetaReleasesView(HomeAssistantView):
+    """Turn "Beta releases" (pre-releases) on or off. Authenticated installs only."""
+    url = "/api/yidstore/settings/beta"
+    name = "api:yidstore:settings:beta"
+    requires_auth = True
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        user = request.get("hass_user")
+        if not (user and user.is_admin):
+            return web.json_response({"error": "unauthorized"}, status=403)
+        from .const import CONF_BETA_RELEASES
+
+        data = await request.json()
+        enabled = bool(data.get("enabled"))
+        entry = hass.config_entries.async_get_entry(self.entry_id)
+        comp = hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if entry is None or not isinstance(comp, dict):
+            return web.json_response({"error": "Integration not ready"}, status=503)
+        client = comp["client"]
+        if enabled and not client.token:
+            return web.json_response({"error": "Beta releases need a store account (token)."}, status=403)
+
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_BETA_RELEASES: enabled})
+        client.include_prereleases = enabled
+
+        # Re-read versions everywhere with the new setting.
+        try:
+            from . import apps
+
+            apps._MANIFEST_CACHE.clear()
+        except Exception:
+            pass
+        _invalidate_repos_cache(self.entry_id)
+        _ensure_repos_rebuild(hass, self.entry_id)
+        coordinator = comp.get("coordinator")
+        if coordinator is not None:
+            hass.async_create_background_task(
+                coordinator.async_check_updates(), "yidstore_beta_update_check"
+            )
+        return web.json_response({"success": True, "beta_releases": client.beta_enabled})
+
+
+class RepoIconView(HomeAssistantView):
+    """A store package's icon, fetched from its repository."""
+    url = "/api/yidstore/repo_icon/{owner}/{repo}"
+    name = "api:yidstore:repo_icon"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        hass = request.app["hass"]
+        eid = self.entry_id
+        comp = hass.data.get(DOMAIN, {}).get(eid)
+        if comp is None:
+            comp = next(iter(hass.data.get(DOMAIN, {}).values()), None)
+        if not isinstance(comp, dict) or "client" not in comp:
+            return web.Response(status=404)
+        client = comp["client"]
+
+        key = f"{owner.lower()}/{repo.lower()}"
+        cached = _REPO_ICON_CACHE.get(key)
+        if not cached or time.time() - cached[0] > _REPO_ICON_TTL:
+            # Only repositories YidStore lists (no probing of other repos).
+            known = None
+            for cache in (_REPOS_CACHE.get(eid), (0, _REPOS_PREV_ITEMS.get(eid) or [])):
+                for it in (cache[1] if cache else []) or []:
+                    if isinstance(it, dict) and (it.get("owner") or "").lower() == owner.lower() \
+                            and (it.get("repo_name") or "").lower() == repo.lower():
+                        known = it
+                        break
+                if known:
+                    break
+            if known is None:
+                return web.Response(status=404)
+
+            domain = request.query.get("d") or known.get("domain") or None
+            found: tuple[bytes | None, str] = (None, "")
+            for path in _repo_icon_paths(domain):
+                data = await client.get_raw_file(owner, repo, path)
+                if not data:
+                    continue
+                ctype = _image_type(data)
+                if ctype:
+                    found = (data, ctype)
+                    break
+            cached = (time.time(), found[0], found[1])
+            _REPO_ICON_CACHE[key] = cached
+
+        if not cached[1]:
+            return web.Response(status=404, headers={"Cache-Control": "public, max-age=3600"})
+        return web.Response(
+            body=cached[1], content_type=cached[2],
+            headers={"Cache-Control": "public, max-age=21600"},
+        )
 
 
 class LocalBrandsIconView(HomeAssistantView):
@@ -2805,7 +3055,8 @@ class LocalBrandsIconView(HomeAssistantView):
         # Try HA brands GitHub repo custom_integrations path first, then brands CDN URL styles.
         remote_urls = [
             f"https://raw.githubusercontent.com/home-assistant/brands/master/custom_integrations/{domain}/{filename}",
-            f"https://brands.home-assistant.io/_/{domain}/{filename}",
+            # Not the "/_/" path: for unknown domains it answers 200 with an
+            # "icon not available" placeholder instead of 404.
             f"https://brands.home-assistant.io/{domain}/{filename}",
         ]
         sess = async_get_clientsession(hass)
@@ -2995,7 +3246,7 @@ class DocumentationReposView(HomeAssistantView):
             client = hass.data[DOMAIN][eid]["client"]
 
             # Fetch repos from Documentation organization
-            repos = await client.get_org_repos(DOCUMENTATION_ORG)
+            repos = await client.get_org_repos(DOCUMENTATION_ORG, include_token=True)
 
             result = []
             for repo in repos:
@@ -3140,11 +3391,14 @@ AUDIO_ORG = "Audio"
 # Blueprints Organization name
 BLUEPRINTS_ORG = "Blueprints"
 
-# Apps Organization name (Supervisor add-ons)
-APPS_ORG = "Apps"
+# Apps organizations (Supervisor add-ons) live in apps.py
+from .apps import APPS_ORG, PRIVATE_APPS_ORG  # noqa: E402
 
 # Organizations to hide from the Store view (they have their own tabs)
-HIDDEN_STORE_ORGS = {"Documentation", "Automations", "Dashboards", "Helpers", "Audio", "Blueprints", "Apps"}
+HIDDEN_STORE_ORGS = {
+    "Documentation", "Automations", "Dashboards", "Helpers", "Audio",
+    "Blueprints", APPS_ORG, PRIVATE_APPS_ORG,
+}
 _HIDDEN_STORE_ORGS_LOWER = {o.lower() for o in HIDDEN_STORE_ORGS}
 
 
@@ -3182,7 +3436,7 @@ class AutomationsReposView(HomeAssistantView):
             client = hass.data[DOMAIN][eid]["client"]
 
             # Fetch repos from Automations organization
-            repos = await client.get_org_repos(AUTOMATIONS_ORG)
+            repos = await client.get_org_repos(AUTOMATIONS_ORG, include_token=True)
 
             result = []
             for repo in repos:
@@ -3369,7 +3623,7 @@ class DashboardsReposView(HomeAssistantView):
             client = hass.data[DOMAIN][eid]["client"]
 
             # Try org first, fall back to user repos if org doesn't exist
-            repos = await client.get_org_repos(DASHBOARDS_ORG)
+            repos = await client.get_org_repos(DASHBOARDS_ORG, include_token=True)
             if not repos:
                 repos = await client.get_user_repos(DASHBOARDS_ORG)
 
@@ -3702,7 +3956,7 @@ class HelpersReposView(HomeAssistantView):
             client = hass.data[DOMAIN][eid]["client"]
 
             # Try org first, fall back to user repos if org doesn't exist
-            repos = await client.get_org_repos(HELPERS_ORG)
+            repos = await client.get_org_repos(HELPERS_ORG, include_token=True)
             if not repos:
                 repos = await client.get_user_repos(HELPERS_ORG)
 
@@ -4013,8 +4267,14 @@ class AudioReposView(HomeAssistantView):
 
             client = hass.data[DOMAIN][eid]["client"]
 
+            # Audio is for authenticated store accounts only.
+            if not client.token or not getattr(client, "_token_valid", True):
+                return web.json_response(
+                    {"error": "Audio is only available with a store account."}, status=403
+                )
+
             # Try org first, fall back to user repos
-            repos = await client.get_org_repos(AUDIO_ORG)
+            repos = await client.get_org_repos(AUDIO_ORG, include_token=True)
             if not repos:
                 repos = await client.get_user_repos(AUDIO_ORG)
 
@@ -4069,6 +4329,12 @@ class AudioFilesView(HomeAssistantView):
 
             client = hass.data[DOMAIN][eid]["client"]
 
+            # Audio is for authenticated store accounts only.
+            if not client.token or not getattr(client, "_token_valid", True):
+                return web.json_response(
+                    {"error": "Audio is only available with a store account."}, status=403
+                )
+
             path = request.query.get("path", "")
             branch = request.query.get("branch", "main")
 
@@ -4115,6 +4381,12 @@ class AudioContentView(HomeAssistantView):
                 eid = eids[0]
 
             client = hass.data[DOMAIN][eid]["client"]
+
+            # Audio is for authenticated store accounts only.
+            if not client.token or not getattr(client, "_token_valid", True):
+                return web.json_response(
+                    {"error": "Audio is only available with a store account."}, status=403
+                )
 
             branch = request.query.get("branch", "main")
 
@@ -4206,7 +4478,7 @@ class BlueprintsReposView(HomeAssistantView):
             client = hass.data[DOMAIN][eid]["client"]
 
             # Try org first, fall back to user repos
-            repos = await client.get_org_repos(BLUEPRINTS_ORG)
+            repos = await client.get_org_repos(BLUEPRINTS_ORG, include_token=True)
             if not repos:
                 repos = await client.get_user_repos(BLUEPRINTS_ORG)
 
@@ -4362,884 +4634,3 @@ class BlueprintsContentView(HomeAssistantView):
         except Exception as e:
             _LOGGER.error("Error fetching blueprint content for %s/%s: %s", owner, repo, e)
             return web.json_response({"error": str(e)}, status=500)
-
-
-# ---------------------------------------------------------------------------
-# Apps (Supervisor Add-ons) views
-# ---------------------------------------------------------------------------
-
-def _get_supervisor_token() -> str | None:
-    return os.environ.get("SUPERVISOR_TOKEN")
-
-
-def _supervisor_available(hass=None) -> bool:
-    """True when running under the HA Supervisor (OS or Supervised)."""
-    if _get_supervisor_token():
-        return True
-    if hass is not None:
-        # Official HA helper — the most reliable signal.
-        try:
-            from homeassistant.components.hassio import is_hassio
-            if is_hassio(hass):
-                return True
-        except Exception:
-            pass
-        if "hassio" in hass.config.components:
-            return True
-    return False
-
-
-def _resolve_addons_path(create: bool = False) -> Path | None:
-    """Return the local add-ons directory the Supervisor watches.
-
-    In HA OS / Supervised the Core container mounts the local add-ons
-    folder at /addons.  Prefer that (Supervisor only scans /addons);
-    fall back to /config/addons for unusual setups.  When ``create`` is
-    set, create the directory if it does not yet exist so installs have
-    a destination.
-    """
-    for candidate in (Path("/addons"), Path("/config/addons")):
-        if candidate.is_dir():
-            return candidate
-    if create:
-        for candidate in (Path("/addons"), Path("/config/addons")):
-            try:
-                candidate.mkdir(parents=True, exist_ok=True)
-                return candidate
-            except Exception:
-                continue
-    return None
-
-
-def _addon_slug(repo_name: str) -> str:
-    return repo_name.lower().replace("-", "_")
-
-
-def _get_installed_addons() -> set[str]:
-    """Return slugs of add-ons placed via YidStore."""
-    root = _resolve_addons_path()
-    if root is None:
-        return set()
-    return {
-        d.name
-        for d in root.iterdir()
-        if d.is_dir() and not d.name.startswith(".")
-    }
-
-
-async def _supervisor_api(hass, method: str, path: str, json_body=None, timeout=30):
-    """Call the local Supervisor REST API. Returns (status, json) or None."""
-    token = _get_supervisor_token()
-    if not token:
-        return None
-    sess = async_get_clientsession(hass)
-    headers = {"Authorization": f"Bearer {token}"}
-    try:
-        async with getattr(sess, method)(
-            f"http://supervisor{path}",
-            headers=headers,
-            json=json_body,
-            timeout=timeout,
-        ) as resp:
-            _LOGGER.info("Supervisor %s %s → %s", method.upper(), path, resp.status)
-            try:
-                body = await resp.json()
-            except Exception:
-                body = None
-            return resp.status, body
-    except Exception as exc:
-        _LOGGER.warning("Supervisor %s %s failed: %s", method, path, exc)
-        return None
-
-
-def _sup_list(body, key: str) -> list:
-    """Extract a list from a Supervisor response.
-
-    The ``data`` envelope is sometimes a list directly (e.g.
-    ``/store/repositories``) and sometimes a dict like ``{"<key>": [...]}``
-    (e.g. ``/addons`` -> ``{"addons": [...]}``). Handle both shapes.
-    """
-    if not isinstance(body, dict):
-        return []
-    data = body.get("data")
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        val = data.get(key)
-        return val if isinstance(val, list) else []
-    return []
-
-
-async def _supervisor_addon_visible(hass, slug: str) -> bool:
-    """Ask Supervisor whether a local add-on with this slug is now known.
-
-    Local add-ons are exposed by Supervisor under the slug ``local_<name>``.
-    Returns True only if Supervisor actually lists it after a rescan.
-    """
-    res = await _supervisor_api(hass, "get", "/addons")
-    if not res or res[0] != 200:
-        return False
-    addons = _sup_list(res[1], "addons")
-    target = slug.lower()
-    for a in addons:
-        if not isinstance(a, dict):
-            continue
-        a_slug = str(a.get("slug", "")).lower()
-        # Supervisor prefixes local add-ons with "local_"; match either form.
-        if a_slug == target or a_slug == f"local_{target}" or a_slug.endswith(f"_{target}"):
-            return True
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Local add-on store (Option B): YidStore publishes its own git store
-# repository that the Supervisor clones over HTTP, so the upstream Gitea URL
-# is never exposed.  See addon_store.py for the git-object plumbing.
-# ---------------------------------------------------------------------------
-
-# Internal hostname the Supervisor uses to reach Core on the hassio network.
-# Overridable via the YIDSTORE_CORE_URL env var for unusual setups.
-_CORE_INTERNAL_URL = os.environ.get("YIDSTORE_CORE_URL", "http://homeassistant:8123")
-_STORE_GIT_PATH = "/api/yidstore/store.git"
-
-
-def _addon_store_root(hass) -> Path:
-    """Writable on-disk location for the published add-on store."""
-    return Path(hass.config.path(".yidstore_store"))
-
-
-def _addon_store_clone_url() -> str:
-    return f"{_CORE_INTERNAL_URL.rstrip('/')}{_STORE_GIT_PATH}"
-
-
-# ---------------------------------------------------------------------------
-# Connector (preferred path on HA OS): a companion add-on the user installs,
-# which has the local add-ons folder mounted read-write.  YidStore hands it
-# add-on jobs; the connector pulls the files (fetched from Gitea server-side)
-# and places them where the Supervisor looks.  The Gitea URL is never exposed.
-# ---------------------------------------------------------------------------
-
-# Public add-on repository that hosts the YidStore Connector add-on. This must
-# be a NEUTRAL public host (e.g. GitHub) — never git.onoffapi.com — because the
-# Supervisor shows it in the repositories list. Override via env var.
-_CONNECTOR_REPO_URL = os.environ.get(
-    "YIDSTORE_CONNECTOR_REPO",
-    "https://github.com/onoffautomations/yidstore-connector",
-)
-# The add-on folder slug inside that repo (Supervisor prefixes it with a hash).
-_CONNECTOR_ADDON_FOLDER = "yidstore_connector"
-
-# How recently the connector must have checked in to count as "online".
-_CONNECTOR_ONLINE_WINDOW = 60.0
-# Re-offer a job the connector claimed but never finished after this long.
-_CONNECTOR_JOB_RETRY = 120.0
-
-# Module-level connector state (jobs are transient; token is persisted).
-_CONNECTOR_STATE: dict = {"last_seen": 0.0}
-_CONNECTOR_JOBS: dict = {}
-
-
-def _connector_token(hass) -> str:
-    """Read (or create) the shared token the connector authenticates with."""
-    path = _addon_store_root(hass) / "connector_token"
-    try:
-        if path.is_file():
-            tok = path.read_text().strip()
-            if tok:
-                return tok
-    except Exception:
-        pass
-    tok = secrets.token_urlsafe(24)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tok)
-    except Exception as exc:
-        _LOGGER.warning("Could not persist connector token: %s", exc)
-    return tok
-
-
-def _connector_online() -> bool:
-    return (time.time() - _CONNECTOR_STATE.get("last_seen", 0.0)) < _CONNECTOR_ONLINE_WINDOW
-
-
-def _enqueue_job(action: str, owner: str, repo: str, slug: str, ref: str | None) -> str:
-    job_id = uuid.uuid4().hex
-    _CONNECTOR_JOBS[job_id] = {
-        "id": job_id, "action": action, "owner": owner, "repo": repo,
-        "slug": slug, "ref": ref, "status": "pending", "error": None,
-        "config_found": None, "created": time.time(), "sent": 0.0,
-    }
-    return job_id
-
-
-def _pending_jobs() -> list[dict]:
-    now = time.time()
-    out = []
-    for job in _CONNECTOR_JOBS.values():
-        if job["status"] == "pending" or (
-            job["status"] == "sent" and now - job["sent"] > _CONNECTOR_JOB_RETRY
-        ):
-            job["status"] = "sent"
-            job["sent"] = now
-            out.append({"id": job["id"], "action": job["action"], "slug": job["slug"]})
-    return out
-
-
-async def _ensure_store_registered(hass) -> dict:
-    """Register the YidStore store repo with the Supervisor if not present.
-
-    Returns {"registered": bool, "error": str|None}. Supervisor validates a
-    repository by cloning it immediately, so a registration failure usually
-    means it could not reach/clone our store URL — the message is captured.
-    """
-    url = _addon_store_clone_url()
-    res = await _supervisor_api(hass, "get", "/store/repositories")
-    existing: list[str] = []
-    if res and res[0] == 200:
-        for r in _sup_list(res[1], "repositories"):
-            if isinstance(r, dict):
-                src = r.get("source") or r.get("slug") or ""
-            else:
-                src = str(r)
-            if src:
-                existing.append(str(src))
-    if url in existing:
-        return {"registered": True, "error": None}
-    add = await _supervisor_api(
-        hass, "post", "/store/repositories", {"repository": url}
-    )
-    if add and add[0] in (200, 201):
-        return {"registered": True, "error": None}
-    msg = None
-    if add and isinstance(add[1], dict):
-        msg = add[1].get("message")
-    err = f"HTTP {add[0] if add else 'no-response'}: {msg or add}"
-    _LOGGER.warning("Failed to register YidStore add-on store (%s): %s", url, err)
-    return {"registered": False, "error": err}
-
-
-async def _supervisor_installed_slugs(hass) -> set[str]:
-    """Return lowercased slugs of all add-ons the Supervisor currently has."""
-    res = await _supervisor_api(hass, "get", "/addons")
-    if not res or res[0] != 200:
-        return set()
-    out: set[str] = set()
-    for a in _sup_list(res[1], "addons"):
-        if isinstance(a, dict) and a.get("slug"):
-            out.add(str(a["slug"]).lower())
-    return out
-
-
-def _slug_installed(slug: str, supervisor_slugs: set[str]) -> bool:
-    """Match our folder slug against Supervisor's (possibly prefixed) slugs."""
-    target = slug.lower()
-    return any(
-        s == target or s == f"local_{target}" or s.endswith(f"_{target}")
-        for s in supervisor_slugs
-    )
-
-
-async def _supervisor_store_slug(hass, folder_slug: str) -> str | None:
-    """Find the Supervisor store slug for an add-on folder we published."""
-    res = await _supervisor_api(hass, "get", "/store/addons")
-    if not res or res[0] != 200:
-        return None
-    target = folder_slug.lower()
-    for a in _sup_list(res[1], "addons"):
-        if not isinstance(a, dict):
-            continue
-        a_slug = str(a.get("slug", "")).lower()
-        if a_slug == target or a_slug.endswith(f"_{target}"):
-            return a.get("slug")
-    return None
-
-
-class AddonStoreGitView(HomeAssistantView):
-    """Serve the YidStore add-on store over git's dumb-HTTP protocol.
-
-    The Supervisor clones this URL; we expose loose git objects and ref
-    files as static content.  The smart-protocol probe is answered with 404
-    so the client falls back to the dumb protocol (no git binary needed).
-    """
-
-    url = "/api/yidstore/store.git/{tail:.*}"
-    name = "api:yidstore:store_git"
-    requires_auth = False
-
-    async def get(self, request: web.Request) -> web.Response:
-        from . import addon_store
-
-        hass = request.app["hass"]
-        tail = request.match_info.get("tail", "")
-
-        # Force dumb-protocol fallback: refuse the smart ref-advertisement.
-        if tail == "info/refs" and request.query.get("service"):
-            return web.Response(status=404)
-
-        git_dir = _addon_store_root(hass) / "repo.git"
-        # Resolve safely within git_dir (no path traversal).
-        target = (git_dir / tail).resolve()
-        try:
-            target.relative_to(git_dir.resolve())
-        except ValueError:
-            return web.Response(status=403)
-
-        if not target.is_file():
-            return web.Response(status=404)
-
-        data = await hass.async_add_executor_job(target.read_bytes)
-        return web.Response(
-            body=data,
-            content_type=addon_store.git_content_type(tail).split(";")[0].strip(),
-        )
-
-
-class AppsReposView(HomeAssistantView):
-    """API to list add-on repositories from the Apps organization."""
-    url = "/api/yidstore/apps"
-    name = "api:yidstore:apps"
-    requires_auth = False
-
-    def __init__(self, entry_id: str) -> None:
-        self.entry_id = entry_id
-
-    async def get(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            eid = self.entry_id
-            if DOMAIN not in hass.data:
-                return web.json_response({"error": "Integration not ready"}, status=503)
-            if eid not in hass.data[DOMAIN]:
-                eids = list(hass.data[DOMAIN].keys())
-                if not eids:
-                    return web.json_response({"error": "Integration not ready"}, status=503)
-                eid = eids[0]
-
-            client = hass.data[DOMAIN][eid]["client"]
-            is_authenticated = await client.test_auth()
-
-            repos = await client.get_org_repos(APPS_ORG)
-            if not repos:
-                repos = await client.get_user_repos(APPS_ORG)
-
-            sup_ok = _supervisor_available(hass)
-            connector_online = _connector_online()
-            sup_slugs = await _supervisor_installed_slugs(hass) if sup_ok else set()
-            local_installed = await hass.async_add_executor_job(_get_installed_addons)
-
-            result = []
-            for repo in repos:
-                if not isinstance(repo, dict):
-                    continue
-                if repo.get("archived", False):
-                    continue
-                if repo.get("private", False) and not is_authenticated:
-                    continue
-
-                repo_name = repo.get("name", "")
-                if repo_name.startswith("x-") and not is_authenticated:
-                    continue
-
-                owner = repo.get("owner", {}).get("login", APPS_ORG)
-                description = repo.get("description", "")
-                updated_at = repo.get("updated_at", "")
-                default_branch = repo.get("default_branch", "main")
-
-                slug = _addon_slug(repo_name)
-                is_installed = _slug_installed(slug, sup_slugs) or slug in local_installed
-                result.append({
-                    "name": f"{owner}/{repo_name}",
-                    "owner": owner,
-                    "repo_name": repo_name,
-                    "description": description,
-                    "updated_at": updated_at,
-                    "default_branch": default_branch,
-                    "is_installed": is_installed,
-                    "supervisor_available": sup_ok,
-                    "connector_online": connector_online,
-                })
-
-            return web.json_response(result)
-        except Exception as e:
-            _LOGGER.error("Error fetching apps repos: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
-class AppsInstallView(HomeAssistantView):
-    """API to install an add-on from the Apps org."""
-    url = "/api/yidstore/apps/install"
-    name = "api:yidstore:apps:install"
-    requires_auth = False
-
-    def __init__(self, entry_id: str) -> None:
-        self.entry_id = entry_id
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        data = await request.json()
-        try:
-            owner = data.get("owner", APPS_ORG)
-            repo = data.get("repo", "").strip()
-            if not repo:
-                return web.json_response({"error": "Missing repo"}, status=400)
-
-            eid = self.entry_id
-            if DOMAIN not in hass.data or eid not in hass.data[DOMAIN]:
-                return web.json_response({"error": "Integration not ready"}, status=503)
-
-            if not _supervisor_available(hass):
-                return web.json_response({
-                    "error": "Add-on installation requires Home Assistant OS or Supervised install"
-                }, status=400)
-
-            client = hass.data[DOMAIN][eid]["client"]
-
-            # Resolve the latest release tag, fall back to default branch
-            ref = data.get("tag") or None
-            if not ref:
-                try:
-                    latest = await client.get_latest_release(owner, repo)
-                    ref = (latest or {}).get("tag_name")
-                except Exception:
-                    pass
-            if not ref:
-                ref = data.get("branch") or "main"
-
-            slug = _addon_slug(repo)
-
-            # --- Preferred path: hand the job to the YidStore Connector
-            # add-on. It has the local add-ons folder mounted read-write and
-            # places the add-on where the Supervisor scans — solving the HA OS
-            # sandbox limitation. The connector pulls the files from us (we
-            # fetched them from Gitea server-side), so the Gitea URL stays
-            # hidden.
-            if _connector_online():
-                job_id = _enqueue_job("install", owner, repo, slug, ref)
-                job = await _wait_for_job(job_id, timeout=120)
-                await _supervisor_api(hass, "post", "/addons/reload")
-                visible = await _supervisor_addon_visible(hass, slug)
-                return web.json_response({
-                    "success": True,
-                    "via": "connector",
-                    "version": ref,
-                    "visible": visible,
-                    "job_status": job.get("status"),
-                    "config_found": job.get("config_found"),
-                    "install_error": job.get("error"),
-                })
-
-            # --- Fallback: publish to YidStore's own dumb-HTTP git store and
-            # let the Supervisor clone it (only works if the Supervisor can
-            # reach Core). Used when the connector add-on isn't installed.
-            url = client.archive_zip_url(owner, repo, ref)
-            headers = {}
-            if client.token:
-                headers["Authorization"] = f"token {client.token}"
-
-            from . import addon_store
-            from .installer import _download_zip_bytes
-
-            zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
-            slug = _addon_slug(repo)
-
-            # --- Option B: publish to YidStore's own local store, then let
-            # Supervisor clone + install it. Works on HA OS where Core cannot
-            # write to the Supervisor's local add-ons folder, and never
-            # exposes the upstream Gitea URL.
-            root = _addon_store_root(hass)
-
-            def _build_store():
-                addon_store.ensure_repository_json(root)
-                meta = addon_store.add_addon_from_zip(root, slug, zip_bytes)
-                addon_store.publish_from_dir(root)
-                return meta
-
-            meta = await hass.async_add_executor_job(_build_store)
-            commit = await hass.async_add_executor_job(addon_store.publish_from_dir, root)
-
-            reg = await _ensure_store_registered(hass)
-            registered = reg.get("registered")
-            register_error = reg.get("error")
-            await _supervisor_api(hass, "post", "/store/reload")
-
-            store_slug = await _supervisor_store_slug(hass, slug)
-            install_error = None
-            if store_slug:
-                install_resp = await _supervisor_api(
-                    hass, "post", f"/store/addons/{store_slug}/install"
-                )
-                if not (install_resp and install_resp[0] in (200, 201)):
-                    # Older Supervisor uses /addons/<slug>/install.
-                    install_resp = await _supervisor_api(
-                        hass, "post", f"/addons/{store_slug}/install"
-                    )
-                if install_resp and isinstance(install_resp[1], dict):
-                    install_error = install_resp[1].get("message")
-
-            await _supervisor_api(hass, "post", "/addons/reload")
-            visible = await _supervisor_addon_visible(hass, slug)
-
-            # Fallback for Supervised installs where Core *can* write to the
-            # local add-ons folder directly.
-            if not visible and not store_slug:
-                try:
-                    from .installer import install_package
-                    fs = await install_package(
-                        hass, zip_bytes=zip_bytes, package_type="addon",
-                        repo_name=repo, owner=owner,
-                    )
-                    await _supervisor_api(hass, "post", "/addons/reload")
-                    visible = await _supervisor_addon_visible(hass, slug)
-                    meta = {**meta, **fs}
-                except Exception as exc:
-                    _LOGGER.debug("Filesystem add-on fallback failed: %s", exc)
-
-            return web.json_response({
-                "success": True,
-                "version": ref,
-                "visible": visible,
-                "store_registered": registered,
-                "register_error": register_error,
-                "store_slug": store_slug,
-                "install_error": install_error,
-                "store_commit": commit,
-                "config_found": meta.get("config_found"),
-                "addon_path": meta.get("addon_path") or meta.get("src_path"),
-            })
-        except Exception as e:
-            _LOGGER.error("Error installing app %s: %s", data.get("repo", "?"), e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
-class AppsUninstallView(HomeAssistantView):
-    """API to remove a locally-installed add-on."""
-    url = "/api/yidstore/apps/uninstall"
-    name = "api:yidstore:apps:uninstall"
-    requires_auth = False
-
-    def __init__(self, entry_id: str) -> None:
-        self.entry_id = entry_id
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            data = await request.json()
-            repo = data.get("repo", "").strip()
-            if not repo:
-                return web.json_response({"error": "Missing repo"}, status=400)
-
-            slug = _addon_slug(repo)
-
-            # Preferred: let the connector remove the local add-on files.
-            if _connector_online():
-                job_id = _enqueue_job("uninstall", APPS_ORG, repo, slug, None)
-                await _wait_for_job(job_id, timeout=60)
-                await _supervisor_api(hass, "post", "/addons/reload")
-                return web.json_response({"success": True, "via": "connector"})
-
-            # Uninstall via Supervisor if it knows the add-on (store path).
-            store_slug = await _supervisor_store_slug(hass, slug)
-            if store_slug:
-                resp = await _supervisor_api(
-                    hass, "post", f"/store/addons/{store_slug}/uninstall"
-                )
-                if not (resp and resp[0] in (200, 201)):
-                    await _supervisor_api(
-                        hass, "post", f"/addons/{store_slug}/uninstall"
-                    )
-
-            # Remove the add-on from our published store and re-publish.
-            from . import addon_store
-            root = _addon_store_root(hass)
-
-            def _prune():
-                src = root / "src" / slug
-                if src.exists():
-                    shutil.rmtree(src)
-                addon_store.publish_from_dir(root)
-
-            await hass.async_add_executor_job(_prune)
-
-            # Also clean up any filesystem-installed copy (Supervised path).
-            from .installer import uninstall_package
-            await hass.async_add_executor_job(
-                uninstall_package, hass, "addon", repo
-            )
-
-            await _supervisor_api(hass, "post", "/store/reload")
-            await _supervisor_api(hass, "post", "/addons/reload")
-
-            return web.json_response({"success": True})
-        except Exception as e:
-            _LOGGER.error("Error uninstalling app: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
-class AppsDiagView(HomeAssistantView):
-    """Diagnostics for the add-on store delivery path."""
-    url = "/api/yidstore/apps/diag"
-    name = "api:yidstore:apps:diag"
-    requires_auth = False
-
-    async def get(self, request: web.Request) -> web.Response:
-        from . import addon_store
-
-        hass = request.app["hass"]
-        out: dict = {
-            "supervisor_token_present": bool(_get_supervisor_token()),
-            "clone_url": _addon_store_clone_url(),
-        }
-
-        # On-disk store state.
-        root = _addon_store_root(hass)
-        git_dir = root / "repo.git"
-
-        def _store_state():
-            src = root / "src"
-            addons = []
-            if src.is_dir():
-                addons = [p.name for p in src.iterdir() if p.is_dir()]
-            info_refs = git_dir / "info" / "refs"
-            return {
-                "root": str(root),
-                "repo_git_exists": git_dir.is_dir(),
-                "addons_in_store": addons,
-                "info_refs": info_refs.read_text() if info_refs.is_file() else None,
-            }
-
-        out["store"] = await hass.async_add_executor_job(_store_state)
-
-        # Can Supervisor be reached at all?
-        info = await _supervisor_api(hass, "get", "/supervisor/info")
-        out["supervisor_reachable"] = bool(info and info[0] == 200)
-
-        # Raw repository + add-on listings.
-        repos = await _supervisor_api(hass, "get", "/store/repositories")
-        out["repositories"] = _sup_list(repos[1], "repositories") if repos else None
-
-        store_addons = await _supervisor_api(hass, "get", "/store/addons")
-        if store_addons:
-            out["store_addon_slugs"] = [
-                a.get("slug") for a in _sup_list(store_addons[1], "addons")
-                if isinstance(a, dict)
-            ]
-
-        installed = await _supervisor_api(hass, "get", "/addons")
-        if installed:
-            out["installed_addon_slugs"] = [
-                a.get("slug") for a in _sup_list(installed[1], "addons")
-                if isinstance(a, dict)
-            ]
-
-        # Can WE serve our own store over HTTP? (Core -> Core self-check.)
-        try:
-            sess = async_get_clientsession(hass)
-            self_url = (
-                f"http://127.0.0.1:8123{_STORE_GIT_PATH}/info/refs"
-            )
-            async with sess.get(self_url, timeout=10) as r:
-                out["self_serve"] = {
-                    "status": r.status,
-                    "body": (await r.text())[:120],
-                }
-        except Exception as exc:
-            out["self_serve"] = {"error": str(exc)}
-
-        out["connector_online"] = _connector_online()
-        return web.json_response(out)
-
-
-def _connector_authorized(request, hass) -> bool:
-    return request.headers.get("X-YidStore-Token", "") == _connector_token(hass)
-
-
-class ConnectorTokenView(HomeAssistantView):
-    """Expose the connector token + online status to the YidStore UI."""
-    url = "/api/yidstore/connector/token"
-    name = "api:yidstore:connector:token"
-    requires_auth = False
-
-    async def get(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        return web.json_response({
-            "token": _connector_token(hass),
-            "online": _connector_online(),
-        })
-
-
-class ConnectorJobsView(HomeAssistantView):
-    """The connector polls this for pending add-on jobs (and checks in)."""
-    url = "/api/yidstore/connector/jobs"
-    name = "api:yidstore:connector:jobs"
-    requires_auth = False
-
-    async def get(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        if not _connector_authorized(request, hass):
-            return web.json_response({"error": "unauthorized"}, status=403)
-        _CONNECTOR_STATE["last_seen"] = time.time()
-        return web.json_response({"jobs": _pending_jobs()})
-
-
-class ConnectorFetchView(HomeAssistantView):
-    """Stream an add-on archive (downloaded from Gitea server-side)."""
-    url = "/api/yidstore/connector/fetch/{job_id}"
-    name = "api:yidstore:connector:fetch"
-    requires_auth = False
-
-    def __init__(self, entry_id: str) -> None:
-        self.entry_id = entry_id
-
-    async def get(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        if not _connector_authorized(request, hass):
-            return web.json_response({"error": "unauthorized"}, status=403)
-        _CONNECTOR_STATE["last_seen"] = time.time()
-
-        job = _CONNECTOR_JOBS.get(request.match_info.get("job_id", ""))
-        if not job or job["action"] != "install":
-            return web.Response(status=404)
-
-        eid = self.entry_id
-        if DOMAIN not in hass.data or eid not in hass.data[DOMAIN]:
-            eids = list(hass.data.get(DOMAIN, {}).keys())
-            if not eids:
-                return web.json_response({"error": "not ready"}, status=503)
-            eid = eids[0]
-        client = hass.data[DOMAIN][eid]["client"]
-
-        ref = job.get("ref")
-        if not ref:
-            try:
-                latest = await client.get_latest_release(job["owner"], job["repo"])
-                ref = (latest or {}).get("tag_name")
-            except Exception:
-                pass
-            ref = ref or "main"
-
-        url = client.archive_zip_url(job["owner"], job["repo"], ref)
-        headers = {}
-        if client.token:
-            headers["Authorization"] = f"token {client.token}"
-        from .installer import _download_zip_bytes
-        zip_bytes = await _download_zip_bytes(hass, url, headers=headers)
-        return web.Response(body=zip_bytes, content_type="application/zip")
-
-
-class ConnectorResultView(HomeAssistantView):
-    """The connector reports the outcome of a job here."""
-    url = "/api/yidstore/connector/result"
-    name = "api:yidstore:connector:result"
-    requires_auth = False
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        if not _connector_authorized(request, hass):
-            return web.json_response({"error": "unauthorized"}, status=403)
-        _CONNECTOR_STATE["last_seen"] = time.time()
-
-        data = await request.json()
-        job = _CONNECTOR_JOBS.get(data.get("id", ""))
-        if job:
-            job["status"] = "done" if data.get("ok") else "error"
-            job["error"] = data.get("error")
-            job["config_found"] = data.get("config_found")
-        return web.json_response({"success": True})
-
-
-async def _wait_for_job(job_id: str, timeout: float = 90.0) -> dict:
-    """Poll a connector job until it reaches a terminal state or times out."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        job = _CONNECTOR_JOBS.get(job_id)
-        if not job:
-            return {"status": "missing"}
-        if job["status"] in ("done", "error"):
-            return job
-        await asyncio.sleep(1.5)
-    return _CONNECTOR_JOBS.get(job_id, {"status": "timeout"})
-
-
-class ConnectorSetupView(HomeAssistantView):
-    """One-click connector install: add the public repo, install, configure,
-    and start the connector add-on via the Supervisor API.
-
-    The connector repo is a neutral public repo, so this never exposes the
-    private Gitea URL. Installing a public repo through the Supervisor works
-    reliably (unlike the Core-hosted store), because the Supervisor clones it
-    from the internet, not from Core.
-    """
-    url = "/api/yidstore/connector/setup"
-    name = "api:yidstore:connector:setup"
-    requires_auth = False
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        steps: list[dict] = []
-
-        def step(name, ok, detail=None):
-            steps.append({"step": name, "ok": ok, "detail": detail})
-            return ok
-
-        if not _supervisor_available(hass):
-            return web.json_response(
-                {"success": False, "error": "Supervisor not available", "steps": steps},
-                status=400,
-            )
-
-        # 1. Register the public connector repository (idempotent).
-        add = await _supervisor_api(
-            hass, "post", "/store/repositories",
-            {"repository": _CONNECTOR_REPO_URL}, timeout=120,
-        )
-        # 200/201 = added; 400 often means "already exists" — keep going.
-        step("add_repository", bool(add), add[1] if add and isinstance(add[1], dict) else None)
-        await _supervisor_api(hass, "post", "/store/reload", timeout=120)
-
-        # 2. Resolve the Supervisor slug for the connector add-on.
-        slug = await _supervisor_store_slug(hass, _CONNECTOR_ADDON_FOLDER)
-        if not slug:
-            step("find_addon", False, "connector add-on not found in store after adding repo")
-            return web.json_response(
-                {"success": False, "error": "Connector add-on not found. Check the repository URL.",
-                 "repo_url": _CONNECTOR_REPO_URL, "steps": steps},
-                status=502,
-            )
-        step("find_addon", True, slug)
-
-        # 3. Install (builds the image — can take a few minutes).
-        inst = await _supervisor_api(hass, "post", f"/store/addons/{slug}/install", timeout=600)
-        if not (inst and inst[0] in (200, 201)):
-            inst = await _supervisor_api(hass, "post", f"/addons/{slug}/install", timeout=600)
-        installed_ok = bool(inst and inst[0] in (200, 201))
-        # Already-installed shows as an error message; treat that as success.
-        msg = inst[1].get("message") if inst and isinstance(inst[1], dict) else None
-        if not installed_ok and msg and "already installed" in msg.lower():
-            installed_ok = True
-        step("install", installed_ok, msg)
-
-        # 4. Configure the add-on (token + how to reach Core).
-        opts = {
-            "options": {
-                "core_url": _CORE_INTERNAL_URL,
-                "token": _connector_token(hass),
-                "poll_seconds": 15,
-            }
-        }
-        cfg = await _supervisor_api(hass, "post", f"/addons/{slug}/options", opts, timeout=60)
-        step("configure", bool(cfg and cfg[0] in (200, 201)),
-             cfg[1].get("message") if cfg and isinstance(cfg[1], dict) else None)
-
-        # 5. Start it.
-        start = await _supervisor_api(hass, "post", f"/addons/{slug}/start", timeout=120)
-        start_msg = start[1].get("message") if start and isinstance(start[1], dict) else None
-        start_ok = bool(start and start[0] in (200, 201))
-        if not start_ok and start_msg and "already running" in (start_msg or "").lower():
-            start_ok = True
-        step("start", start_ok, start_msg)
-
-        return web.json_response({
-            "success": installed_ok and start_ok,
-            "slug": slug,
-            "steps": steps,
-        })

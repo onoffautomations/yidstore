@@ -9,16 +9,28 @@ YidStore is a Home Assistant integration that adds a full in-app “store” for
 - Update tracking and reinstall flow
 - Local branding support for custom integrations (icon/logo files in the repo)
 
-## Installation (HACS Custom Repository)
+## Installation
+
+The link below works with both HACS and the Marketplace built into Home Assistant 2026.11+. Existing HACS addresses keep working there.
+
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=onoffautomations&repository=yidstore&category=Integration)
+
+### Home Assistant 2026.11 and newer (built-in Marketplace)
+1) Go to **Settings → Marketplace**.
+2) Open the menu (⋮) and choose **Custom repositories**. Custom repositories need a connected GitHub account.
+3) Add `https://github.com/onoffautomations/yidstore` with type **Integration**.
+4) Install **YidStore** and restart Home Assistant.
+
+If you already installed YidStore through HACS, nothing changes. Home Assistant moves it into the Marketplace on its own.
+
+### Older versions (HACS)
 1) In Home Assistant, open HACS.
-2) Go to **Integrations**.
-3) Click the three dots in the top-right and choose **Custom repositories**.
-4) Add this repository URL:
+2) Click the three dots in the top-right and choose **Custom repositories**.
+3) Add this repository URL:
    - `https://github.com/onoffautomations/yidstore`
-5) Select category **Integration** and click **Add**.
-6) Find **YidStore** in HACS and install it.
-7) Restart Home Assistant.
+4) Select category **Integration** and click **Add**.
+5) Find **YidStore** in HACS and install it.
+6) Restart Home Assistant.
 
 ## Setup
 1) Go to **Settings → Devices & Services → Add Integration**.
@@ -28,3 +40,11 @@ YidStore is a Home Assistant integration that adds a full in-app “store” for
 ## Using the Store
 - Open **YidStore** in the left sidebar.
 - Install packages directly from the list.
+
+## Apps
+The **Apps** tab installs add-ons on Home Assistant OS or Supervised installs.
+
+- The first time, click **Install add-on**. YidStore installs and starts its helper add-on, the YidStore Connector, which ships inside this integration. There is no extra repository to add.
+- **Install** downloads the app and has Home Assistant build and install it.
+- Each app shows its installed and latest version. You can update, start, stop and open it, and set start on boot and watchdog.
+- Some apps are only available to installations with a store account.

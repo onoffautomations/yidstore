@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -9,7 +10,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
@@ -20,6 +21,8 @@ from .const import (
     SERVICE_INSTALL_LOVELACE,
     SERVICE_INSTALL_BLUEPRINTS,
     SERVICE_CHECK_UPDATES,
+    SERVICE_INSTALL_APP,
+    CONF_BETA_RELEASES,
     MODE_ASSET,
     MODE_ZIPBALL,
     TYPE_INTEGRATION,
@@ -53,6 +56,26 @@ SERVICE_SCHEMA_GENERIC = vol.Schema(
         vol.Optional("audio_files"): [str],
         vol.Optional("audio_subfolder"): str,
     }
+)
+
+
+def _require_app_ref(data: dict) -> dict:
+    """install_app needs app_id, or both owner and repo."""
+    if data.get("app_id") or (data.get("owner") and data.get("repo")):
+        return data
+    raise vol.Invalid("Give app_id, or both owner and repo")
+
+
+SERVICE_SCHEMA_INSTALL_APP = vol.All(
+    vol.Schema(
+        {
+            vol.Optional("app_id"): str,
+            vol.Optional("owner"): str,
+            vol.Optional("repo"): str,
+            vol.Optional("update", default=False): bool,
+        }
+    ),
+    _require_app_ref,
 )
 
 SERVICE_SCHEMA_SIMPLE = vol.Schema(
@@ -157,40 +180,14 @@ def _scan_custom_components_versions(hass: HomeAssistant) -> dict[str, str]:
 
 
 def _load_hacs_integrations(hass: HomeAssistant) -> set[str]:
-    """Return a set of installed HACS integration domains."""
-    hacs_path = Path(hass.config.path(".storage", "hacs"))
-    if not hacs_path.exists():
-        return set()
+    """Return integration domains installed by HACS or the HA Marketplace."""
+    from ._utils import community_store_installed
 
     try:
-        raw = json.loads(hacs_path.read_text(encoding="utf-8"))
+        domains, _ = community_store_installed(hass.config.config_dir)
     except Exception as e:
-        _LOGGER.debug("Failed to read HACS storage: %s", e)
+        _LOGGER.debug("Failed to read HACS/Marketplace storage: %s", e)
         return set()
-
-    data = raw.get("data", raw)
-    repos = data.get("repositories", [])
-    domains: set[str] = set()
-
-    for repo in repos:
-        try:
-            category = repo.get("category") or repo.get("data", {}).get("category")
-            installed = repo.get("installed")
-            if installed is None:
-                installed = repo.get("data", {}).get("installed")
-            if category != "integration" or not installed:
-                continue
-            domain = repo.get("domain") or repo.get("data", {}).get("domain")
-            if isinstance(domain, str) and domain:
-                domains.add(domain.lower())
-            else:
-                domains_list = repo.get("domains") or repo.get("data", {}).get("domains") or []
-                for d in domains_list:
-                    if isinstance(d, str) and d:
-                        domains.add(d.lower())
-        except Exception:
-            continue
-
     return domains
 
 
@@ -601,6 +598,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Recorded HA start time: %s", hass.data['homeassistant_start_time'])
 
     client = GiteaClient(hass, base_url=base_url, token=token)
+    client.include_prereleases = bool(entry.data.get(CONF_BETA_RELEASES, False))
+
+    # Repo keys, the token's repository list and "access stopped" repairs.
+    from .access import AccessManager
+
+    access = AccessManager(hass, client)
+    await access.async_load()
 
     if not token:
         _LOGGER.info("No token configured - only public repositories will be accessible")
@@ -612,16 +616,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = OnOffGiteaStoreCoordinator(hass, entry.entry_id, client)
     await coordinator.async_load_packages()
 
-    # Build headers with optional auth
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"token {token}"
-
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "default_owner": default_owner,
-        "headers": headers,
         "coordinator": coordinator,
+        "access": access,
     }
 
     # Track already-installed custom_components integrations as if installed by the store
@@ -657,6 +656,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 packages = await hass.async_add_executor_job(load_store_list, hass)
                 installed_integration = False
 
+                # The install service is registered later in this setup.
+                for _ in range(30):
+                    if hass.services.has_service(DOMAIN, SERVICE_INSTALL):
+                        break
+                    await asyncio.sleep(1)
+
                 for key in pending_installs:
                     # Find package by key
                     pkg = None
@@ -686,26 +691,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
                     _LOGGER.info("Installing package from setup: %s/%s (type: %s)", owner, repo, pkg_type)
 
-                    # Determine service name
-                    if pkg_type == "integration":
-                        service_name = "install_integration"
-                    elif pkg_type == "lovelace":
-                        service_name = "install_lovelace"
-                    elif pkg_type == "blueprints":
-                        service_name = "install_blueprints"
-                    elif pkg_type == "audio":
-                        service_name = SERVICE_INSTALL
-                    else:
+                    if pkg_type not in ("integration", "lovelace", "blueprints", "audio"):
                         _LOGGER.error("Unknown package type: %s", pkg_type)
                         continue
 
-                    # Build service data
+                    # Only the generic "install" service is registered.
+                    service_name = SERVICE_INSTALL
                     service_data = {
                         "owner": owner,
                         "repo": repo,
+                        "type": pkg_type,
                     }
-                    if service_name == SERVICE_INSTALL:
-                        service_data["type"] = pkg_type
                     if mode:
                         service_data["mode"] = mode
                     if asset_name:
@@ -818,7 +814,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # github.com redirect, then read hacs.json from raw.githubusercontent.
             ref = tag
             if not ref:
-                ref = await async_github_latest_tag(hass, owner, repo)
+                ref = await async_github_latest_tag(
+                    hass, owner, repo, include_prereleases=client.beta_enabled
+                )
 
             # HACS zip_release is supported only for integrations. If hacs.json
             # opts in, download the named GitHub Release asset exactly like HACS
@@ -938,17 +936,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("=" * 60)
             _LOGGER.info("")
 
-            # Get auth token for download - use client's token (not Accept: application/json header)
+            # A credential only for a store repository that needs one (its
+            # repo key, or the main token if it can see the repository).
+            # Never for GitHub; installer.py also strips it for other hosts.
             download_headers = {}
-            current_token = client.token  # Get from client instance
             if source == "github":
                 download_headers["Accept"] = "application/octet-stream"
                 download_headers["User-Agent"] = "YidStore"
-            elif current_token:
-                download_headers["Authorization"] = f"token {current_token}"
-                _LOGGER.debug("Using authenticated download for %s/%s", owner, repo)
             else:
-                _LOGGER.debug("Using anonymous download for %s/%s", owner, repo)
+                download_headers.update(client.auth_headers(owner, repo))
 
             result = await download_and_install(
                 hass,
@@ -1072,6 +1068,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, SERVICE_INSTALL, _handle_install_generic, schema=SERVICE_SCHEMA_GENERIC)
     hass.services.async_register(DOMAIN, SERVICE_CHECK_UPDATES, _handle_check_updates)
+
+    async def _handle_install_app(call: ServiceCall):
+        """Install or update an app (add-on); returns when it's done."""
+        from .apps import async_install_app_service
+
+        result = await async_install_app_service(hass, entry.entry_id, dict(call.data))
+        return result if call.return_response else None
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_INSTALL_APP,
+        _handle_install_app,
+        schema=SERVICE_SCHEMA_INSTALL_APP,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
     return True
 

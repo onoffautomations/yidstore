@@ -117,7 +117,14 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if token:
                 try:
                     client = GiteaClient(self.hass, base_url=base_url, token=token)
-                    if not await client.test_auth():
+                    ok = await client.check_token()
+                    if ok is None:
+                        return self.async_show_form(
+                            step_id="reconfigure",
+                            data_schema=self._get_reconfigure_schema(entry),
+                            errors={"base": "cannot_connect"},
+                        )
+                    if not ok:
                         return self.async_show_form(
                             step_id="reconfigure",
                             data_schema=self._get_reconfigure_schema(entry),
@@ -142,11 +149,13 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if DOMAIN in self.hass.data and entry.entry_id in self.hass.data[DOMAIN]:
                 runtime = self.hass.data[DOMAIN][entry.entry_id]
                 if "client" in runtime:
+                    changed = (runtime["client"].token or None) != (token or None)
                     runtime["client"].token = token
                     runtime["client"]._token_valid = True if token else False
-                runtime["headers"] = {"Accept": "application/json"}
-                if token:
-                    runtime["headers"]["Authorization"] = f"token {token}"
+                    if changed and runtime.get("access") is not None:
+                        runtime["access"].token_changed()
+
+            _refresh_store_after_token_change(self.hass, entry.entry_id)
 
             return self.async_abort(reason="reconfigure_successful")
 
@@ -293,6 +302,18 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
 
+def _refresh_store_after_token_change(hass, entry_id: str) -> None:
+    """Rebuild the store list right away so private packages appear (or
+    disappear) without reloading the integration."""
+    try:
+        from .dashboard import _ensure_repos_rebuild, _invalidate_repos_cache
+
+        _invalidate_repos_cache(entry_id)
+        _ensure_repos_rebuild(hass, entry_id)
+    except Exception as e:  # dashboard not set up (yet)
+        _LOGGER.debug("Could not refresh store list after token change: %s", e)
+
+
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for reconfiguration and installation."""
 
@@ -315,7 +336,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 try:
                     base_url = entry_data.get("base_url", get_primary_endpoint())
                     client = GiteaClient(self.hass, base_url=base_url, token=token)
-                    if not await client.test_auth():
+                    ok = await client.check_token()
+                    if ok is None:
+                        errors["base"] = "cannot_connect"
+                    elif not ok:
                         errors["token"] = "invalid_auth"
                 except Exception as e:
                     _LOGGER.error("Auth test failed: %s", e)
@@ -333,11 +357,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if DOMAIN in self.hass.data and self.config_entry.entry_id in self.hass.data[DOMAIN]:
                     runtime = self.hass.data[DOMAIN][self.config_entry.entry_id]
                     if "client" in runtime:
+                        changed = (runtime["client"].token or None) != (token or None)
                         runtime["client"].token = token or None
                         runtime["client"]._token_valid = True if token else False
-                    runtime["headers"] = {"Accept": "application/json"}
-                    if token:
-                        runtime["headers"]["Authorization"] = f"token {token}"
+                        if changed and runtime.get("access") is not None:
+                            runtime["access"].token_changed()
+
+                _refresh_store_after_token_change(self.hass, self.config_entry.entry_id)
 
                 return self.async_create_entry(title="", data={})
 

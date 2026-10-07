@@ -174,3 +174,35 @@ check_updates:
   name: Check for Updates
   description: Manually check for updates for all tracked packages.
   fields: {}
+
+install_app:
+  name: Install app
+  description: Install or update an app (add-on) from the Apps / PrivateApps store, the same way the Apps tab does. Sets up the YidStore Connector first if needed and returns when Home Assistant has finished installing it.
+  fields:
+    app_id:
+      name: App ID
+      description: The app id from the Auto-Install list or the Apps list. Use this, or owner and repo.
+      required: false
+      selector:
+        text:
+    owner:
+      name: Owner
+      description: Apps or PrivateApps (together with repo).
+      required: false
+      example: Apps
+      selector:
+        text:
+    repo:
+      name: Repo
+      description: The app's repository name (together with owner).
+      required: false
+      example: network_scanner
+      selector:
+        text:
+    update:
+      name: Update
+      description: Update the app if it is already installed. If off and the app is installed, nothing is done.
+      required: false
+      default: false
+      selector:
+        boolean:

@@ -1,0 +1,21 @@
+name: YidStore Connector
+version: "1.1.0"
+slug: yidstore_connector
+description: Lets YidStore install apps on Home Assistant OS
+url: https://onoffautomations.com
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+# Talks to the YidStore integration through the Supervisor's Core API proxy,
+# so it needs no token or address of its own.
+homeassistant_api: true
+map:
+  - type: addons
+    read_only: false
+options:
+  poll_seconds: 15
+schema:
+  poll_seconds: int(5,300)

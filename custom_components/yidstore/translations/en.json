@@ -22,12 +22,15 @@
           "use_token": "Use Access Token",
           "token": "Access Token",
           "side_panel": "Show Store in Sidebar (Admins Only)"
+        },
+        "data_description": {
+          "token": "Your store token, or a repo key from your installer. It adds its repositories to the public store; it never replaces it."
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to Gitea",
-      "invalid_auth": "Invalid authentication",
+      "invalid_auth": "This token or key isn't valid or was removed",
       "unknown": "Unexpected error occurred",
       "install_failed": "Failed to install one or more packages",
       "no_selection": "Please select at least one package"
@@ -52,11 +55,16 @@
           "use_token": "Use Access Token",
           "token": "Access Token",
           "side_panel": "Show Store in Sidebar (Admins Only)"
+        },
+        "data_description": {
+          "token": "Your store token, or a repo key from your installer. It adds its repositories to the public store; it never replaces it."
         }
       }
     },
     "error": {
-      "install_failed": "Failed to install one or more packages"
+      "install_failed": "Failed to install one or more packages",
+      "invalid_auth": "This token or key isn't valid or was removed",
+      "cannot_connect": "Couldn't reach the store. Try again."
     },
     "abort": {
       "no_packages_in_store": "No packages available in store list"
@@ -78,6 +86,45 @@
     "setup_restart_required": {
       "title": "Restart required",
       "description": "One or more integrations have been installed during setup. Home Assistant must be restarted for the changes to take effect.\n\nGo to Settings → System → Restart to restart Home Assistant."
+    },
+    "access_stopped": {
+      "title": "Access to {owner}/{repo} stopped",
+      "description": "Access to {owner}/{repo} was stopped. Ask your installer for a new key.\n\nThe installed version keeps working; updates resume when access comes back."
+    }
+  },
+  "services": {
+    "install_app": {
+      "name": "Install app",
+      "description": "Install or update an app (add-on) from the Apps / PrivateApps store, the same way the Apps tab does. Sets up the YidStore Connector first if needed and returns when Home Assistant has finished installing it.",
+      "fields": {
+        "app_id": {
+          "name": "App ID",
+          "description": "The app id from the Auto-Install list or the Apps list. Use this, or owner and repo."
+        },
+        "owner": {
+          "name": "Owner",
+          "description": "Apps or PrivateApps (together with repo)."
+        },
+        "repo": {
+          "name": "Repo",
+          "description": "The app's repository name (together with owner)."
+        },
+        "update": {
+          "name": "Update",
+          "description": "Update the app if it is already installed. If off and the app is installed, nothing is done."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "key_invalid": {
+      "message": "This key isn't valid or was removed"
+    },
+    "key_no_access": {
+      "message": "This key doesn't open this repository (or it's paused)"
+    },
+    "key_github": {
+      "message": "Repo keys only work for repositories on the OnOff store."
     }
   }
 }

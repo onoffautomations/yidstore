@@ -365,10 +365,15 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
 
                     package_data["last_check"] = datetime.now().isoformat()
 
-                    release = await async_github_latest_release(self.hass, owner, repo)
+                    beta = getattr(self.client, "beta_enabled", False)
+                    release = await async_github_latest_release(
+                        self.hass, owner, repo, include_prereleases=beta
+                    )
                     latest_tag = release.get("tag_name") if release else None
                     if not latest_tag:
-                        latest_tag = await async_github_latest_tag(self.hass, owner, repo)
+                        latest_tag = await async_github_latest_tag(
+                            self.hass, owner, repo, include_prereleases=beta
+                        )
 
                     if latest_tag:
                         update_available = (
@@ -397,6 +402,16 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     continue
 
                 _LOGGER.debug("Checking %s/%s (installed: %s)", owner, repo, installed_version)
+
+                # A repository opened by a token or repo key: if that access
+                # stopped (401/404), keep the installed version and skip
+                # quietly; a repair issue tells the user (cleared when back).
+                if await self.client.check_repo_access(owner, repo) is False:
+                    package_data["access_stopped"] = True
+                    package_data["update_available"] = False
+                    package_data["last_check"] = datetime.now().isoformat()
+                    continue
+                package_data.pop("access_stopped", None)
 
                 # Get latest release
                 latest_release = await self.client.get_latest_release(owner, repo)

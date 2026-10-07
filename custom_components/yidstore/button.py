@@ -86,26 +86,17 @@ class PackageUpdateButton(ButtonEntity):
 
         _LOGGER.info("Update button pressed for %s/%s (type: %s)", owner, repo_name, package_type)
 
-        # Determine which service to call
-        if package_type == "integration":
-            service_name = "install_integration"
-        elif package_type == "lovelace":
-            service_name = "install_lovelace"
-        elif package_type == "blueprints":
-            service_name = "install_blueprints"
-        elif package_type == "audio":
-            service_name = "install"
-        else:
+        if package_type not in ("integration", "lovelace", "blueprints", "audio"):
             _LOGGER.error("Unknown package type: %s", package_type)
             return
 
-        # Build service data
+        # Only the generic "install" service is registered.
+        service_name = "install"
         service_data = {
             "owner": owner,
             "repo": repo_name,
+            "type": package_type,
         }
-        if service_name == "install":
-            service_data["type"] = package_type
 
         if mode:
             service_data["mode"] = mode
