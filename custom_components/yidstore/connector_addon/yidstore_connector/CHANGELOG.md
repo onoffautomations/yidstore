@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+- Updates an app in the folder it is already installed in (also when it was installed by hand), and removes a duplicate copy of the same app. Fixes "No update available" when updating.
+
 ## 1.2.0
 
 - App updates show up in Home Assistant (add-on page and Settings → Updates): new versions are put in place so Home Assistant can update them itself.

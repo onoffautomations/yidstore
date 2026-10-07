@@ -118,8 +118,37 @@ def _addon_root(extracted: Path) -> Path:
     return extracted
 
 
-def install(job: dict) -> dict:
-    slug = job["slug"]
+def _folders_with_slug(slug: str | None) -> list[Path]:
+    """Add-on folders in /addons whose config file declares this slug."""
+    if not slug or not ADDONS_DIR.is_dir():
+        return []
+    found = []
+    for child in sorted(ADDONS_DIR.iterdir()):
+        if child.is_dir() and not child.name.startswith(".") and _config_slug(child) == slug:
+            found.append(child)
+    return found
+
+
+def _target_folder(default: Path, slug: str | None) -> tuple[Path, list[Path]]:
+    """Where the app goes, and copies to remove.
+
+    An app that is already installed is updated in ITS folder, whatever
+    that folder is called (it may have been installed by hand). Two folders
+    with the same slug make Home Assistant keep reading the old one ("No
+    update available"), so a copy YidStore made in its default folder next
+    to the original is removed. The original is never removed.
+    """
+    existing = _folders_with_slug(slug)
+    if not existing:
+        return default, []
+    others = [f for f in existing if f != default]
+    if others:
+        dupes = [default] if default in existing else []
+        return others[0], dupes
+    return default, []
+
+
+def install(job: dict, require_existing: bool = False) -> dict:
     try:
         data = request(f"fetch/{job['id']}", timeout=300)
     except urllib.error.HTTPError as exc:
@@ -134,30 +163,32 @@ def install(job: dict) -> dict:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             _safe_extract(zf, tmp)
         src = _addon_root(tmp)
+        addon_slug = _config_slug(src)
 
         ADDONS_DIR.mkdir(parents=True, exist_ok=True)
-        dest = ADDONS_DIR / slug
-        staging = ADDONS_DIR / f".{slug}.new"
+        dest, dupes = _target_folder(ADDONS_DIR / job["slug"], addon_slug)
+        if require_existing and not dest.is_dir():
+            raise RuntimeError("Not installed here; nothing staged")
+        staging = ADDONS_DIR / f".{dest.name}.new"
         if staging.exists():
             shutil.rmtree(staging)
         shutil.copytree(src, staging)
         if dest.exists():
             shutil.rmtree(dest)
         staging.rename(dest)
+        for dupe in dupes:
+            shutil.rmtree(dupe, ignore_errors=True)
+            log(f"Removed duplicate copy {dupe.name} (same app as {dest.name})")
 
     config_found = any((dest / n).is_file() for n in CONFIG_NAMES)
-    addon_slug = _config_slug(dest)
-    log(f"Installed {slug} (config found: {config_found}, app slug: {addon_slug})")
+    log(f"Installed {addon_slug or job['slug']} in {dest.name} (config found: {config_found})")
     return {"ok": True, "config_found": config_found, "addon_slug": addon_slug}
 
 
 def stage(job: dict) -> dict:
-    """Put a newer version in place for an app installed here, so the
-    Supervisor offers the update. Never creates a new folder (that could
-    clash with an add-on installed some other way)."""
-    if not (ADDONS_DIR / job["slug"]).is_dir():
-        raise RuntimeError("Not installed by YidStore here; nothing staged")
-    return install(job)
+    """Put a newer version in place for an app that is installed, so the
+    Supervisor offers the update. Never creates a new folder."""
+    return install(job, require_existing=True)
 
 
 def uninstall(job: dict) -> dict:

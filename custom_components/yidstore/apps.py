@@ -647,6 +647,19 @@ async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) 
             )
         installed = _find_slug(await _installed_addons(hass), addon_slug, local=True)
         ok, err = await _install_or_update(hass, store_slug, update=bool(installed))
+        if not ok and installed and "no update" in (err or "").lower():
+            # The Supervisor may not have read the new files yet: reload and
+            # try once more before reporting what it still sees.
+            await asyncio.sleep(3)
+            await _store_reload(hass)
+            ok, err = await _install_or_update(hass, store_slug, update=True)
+            if not ok and "no update" in (err or "").lower():
+                seen = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
+                err = (
+                    f"Home Assistant still sees version {seen.get('version_latest') or seen.get('version') or '?'} "
+                    "of this app. Update the YidStore Connector add-on and try again; "
+                    "if it keeps happening, see Settings → System → Logs → Supervisor."
+                )
         if not ok:
             raise RuntimeError(err or "Home Assistant could not install the app")
         _set_task(app_id, "done", action=action)
