@@ -64,15 +64,25 @@ def gitea_headers() -> dict:
     return {"Authorization": f"token {GITEA_TOKEN}"} if GITEA_TOKEN else {}
 
 
+_DIAG = {"releases": 0, "with_archive_counts": 0, "archive_downloads": 0, "asset_downloads": 0}
+
+
 def release_downloads(releases: list) -> int:
     total = 0
     for rel in releases or []:
         if not isinstance(rel, dict) or rel.get("draft"):
             continue
+        _DIAG["releases"] += 1
         for asset in rel.get("assets") or []:
-            total += int(asset.get("download_count") or 0)
+            n = int(asset.get("download_count") or 0)
+            total += n
+            _DIAG["asset_downloads"] += n
+        if "archive_download_count" in rel:
+            _DIAG["with_archive_counts"] += 1
         archive = rel.get("archive_download_count") or {}
-        total += int(archive.get("zip") or 0) + int(archive.get("tar_gz") or 0)
+        n = int(archive.get("zip") or 0) + int(archive.get("tar_gz") or 0)
+        total += n
+        _DIAG["archive_downloads"] += n
     return total
 
 
@@ -139,8 +149,11 @@ def github_items() -> dict:
 
 
 def main() -> int:
+    version = get_json(f"{GITEA_URL}/api/v1/version", gitea_headers()) or {}
+    print(f"Store server version: {version.get('version', 'unknown')}")
     items = {}
     items.update(gitea_items())
+    print(f"Store releases: {_DIAG}")
     items.update(github_items())
     if not items:
         print("No items found; keeping the previous stats", file=sys.stderr)
