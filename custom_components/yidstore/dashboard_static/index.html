@@ -3546,7 +3546,9 @@
             if (!st) return '';
             return `<span class="stat-chips">`
                 + `<span class="stat-chip" title="${Number(st.stars) || 0} stars"><i class="mdi mdi-star-outline"></i> ${formatCount(st.stars)}</span>`
-                + `<span class="stat-chip" title="${Number(st.downloads) || 0} downloads"><i class="mdi mdi-download-outline"></i> ${formatCount(st.downloads)}</span>`
+                // The store server only counts downloads of attached release
+                // files, so hide a zero rather than show a misleading count.
+                + (Number(st.downloads) > 0 ? `<span class="stat-chip" title="${Number(st.downloads)} downloads"><i class="mdi mdi-download-outline"></i> ${formatCount(st.downloads)}</span>` : '')
                 + `</span>`;
         }
 
