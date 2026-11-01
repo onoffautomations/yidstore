@@ -487,6 +487,16 @@
         .app-chip.update { background:rgba(3,169,244,0.14); color:var(--primary); font-weight:600; }
         .app-chip.running { background:rgba(76,175,80,0.14); color:var(--success); }
         .app-actions { display:flex; gap:0.35rem; flex-wrap:wrap; justify-content:flex-end; }
+        /* App details: release notes / changelog for the selected version. */
+        .app-changelog { margin-top:0.9rem; border-top:1px solid var(--divider); padding-top:0.7rem; text-align:left; }
+        .app-changelog:empty { display:none; }
+        .app-changelog-title { font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:0.4rem; margin-bottom:0.4rem; }
+        .app-changelog-body { font-size:0.85rem; color:var(--dim); line-height:1.5; max-height:240px; overflow:auto; word-break:break-word; }
+        .app-changelog-body h1, .app-changelog-body h2, .app-changelog-body h3 { font-size:0.9rem; margin:0.6rem 0 0.3rem; color:var(--text); }
+        .app-changelog-body ul, .app-changelog-body ol { margin:0.3rem 0 0.3rem 1.1rem; padding:0; }
+        .app-changelog-body a { color:var(--primary); }
+        .app-changelog-body code { background:rgba(127,127,127,0.14); border-radius:4px; padding:0 0.25rem; }
+        .app-changelog-body pre { background:rgba(127,127,127,0.12); border-radius:6px; padding:0.5rem; overflow:auto; }
         .app-actions .btn { font-size:0.75rem; padding:0.28rem 0.6rem; }
         .app-busy { display:flex; align-items:center; gap:0.4rem; color:var(--primary); font-size:0.78rem; }
         .app-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:0.6rem 0; border-bottom:1px solid var(--divider); text-align:left; }
@@ -2900,6 +2910,81 @@
             el.innerHTML = `<i class="mdi mdi-music-note"></i> Audio Download: ${label}`;
         }
 
+        // Running Home Assistant Core version, provided by /api/yidstore/status.
+        let haVersion = '';
+        // HA 2026.11.1+ renamed the community store to "Marketplace".
+        const MARKETPLACE_MIN = [2026, 11, 1];
+
+        // true / false when the version is known, null while still unknown.
+        function haVersionAtLeast(target) {
+            const m = String(haVersion || '').match(/\d+/g);
+            if (!m) return null;
+            const v = m.slice(0, 3).map(Number);
+            for (let i = 0; i < target.length; i++) {
+                const a = v[i] || 0, b = target[i] || 0;
+                if (a !== b) return a > b;
+            }
+            return true;
+        }
+
+        // Badge/label wording for community-store installs: "Marketplace" on
+        // HA 2026.11.1+, "HACS" below it, both while the version is unknown.
+        function marketplaceBadge() {
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return '<span class="badge badge-inst">Installed by HACS / Marketplace</span>';
+            return at
+                ? '<span class="badge badge-inst">Installed via Marketplace</span>'
+                : '<span class="badge badge-inst">Installed by HACS</span>';
+        }
+        function marketplaceLabel() {
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return 'Installed (HACS / Marketplace)';
+            return at ? 'Installed (Marketplace)' : 'Installed (HACS)';
+        }
+
+        // One-time popup (mirrors the Home Assistant persistent notification):
+        // after the HA 2026.11.1 update YidStore may need re-adding as a custom
+        // repository in the Marketplace (HACS).
+        let marketplaceNoticeChecked = false;
+        function maybeShowMarketplaceNotice() {
+            if (marketplaceNoticeChecked) return;
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return;       // version not known yet
+            marketplaceNoticeChecked = true;
+            if (!at) return;               // older HA: nothing to show
+            let seen = false;
+            try { seen = localStorage.getItem('yidstore_marketplace_notice') === '1'; } catch (_) {}
+            if (seen) return;
+            showMarketplaceNotice();
+        }
+
+        function marketplaceNoticeBody() {
+            return `
+                <div style="text-align:left; line-height:1.55;">
+                    <p style="margin:0 0 0.6rem;">After updating to <strong>Home Assistant ${escapeHtml(haVersion || '2026.11.1')}</strong>,
+                    YidStore sometimes needs to be re-added as a <strong>custom repository</strong> in the Marketplace (HACS).</p>
+                    <p style="margin:0 0 0.4rem; font-weight:600;"><i class="mdi mdi-store-plus"></i> If YidStore is missing, re-add it:</p>
+                    <ol style="margin:0 0 0.6rem 1.1rem; padding:0;">
+                        <li>Open <strong>Marketplace</strong> (HACS) from the sidebar.</li>
+                        <li>Click the <strong><i class="mdi mdi-dots-vertical"></i></strong> menu (top-right) → <strong>Custom repositories</strong>.</li>
+                        <li>Paste the YidStore repository URL and choose the <strong>Integration</strong> category.</li>
+                        <li>Click <strong>Add</strong>, then search for and install <strong>YidStore</strong>.</li>
+                        <li>Restart Home Assistant.</li>
+                    </ol>
+                    <p style="margin:0; color:var(--dim); font-size:0.85rem;">Everything already working? You can safely dismiss this notice.</p>
+                </div>`;
+        }
+        function showMarketplaceNotice() {
+            pop('Marketplace update notice', marketplaceNoticeBody(), 'mdi-store-alert', false, [
+                { t: "Don't show again", c: 'btn-o', f: 'dismissMarketplaceNotice()' },
+                { t: 'Got it', c: 'btn-p', f: 'closePop()' }
+            ]);
+        }
+        function dismissMarketplaceNotice() {
+            try { localStorage.setItem('yidstore_marketplace_notice', '1'); } catch (_) {}
+            closePop();
+        }
+
         function getInstalledBadge(installSource, needsRestart = false, itemType = 'integration') {
             // Only integrations need restart - cards and blueprints just need reload
             if (needsRestart && itemType === 'integration') {
@@ -2907,7 +2992,7 @@
             }
             switch (installSource) {
                 case 'hacs':
-                    return '<span class="badge badge-inst">Installed by HACS / Marketplace</span>';
+                    return marketplaceBadge();
                 case 'manual':
                     return '<span class="badge badge-inst">Manually installed</span>';
                 case 'yidstore':
@@ -3001,6 +3086,14 @@
             requiresRestartSet = new Set(data.requires_restart_list || []);
             for (const k of requiresRestartSet) {
                 optimisticRestartUntil.delete(normalizeRestartKey(k));
+            }
+
+            if (data.ha_version && data.ha_version !== haVersion) {
+                haVersion = data.ha_version;
+                // The install labels (Marketplace vs HACS) depend on this, so
+                // re-render once the version becomes known.
+                try { if (toolbarView !== 'apps') apply(); } catch (_) {}
+                maybeShowMarketplaceNotice();
             }
 
             if (data.is_authenticated !== undefined) {
@@ -3732,7 +3825,7 @@
                 } else {
                     dotClass += ' installed';
                     statusLabel = i.install_source === 'hacs'
-                        ? 'Installed (HACS / Marketplace)'
+                        ? marketplaceLabel()
                         : (i.install_source === 'manual' ? 'Installed (manual)' : 'Installed');
                 }
             }
@@ -5817,6 +5910,11 @@
         // instead of retrying the image (no flash on every refresh).
         const appIconMissing = new Set();
 
+        // App id -> list of releases (for the version picker and changelog).
+        const appReleasesCache = new Map();
+        // App id -> the version tag the user picked in the details dialog ('' = latest).
+        const appVersionChoice = {};
+
         const APP_TASK_LABELS = {
             starting: 'Starting…',
             downloading: 'Downloading…',
@@ -6167,7 +6265,7 @@
 
         function findApp(id) { return appsData.find(a => a.id === id); }
 
-        async function appAction(id, action, btn, value) {
+        async function appAction(id, action, btn, value, ref) {
             const app = findApp(id);
             if (!app) return;
             if (action === 'remove' && !confirm(`Remove ${app.name || app.repo_name}? Its settings and data in Home Assistant are deleted too.`)) return;
@@ -6176,7 +6274,7 @@
                 const res = await fetch('/api/yidstore/apps/action', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, action, value, slug: app.slug })
+                    body: JSON.stringify({ id, action, value, slug: app.slug, ref: ref || null })
                 });
                 const data = await parseJsonSafe(res);
                 if (!res.ok || data.error) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
@@ -6233,12 +6331,35 @@
             if (app.installed) versions.push(`Installed <strong>v${escapeHtml(app.installed_version || '?')}</strong>`);
             if (app.latest_version) versions.push(`Latest <strong>v${escapeHtml(app.latest_version)}</strong>`);
 
+            // Version picker (older versions / reinstall) — shown once the
+            // releases for this app have loaded and no job is running.
+            const rels = appReleasesCache.get(app.id);
+            let versionPicker = '';
+            if (!st.busy && Array.isArray(rels) && rels.length) {
+                const choice = appVersionChoice[app.id] || '';
+                const opts = [`<option value=""${choice === '' ? ' selected' : ''}>Latest (${escapeHtml(rels[0].tag_name)})</option>`]
+                    .concat(rels.slice(1).map(r => {
+                        const d = formatReleaseDate(r.published_at || r.created_at);
+                        return `<option value="${escapeHtml(r.tag_name)}"${choice === r.tag_name ? ' selected' : ''}>${escapeHtml(r.tag_name)}${r.name && r.name !== r.tag_name ? ' - ' + escapeHtml(r.name) : ''}${d ? ' - ' + escapeHtml(d) : ''}</option>`;
+                    }));
+                versionPicker = `
+                    <div class="version-wrap" style="margin:0 0 0.6rem;">
+                        <div class="version-row">
+                            <label style="color:var(--dim); font-size:0.85rem; white-space:nowrap;">Version:</label>
+                            <select id="appVersionSelect" class="version-select" onchange="appVersionChoice['${sid}']=this.value; renderAppChangelog('${sid}')">
+                                ${opts.join('')}
+                            </select>
+                        </div>
+                    </div>`;
+            }
+
             const primary = [];
             if (!st.busy) {
                 if (!app.installed) {
-                    primary.push(`<button class="btn btn-p" onclick="appAction('${sid}','install',this)"><i class="mdi mdi-download"></i> Install</button>`);
+                    primary.push(`<button class="btn btn-p" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-download"></i> Install</button>`);
                 } else {
                     if (app.update_available) primary.push(`<button class="btn btn-p" onclick="appAction('${sid}','update',this)"><i class="mdi mdi-update"></i> Update to v${escapeHtml(app.latest_version)}</button>`);
+                    if (Array.isArray(rels) && rels.length) primary.push(`<button class="btn btn-o" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-swap-vertical"></i> Switch version</button>`);
                     primary.push(running
                         ? `<button class="btn btn-o" onclick="appAction('${sid}','stop',this)"><i class="mdi mdi-stop"></i> Stop</button>`
                         : `<button class="btn btn-o" onclick="appAction('${sid}','start',this)"><i class="mdi mdi-play"></i> Start</button>`);
@@ -6262,7 +6383,9 @@
                     <span>${escapeHtml(st.label)}</span>
                 </div>
                 ${error}
+                ${versionPicker}
                 ${primary.length ? `<div class="app-manage-actions" style="margin-top:0.2rem;">${primary.join('')}</div>` : ''}
+                <div id="appChangelog">${appReleaseNotesHtml(app.id)}</div>
                 ${app.installed && !st.busy ? `
                     <div style="margin-top:0.8rem;">
                         ${sw('boot', 'Start on boot', 'Start the app when Home Assistant starts', app.boot === 'auto')}
@@ -6290,6 +6413,69 @@
             appDetailsLast = appDetailsHtml(app);
             pop(app.name || formatName(app.repo_name), appDetailsLast, 'mdi-apps', false,
                 [{ t: 'Close', c: 'btn-o', f: 'closePop()' }]);
+            fetchAppReleases(id);
+        }
+
+        // Load the app's releases once (version picker + changelog), then
+        // re-render the open dialog so they appear.
+        async function fetchAppReleases(id) {
+            if (!appReleasesCache.has(id)) {
+                try {
+                    const res = await fetch(`/api/yidstore/apps/releases/${encodeURIComponent(id)}`);
+                    const data = await parseJsonSafe(res);
+                    appReleasesCache.set(id, Array.isArray(data) ? data : []);
+                } catch (_) {
+                    appReleasesCache.set(id, []);
+                }
+            }
+            if (appDetailsOpen() && appDetailsId === id) {
+                const app = findApp(id);
+                if (app) {
+                    appDetailsLast = appDetailsHtml(app);
+                    const pm = document.getElementById('pm');
+                    if (pm) pm.innerHTML = appDetailsLast;
+                }
+            }
+        }
+
+        // Release notes for the version currently selected ('' = latest).
+        function appReleaseNotesHtml(id) {
+            const rels = appReleasesCache.get(id);
+            if (!Array.isArray(rels) || !rels.length) return '';
+            const choice = appVersionChoice[id] || '';
+            const rel = choice ? rels.find(r => r.tag_name === choice) : rels[0];
+            if (!rel) return '';
+            const title = rel.name && rel.name !== rel.tag_name ? `${rel.tag_name} — ${rel.name}` : rel.tag_name;
+            const dateStr = formatReleaseDate(rel.published_at || rel.created_at);
+            const body = (rel.body || '').trim();
+            let bodyHtml;
+            if (body) {
+                try { bodyHtml = window.marked ? marked.parse(body) : escapeHtml(body).replace(/\n/g, '<br>'); }
+                catch (_) { bodyHtml = escapeHtml(body).replace(/\n/g, '<br>'); }
+            } else {
+                bodyHtml = '<span style="color:var(--dim);">No release notes for this version.</span>';
+            }
+            return `
+                <div class="app-changelog">
+                    <div class="app-changelog-title"><i class="mdi mdi-text-box-outline"></i> What's New — ${escapeHtml(title)}${dateStr ? ` <span style="color:var(--dim); font-weight:400;">· ${escapeHtml(dateStr)}</span>` : ''}</div>
+                    <div class="app-changelog-body">${bodyHtml}</div>
+                </div>`;
+        }
+
+        function renderAppChangelog(id) {
+            const el = document.getElementById('appChangelog');
+            if (el) el.innerHTML = appReleaseNotesHtml(id);
+        }
+
+        // Install / switch to the version chosen in the picker ('' = latest).
+        function appInstallSelectedVersion(id, action, btn) {
+            const sel = document.getElementById('appVersionSelect');
+            const ref = (sel ? sel.value : (appVersionChoice[id] || '')) || null;
+            const app = findApp(id);
+            if (app && app.installed && ref) {
+                if (!confirm(`Install ${app.name || app.repo_name} version ${ref}? The app will be rebuilt with this version.`)) return;
+            }
+            appAction(id, action, btn, undefined, ref);
         }
 
         // Keep an open details dialog in step with the latest data.

@@ -2805,12 +2805,21 @@ class OnOffStoreStatusView(HomeAssistantView):
             cached = _REPOS_CACHE.get(eid)
             _maybe_retry_auth_rebuild(hass, eid)
 
+            # Running Home Assistant Core version (e.g. "2026.11.1"). The panel
+            # uses it to label installs (Marketplace vs HACS) and to show the
+            # one-time Marketplace migration notice.
+            try:
+                from homeassistant.const import __version__ as _ha_version
+            except Exception:
+                _ha_version = None
+
             return web.json_response({
                 "status": status,
                 "requires_restart_list": restart_list,
                 "is_authenticated": is_authenticated,
                 "beta_releases": bool(client and client.beta_enabled),
                 "repos_built_at": cached[0] if cached else None,
+                "ha_version": _ha_version,
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

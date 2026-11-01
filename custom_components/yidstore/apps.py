@@ -61,6 +61,15 @@ _MANIFEST_CACHE: dict[tuple, dict] = {}
 _ICON_CACHE: dict[str, tuple[float, bytes | None, str]] = {}
 _ICON_TTL = 6 * 60 * 60
 
+# Cached "app catalog" (the slow reads from the store server: repo list,
+# manifests and org names). The Apps tab merges fast Supervisor state on top,
+# so repeat visits and the background polling never pay for the Gitea round
+# trips again. Served stale-while-revalidate so only the very first load waits.
+_CATALOG_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_CATALOG_TTL = 300.0     # within this age the cache is served as-is
+_CATALOG_STALE = 1800.0  # within this age it is served, then refreshed in the background
+_CATALOG_REFRESH_LOCK: dict[str, asyncio.Lock] = {}
+
 
 # ---------------------------------------------------------------------------
 # Small helpers
@@ -602,14 +611,21 @@ async def _fetch_icon(hass, client, owner: str, repo: str) -> tuple[bytes | None
 # Install / update / remove
 # ---------------------------------------------------------------------------
 
-async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) -> str:
+async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool,
+                      ref: str | None = None) -> str:
     """Download an app through the connector and have the Supervisor install
     (or update) it. Returns the Supervisor slug; raises with the reason.
+
+    When ``ref`` is given, that exact release/tag is installed. This also makes
+    reinstalling the same version or going back to an older one work: the
+    connector puts those files in place and, if the Supervisor sees "no update"
+    (same or older version), YidStore rebuilds the add-on from them.
 
     Progress is kept in _TASKS[app id] so the Apps tab shows it.
     """
     app_id = _app_id(owner, repo)
     action = "update" if update else "install"
+    exact = bool(ref)
     try:
         client = _client(hass, entry_id)
         if client is None:
@@ -620,8 +636,8 @@ async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) 
             raise RuntimeError("The YidStore Connector add-on is not running")
 
         _set_task(app_id, "downloading", action=action)
-        ref = await _default_ref(client, owner, repo)
-        job_id = _enqueue_job("install", owner, repo, _addon_slug(repo), ref)
+        use_ref = ref or await _default_ref(client, owner, repo)
+        job_id = _enqueue_job("install", owner, repo, _addon_slug(repo), use_ref)
         job = await _wait_for_job(job_id, timeout=300)
         if job.get("status") != "done":
             raise RuntimeError(
@@ -646,30 +662,50 @@ async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) 
                 "(see Settings → System → Logs → Supervisor)."
             )
         installed = _find_slug(await _installed_addons(hass), addon_slug, local=True)
-        ok, err = await _install_or_update(hass, store_slug, update=bool(installed))
-        if not ok and installed and "no update" in (err or "").lower():
-            # Already on the latest version (e.g. updated from Home
-            # Assistant's own Updates in the meantime): nothing to do.
-            current = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
-            try:
-                latest = (await _app_manifest(hass, client, owner, {"name": repo})).get("version")
-            except Exception:
-                latest = None
-            if latest and not _is_newer(latest, current.get("version")):
-                ok, err = True, None
-        if not ok and installed and "no update" in (err or "").lower():
-            # The Supervisor may not have read the new files yet: reload and
-            # try once more before reporting what it still sees.
-            await asyncio.sleep(3)
-            await _store_reload(hass)
+        if exact and installed:
+            # A specific version was chosen for an app already installed
+            # (reinstall, downgrade or jump to a particular release). The
+            # connector has staged exactly those files; apply them. If the
+            # Supervisor reports "no update" because the version is the same or
+            # older, rebuild the add-on from the staged files so the choice
+            # still takes effect.
             ok, err = await _install_or_update(hass, store_slug, update=True)
             if not ok and "no update" in (err or "").lower():
-                seen = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
-                err = (
-                    f"Home Assistant still sees version {seen.get('version_latest') or seen.get('version') or '?'} "
-                    "of this app. Update the YidStore Connector add-on and try again; "
-                    "if it keeps happening, see Settings → System → Logs → Supervisor."
-                )
+                await asyncio.sleep(2)
+                await _store_reload(hass)
+                res = await _sup(hass, "post", f"/addons/{installed}/rebuild", timeout=3600)
+                if _ok(res):
+                    ok, err = True, None
+                elif res and res[0] == 404:
+                    res = await _sup(hass, "post", f"/store/addons/{installed}/rebuild", timeout=3600)
+                    ok, err = (True, None) if _ok(res) else (False, _message(res))
+                else:
+                    ok, err = False, _message(res)
+        else:
+            ok, err = await _install_or_update(hass, store_slug, update=bool(installed))
+            if not ok and installed and "no update" in (err or "").lower():
+                # Already on the latest version (e.g. updated from Home
+                # Assistant's own Updates in the meantime): nothing to do.
+                current = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
+                try:
+                    latest = (await _app_manifest(hass, client, owner, {"name": repo})).get("version")
+                except Exception:
+                    latest = None
+                if latest and not _is_newer(latest, current.get("version")):
+                    ok, err = True, None
+            if not ok and installed and "no update" in (err or "").lower():
+                # The Supervisor may not have read the new files yet: reload and
+                # try once more before reporting what it still sees.
+                await asyncio.sleep(3)
+                await _store_reload(hass)
+                ok, err = await _install_or_update(hass, store_slug, update=True)
+                if not ok and "no update" in (err or "").lower():
+                    seen = next((a for a in await _installed_addons(hass) if a.get("slug") == installed), {})
+                    err = (
+                        f"Home Assistant still sees version {seen.get('version_latest') or seen.get('version') or '?'} "
+                        "of this app. Update the YidStore Connector add-on and try again; "
+                        "if it keeps happening, see Settings → System → Logs → Supervisor."
+                    )
         if not ok:
             raise RuntimeError(err or "Home Assistant could not install the app")
         _set_task(app_id, "done", action=action)
@@ -680,10 +716,11 @@ async def install_app(hass, entry_id: str, owner: str, repo: str, update: bool) 
         raise
 
 
-async def _run_install(hass, entry_id: str, app_id: str, owner: str, repo: str, update: bool) -> None:
+async def _run_install(hass, entry_id: str, app_id: str, owner: str, repo: str,
+                       update: bool, ref: str | None = None) -> None:
     """Background task behind the Apps tab's Install / Update buttons."""
     try:
-        await install_app(hass, entry_id, owner, repo, update)
+        await install_app(hass, entry_id, owner, repo, update, ref=ref)
     except Exception:
         pass  # already logged and shown on the card
 
@@ -921,6 +958,84 @@ def _maybe_stage_soon(hass, entry_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# App catalog (cached): the slow store-server reads, kept out of every poll
+# ---------------------------------------------------------------------------
+
+async def _build_catalog(hass, client) -> list[dict]:
+    """Read the app list, manifests and org names from the store server.
+
+    Everything here hits the network; the result is cached by _get_catalog so
+    the Apps tab only waits for it on a cold load.
+    """
+    app_repos = await _list_app_repos(client)
+    manifests = await asyncio.gather(
+        *(_app_manifest(hass, client, owner, repo) for owner, repo in app_repos),
+        return_exceptions=True,
+    )
+    owner_names = {o.lower(): await _org_display(client, o) for o in {r[0] for r in app_repos}}
+
+    catalog: list[dict] = []
+    for (owner, repo), manifest in zip(app_repos, manifests):
+        if isinstance(manifest, Exception):
+            manifest = {}
+        repo_name = repo.get("name", "")
+        if not repo_name:
+            continue
+        catalog.append({
+            "owner": owner,
+            "repo_name": repo_name,
+            "addon_slug": manifest.get("slug") or _addon_slug(repo_name),
+            "name": manifest.get("name") or repo_name,
+            "description": repo.get("description") or manifest.get("description") or "",
+            "updated_at": repo.get("updated_at", ""),
+            "owner_display": owner_names.get(owner.lower(), owner),
+            "access_stopped": bool(repo.get("access_stopped")),
+            "has_config": bool(manifest.get("has_config")),
+            "latest_version": manifest.get("version") or manifest.get("tag_version"),
+        })
+    return catalog
+
+
+def _schedule_catalog_refresh(hass, client, entry_id: str) -> None:
+    """Refresh the cached catalog in the background (stale-while-revalidate)."""
+    lock = _CATALOG_REFRESH_LOCK.setdefault(entry_id, asyncio.Lock())
+    if lock.locked():
+        return
+
+    async def _refresh() -> None:
+        async with lock:
+            try:
+                catalog = await _build_catalog(hass, client)
+                _CATALOG_CACHE[entry_id] = (time.time(), catalog)
+            except Exception as exc:
+                _LOGGER.debug("Apps catalog refresh failed: %s", exc)
+
+    hass.async_create_background_task(_refresh(), "yidstore_apps_catalog_refresh")
+
+
+async def _get_catalog(hass, client, entry_id: str, force: bool) -> list[dict]:
+    """The app catalog, cached. Only the first load (or a forced reload) waits."""
+    if force:
+        # Full Reload: drop every cached read so names/versions/icons refresh.
+        _MANIFEST_CACHE.clear()
+        _ICON_CACHE.clear()
+        _ORG_DISPLAY.clear()
+        _CATALOG_CACHE.pop(entry_id, None)
+
+    cached = _CATALOG_CACHE.get(entry_id)
+    now = time.time()
+    if cached and now - cached[0] < _CATALOG_TTL:
+        return cached[1]
+    if cached and now - cached[0] < _CATALOG_STALE:
+        _schedule_catalog_refresh(hass, client, entry_id)
+        return cached[1]
+
+    catalog = await _build_catalog(hass, client)
+    _CATALOG_CACHE[entry_id] = (time.time(), catalog)
+    return catalog
+
+
+# ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
 
@@ -986,11 +1101,7 @@ class AppsReposView(HomeAssistantView):
         hass = request.app["hass"]
         if not _is_admin(request):
             return web.json_response({"error": "unauthorized"}, status=403)
-        if request.query.get("force") in ("1", "true", "yes"):
-            # Full Reload: re-read versions, names, icons and org names.
-            _MANIFEST_CACHE.clear()
-            _ICON_CACHE.clear()
-            _ORG_DISPLAY.clear()
+        force = request.query.get("force") in ("1", "true", "yes")
         sup_ok = supervisor_available(hass)
         online = connector_online()
         out = {
@@ -1004,29 +1115,21 @@ class AppsReposView(HomeAssistantView):
             return web.json_response(out)
 
         try:
-            app_repos = await _list_app_repos(client)
+            catalog = await _get_catalog(hass, client, self.entry_id, force)
         except Exception as exc:
             _LOGGER.error("Could not load apps: %s", exc)
             out["error"] = "Could not load apps"
             return web.json_response(out)
 
-        # Ids stay valid (Auto-Install also hands them out); private apps are
-        # still refused without a token when an action runs.
-        manifests = await asyncio.gather(
-            *(_app_manifest(hass, client, owner, repo) for owner, repo in app_repos),
-            return_exceptions=True,
-        )
+        # The slow store reads are cached; only the fast, live state below
+        # (installed add-ons and their info) is read on every poll.
         installed = await _installed_addons(hass)
 
         rows = []
         info_tasks = []
-        for (owner, repo), manifest in zip(app_repos, manifests):
-            if isinstance(manifest, Exception):
-                manifest = {}
-            repo_name = repo.get("name", "")
-            addon_slug = manifest.get("slug") or _addon_slug(repo_name)
-            sup_slug = _find_slug(installed, addon_slug, local=True)
-            rows.append((owner, repo, manifest, addon_slug, sup_slug))
+        for entry in catalog:
+            sup_slug = _find_slug(installed, entry["addon_slug"], local=True)
+            rows.append((entry, sup_slug))
             info_tasks.append(_sup(hass, "get", f"/addons/{sup_slug}/info") if sup_slug else asyncio.sleep(0))
         infos = await asyncio.gather(*info_tasks, return_exceptions=True)
 
@@ -1048,29 +1151,30 @@ class AppsReposView(HomeAssistantView):
                 "logs_path": f"{base}/logs",
             }
 
-        owner_names = {o.lower(): await _org_display(client, o) for o in {r[0] for r in rows}}
-
-        for (owner, repo, manifest, addon_slug, sup_slug), info_res in zip(rows, infos):
-            repo_name = repo.get("name", "")
-            if not sup_slug and not manifest.get("has_config"):
+        for (entry, sup_slug), info_res in zip(rows, infos):
+            owner = entry["owner"]
+            repo_name = entry["repo_name"]
+            if not sup_slug and not entry["has_config"]:
                 # Not an add-on repository (no config.yaml at the root).
                 continue
+            # Ids stay valid (Auto-Install also hands them out); private apps
+            # are still refused without a token when an action runs.
             app_id = _app_id(owner, repo_name)
             info = _data(info_res) if sup_slug and not isinstance(info_res, Exception) else None
             info = info if isinstance(info, dict) else {}
             installed_version = info.get("version") if sup_slug else None
-            latest = manifest.get("version") or manifest.get("tag_version")
+            latest = entry["latest_version"]
             ingress = bool(info.get("ingress"))
-            if repo.get("access_stopped"):
+            if entry["access_stopped"]:
                 await client.check_repo_access(owner, repo_name)
             out["apps"].append({
-                "access_stopped": bool(repo.get("access_stopped")),
+                "access_stopped": entry["access_stopped"],
                 "id": app_id,
-                "name": manifest.get("name") or repo_name,
+                "name": entry["name"],
                 "repo_name": repo_name,
-                "owner_display": owner_names.get(owner.lower(), owner),
-                "description": repo.get("description") or manifest.get("description") or "",
-                "updated_at": repo.get("updated_at", ""),
+                "owner_display": entry["owner_display"],
+                "description": entry["description"],
+                "updated_at": entry["updated_at"],
                 "latest_version": latest,
                 "installed": bool(sup_slug),
                 "installed_version": installed_version,
@@ -1115,9 +1219,11 @@ class AppsActionView(HomeAssistantView):
             return web.json_response({"error": "This app is busy, please wait"})
 
         if action in ("install", "update"):
+            # An optional explicit release/tag to install (version picker).
+            ref = str(data.get("ref") or "").strip() or None
             _set_task(app_id, "starting", action=action)
             hass.async_create_background_task(
-                _run_install(hass, self.entry_id, app_id, owner, repo, action == "update"),
+                _run_install(hass, self.entry_id, app_id, owner, repo, action == "update", ref=ref),
                 f"yidstore_app_{action}_{repo}",
             )
             return web.json_response({"success": True, "started": True})
@@ -1148,6 +1254,49 @@ class AppsActionView(HomeAssistantView):
         if not _ok(res):
             return web.json_response({"error": _message(res)})
         return web.json_response({"success": True})
+
+
+class AppsReleasesView(HomeAssistantView):
+    """Available releases for an app (version picker + release notes)."""
+    url = "/api/yidstore/apps/releases/{app_id}"
+    name = "api:yidstore:apps:releases"
+    requires_auth = True
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request, app_id: str) -> web.Response:
+        hass = request.app["hass"]
+        if not _is_admin(request):
+            return web.json_response({"error": "unauthorized"}, status=403)
+        resolved = _APP_IDS.get(app_id)
+        client = _client(hass, self.entry_id)
+        if not resolved or client is None:
+            return web.json_response([])
+        owner, repo = resolved
+        if owner.lower() == PRIVATE_APPS_ORG.lower() and not client.credential_for(owner, repo):
+            return web.json_response([])
+        try:
+            releases = await client.get_releases(owner, repo)
+        except Exception as exc:
+            _LOGGER.debug("App releases for %s/%s failed: %s", owner, repo, exc)
+            return web.json_response([])
+        out = []
+        for rel in releases or []:
+            if not isinstance(rel, dict):
+                continue
+            tag = str(rel.get("tag_name") or "").strip()
+            if not tag:
+                continue
+            out.append({
+                "tag_name": tag,
+                "name": rel.get("name") or "",
+                "body": rel.get("body") or "",
+                "published_at": rel.get("published_at") or "",
+                "created_at": rel.get("created_at") or "",
+                "prerelease": bool(rel.get("prerelease")),
+            })
+        return web.json_response(out)
 
 
 class AppsIconView(HomeAssistantView):
@@ -1328,6 +1477,7 @@ async def async_setup_apps(hass: HomeAssistant, entry_id: str) -> list:
     for view in (
         AppsReposView(entry_id),
         AppsActionView(entry_id),
+        AppsReleasesView(entry_id),
         AppsTaskView(),
         AppsIconView(entry_id),
         AppsDiagView(),
@@ -1348,6 +1498,17 @@ async def async_setup_apps(hass: HomeAssistant, entry_id: str) -> list:
             _LOGGER.debug("Could not publish the YidStore add-on store: %s", exc)
 
     hass.async_create_background_task(_refresh_store(), "yidstore_publish_store")
+
+    async def _warm_catalog() -> None:
+        # Pre-load the app catalog so the first visit to the Apps tab is fast.
+        try:
+            client = _client(hass, entry_id)
+            if client and supervisor_available(hass):
+                await _get_catalog(hass, client, entry_id, force=False)
+        except Exception as exc:
+            _LOGGER.debug("Apps catalog warm-up failed: %s", exc)
+
+    hass.async_create_background_task(_warm_catalog(), "yidstore_apps_catalog_warm")
 
     from datetime import timedelta
 
