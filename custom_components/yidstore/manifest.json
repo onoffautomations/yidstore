@@ -1,7 +1,7 @@
 {
   "domain": "yidstore",
   "name": "YidStore",
-  "version": "1.8.0b1",
+  "version": "1.8.0b2",
   "documentation": "onoffautomations.com/integrations",
   "config_flow": true,
   "requirements": [],

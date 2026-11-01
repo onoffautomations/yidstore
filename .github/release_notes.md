@@ -1,5 +1,8 @@
 **Beta** — please test before 1.8.0 is released. Only offered to users who turn on beta versions for YidStore in the Marketplace (HACS).
 
+### Fixed in beta 2
+- On phones, a tall app dialog no longer gets stuck off-screen. Popups now fit the screen and scroll inside, the buttons stay visible, and there's a close (X) button. Tapping outside a popup closes it.
+
 ### Stars and downloads
 - Every integration, card and app now shows its star count, and its download count when there is one. YidStore reads them from a public stats file that this repository refreshes every 6 hours, so no token is needed.
 

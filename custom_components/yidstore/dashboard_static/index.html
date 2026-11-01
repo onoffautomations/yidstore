@@ -1192,6 +1192,48 @@
             max-width: 400px;
             box-shadow: 0 0 40px var(--glow);
             animation: pop 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+            /* Never taller than the screen: the message scrolls, the icon,
+               title and buttons stay in view (tall app details on phones). */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 2rem);
+            max-height: calc(100dvh - 2rem);
+        }
+        .pop > #pi, .pop > #pt, .pop > #pa { flex-shrink: 0; }
+        .pop > #pm {
+            flex: 0 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        .pop-x {
+            position: absolute;
+            top: 0.6rem;
+            right: 0.6rem;
+            width: 2.2rem;
+            height: 2.2rem;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            color: var(--dim);
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1;
+        }
+        .pop-x:hover { background: rgba(127,127,127,0.15); color: var(--text); }
+        @media (max-width: 600px) {
+            .pop-o { padding: 0.6rem; }
+            .pop { padding: 1.1rem 1rem; border-radius: 16px; max-height: calc(100vh - 1.2rem); max-height: calc(100dvh - 1.2rem); }
+            .pop > #pi { font-size: 2.4rem !important; margin-bottom: 0.4rem !important; }
+            .pop > #pt { font-size: 1.15rem !important; margin: 0 2rem 0.6rem !important; }
+            .pop > #pm { margin-bottom: 0.9rem !important; }
+            /* The whole dialog scrolls on phones; no scroll box inside it. */
+            .app-changelog-body { max-height: none; overflow: visible; }
         }
 
         @keyframes pop {
@@ -2625,6 +2667,7 @@
 
     <div id="pop-o" class="pop-o">
         <div class="pop">
+            <button type="button" class="pop-x" onclick="closePop()" aria-label="Close" title="Close"><i class="mdi mdi-close"></i></button>
             <div id="pi" style="font-size:3.5rem; color:var(--success); margin-bottom:1rem;"></div>
             <h3 id="pt" style="font-size:1.4rem; margin-bottom:0.8rem;"></h3>
             <p id="pm" style="color:var(--dim); margin-bottom:1.5rem; line-height:1.5; font-size:0.9rem;"></p>
@@ -5017,6 +5060,8 @@
         window.onclick = (e) => {
             if (e.target == document.getElementById('modal')) closeModal();
             if (e.target == document.getElementById('customModal')) closeCustomModal();
+            // Tap outside a popup (e.g. the app details on a phone) closes it.
+            if (e.target == document.getElementById('pop-o')) closePop();
             if (!e.target.closest('.menu-container') && !e.target.closest('.dropdown')) {
                 document.getElementById('dropdown').style.display = 'none';
             }
