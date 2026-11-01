@@ -1,16 +1,26 @@
 name: Publish YidStore beta (pre-release)
 
-# Pushing a beta tag such as v1.8.0b1 publishes a GitHub pre-release with
-# yidstore.zip attached. HACS / the Marketplace only offer it to users who
-# turn on beta versions for YidStore. Stable releases keep the manual flow
-# (publish-assets.yml).
+# Publishes a GitHub pre-release with yidstore.zip attached when the version
+# in manifest.json is a beta (e.g. 1.8.0b1) and no release exists for it yet.
+# Runs on a push that changes manifest.json, the release notes or this file,
+# or on pushing a beta tag such as v1.8.0b1. Notes: .github/release_notes.md.
+# HACS / the Marketplace only offer a pre-release to users who turn on beta
+# versions. Stable releases keep the manual flow (publish-assets.yml).
 on:
   push:
-    tags:
-      - "v*b*"
+    branches: ["**"]
+    tags: ["v*b*"]
+    paths:
+      - "custom_components/yidstore/manifest.json"
+      - ".github/release_notes.md"
+      - ".github/workflows/beta-release.yml"
 
 permissions:
   contents: write
+
+concurrency:
+  group: yidstore-beta-release
+  cancel-in-progress: false
 
 jobs:
   prerelease:
@@ -19,24 +29,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Read release notes from the tag message
+      - name: Work out the beta version
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          git tag -l --format='%(contents)' "${TAG}" > release_notes.md
-          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          version="$(python3 -c "import json;print(json.load(open('custom_components/yidstore/manifest.json'))['version'])")"
+          tag="v${version}"
+          echo "Manifest version: ${version}"
+          if ! echo "${version}" | grep -Eq '(a|b|rc)[0-9]+$'; then
+            echo "Not a beta version; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; not publishing it again."
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
       - name: Package YidStore
+        if: steps.ver.outputs.publish == 'true'
         run: |
           cd custom_components/yidstore
           zip -r __artifact__.zip .
           mv __artifact__.zip "$GITHUB_WORKSPACE/yidstore.zip"
 
       - name: Publish pre-release
+        if: steps.ver.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TAG }}
-          name: YidStore ${{ env.TAG }} (beta)
-          body_path: release_notes.md
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: YidStore ${{ steps.ver.outputs.tag }} (beta)
+          body_path: .github/release_notes.md
           prerelease: true
+          make_latest: false
           files: yidstore.zip
