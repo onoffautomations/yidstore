@@ -1,5 +1,9 @@
 **Beta** — please test before 1.8.0 is released. Only offered to users who turn on beta versions for YidStore in the Marketplace (HACS).
 
+### New in beta 3
+- After installing an integration that's ready to use (no restart needed), YidStore opens its setup straight away: the same dialog as Settings → Devices & Services → Add integration.
+- Installed integrations that aren't set up yet get a **Set up** button on their card, list row and details, so you can start the setup from YidStore at any time.
+
 ### Fixed in beta 2
 - On phones, a tall app dialog no longer gets stuck off-screen. Popups now fit the screen and scroll inside, the buttons stay visible, and there's a close (X) button. Tapping outside a popup closes it.
 

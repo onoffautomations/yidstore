@@ -3172,6 +3172,8 @@
                 item.is_installed = !!status.is_installed;
                 item.install_source = status.install_source || null;
                 item.requires_restart = !!status.requires_restart;
+                item.domain = status.domain || item.domain || null;
+                item.can_setup = !!status.can_setup;
                 // Backend is authoritative: if it says no restart is needed
                 // (e.g. a fresh config-flow integration loaded on the fly),
                 // drop any optimistic "restart pending" marker.
@@ -3204,6 +3206,7 @@
                     i.install_source || '',
                     i.update_available ? 1 : 0,
                     i.requires_restart ? 1 : 0,
+                    i.can_setup ? 1 : 0,
                     i.is_hidden ? 1 : 0,
                     i.installed_version || '',
                     i.latest_version || '',
@@ -3959,7 +3962,7 @@
                 <span style="flex:1;"></span>
                 ${newChip}
                 ${updateChip}
-                ${i.is_installed ? `
+                ${i.is_installed ? `${setupButtonHtml(i, 'card-install-btn')}
                 <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
                     <i class="mdi mdi-trash-can-outline"></i>
                 </button>` : `
@@ -4030,7 +4033,8 @@
                     <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}${statsHtml(storeStatsFor(i))}</div>
                 </div>
                 <div class="list-actions">
-                    <button class="btn btn-p" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
+                    ${setupButtonHtml(i, 'btn btn-p')}
+                    <button class="btn ${i.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
 
                     ${i.is_installed ? `
                     <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
@@ -4572,9 +4576,10 @@
                     <div style="display:flex; align-items:center; gap:0.8rem;">
                         ${versionSelector || ''}
                     </div>
-                    <div style="display: flex; gap: 0.8rem; justify-content: flex-end;">
+                    <div style="display: flex; gap: 0.8rem; justify-content: flex-end; flex-wrap: wrap;">
                         <button class="btn btn-o" onclick="closeModal()">Close</button>
-                        <button class="btn btn-p" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                        ${setupButtonHtml(item, 'btn btn-p')}
+                        <button class="btn ${item.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
                     </div>
                 </div>
             `;
@@ -4995,7 +5000,32 @@
         // follow the Marketplace: a fresh config-flow integration loads without
         // a restart; an update of a running one needs a restart, and the
         // "Restart required" repair (Settings → System → Repairs) does it.
+        // Open Home Assistant's "Add integration" dialog for a domain (the
+        // same place as Settings -> Devices & Services -> Add integration).
+        function openIntegrationSetup(domain) {
+            if (!domain) return;
+            closePop();
+            try { closeModal(); } catch (_) {}
+            haNavigate(`/config/integrations/dashboard/add?domain=${encodeURIComponent(domain)}`);
+        }
+        function setupStoreItem(o, r, ev) {
+            if (ev) ev.stopPropagation();
+            const item = findItemByRepo(o, r);
+            if (item && item.domain) openIntegrationSetup(item.domain);
+        }
+        function setupButtonHtml(i, cls) {
+            if (!i || i.type !== 'integration' || !i.can_setup || !i.domain) return '';
+            return `<button class="${cls}" onclick="setupStoreItem('${i.owner}','${i.repo_name}',event)" title="Set up this integration"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
+        }
+
         async function afterStoreInstall(o, r, t, data) {
+            if (t === 'integration' && data && data.can_setup && data.domain) {
+                // Fresh integration, loaded without a restart: go straight to
+                // its setup, like the Marketplace does.
+                await syncBackendAfterAction();
+                openIntegrationSetup(data.domain);
+                return;
+            }
             if (t === 'integration') {
                 const needsRestartNow = !!(data && data.requires_restart);
                 if (needsRestartNow) {

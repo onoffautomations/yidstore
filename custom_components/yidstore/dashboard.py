@@ -143,6 +143,28 @@ def _repo_slug(text: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", (text or "").strip().lower().replace("-", "_")).strip("_")
 
 
+def _read_config_flow_flags(config_dir: str, domains: list[str]) -> dict[str, bool]:
+    """Blocking: whether each installed custom integration has a config flow
+    (so it can be set up from the UI)."""
+    import json
+
+    flags: dict[str, bool] = {}
+    for domain in domains:
+        try:
+            manifest = Path(config_dir, "custom_components", domain, "manifest.json")
+            flags[domain] = bool(json.loads(manifest.read_text(encoding="utf-8")).get("config_flow"))
+        except Exception:
+            flags[domain] = False
+    return flags
+
+
+def _has_config_entry(hass: HomeAssistant, domain: str | None) -> bool:
+    try:
+        return bool(domain) and bool(hass.config_entries.async_entries(domain))
+    except Exception:
+        return False
+
+
 def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict | None) -> bool:
     """Return restart-needed flag from tracked package data."""
     if not isinstance(package_data, dict):
@@ -1938,12 +1960,29 @@ class OnOffStoreInstallView(HomeAssistantView):
                 asset_name=effective_asset_name,
             )
             _invalidate_local_state_cache()
+            # Ready to set up right away (a fresh config-flow integration that
+            # loaded without a restart and has no config entry yet): the panel
+            # then opens Home Assistant's "Add integration" dialog for it.
+            installed_domain = tracked_pkg.get("domain") if t == "integration" else None
+            config_flow = False
+            if installed_domain:
+                config_flow = (await hass.async_add_executor_job(
+                    _read_config_flow_flags, hass.config.config_dir, [installed_domain]
+                )).get(installed_domain, False)
+            can_setup = bool(
+                installed_domain and config_flow and not restart_required
+                and not _has_config_entry(hass, installed_domain)
+            )
+
             return web.json_response({
                 "success": True,
                 "requires_restart": restart_required,
                 "mode": effective_mode,
                 "asset_name": effective_asset_name,
                 "installed_version": tracked_pkg.get("installed_version"),
+                "domain": installed_domain,
+                "config_flow": config_flow,
+                "can_setup": can_setup,
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -2802,6 +2841,16 @@ class OnOffStoreStatusView(HomeAssistantView):
             status = {}
             restart_list: list[str] = []
             _LOGGER.debug("Status API: checking %d packages", len(coordinator.packages))
+            # Which installed integrations can be set up from the UI (one
+            # executor read per request, not one per package).
+            integration_domains = sorted({
+                p.get("domain") for p in coordinator.packages.values()
+                if p.get("package_type", "integration") == "integration" and p.get("domain")
+            })
+            config_flow_flags = await hass.async_add_executor_job(
+                _read_config_flow_flags, hass.config.config_dir, integration_domains
+            ) if integration_domains else {}
+
             for pkg_id, pkg_data in coordinator.packages.items():
                 owner = pkg_data.get("owner", "")
                 repo = pkg_data.get("repo_name", "")
@@ -2831,6 +2880,13 @@ class OnOffStoreStatusView(HomeAssistantView):
                     restart_list.append(key)
                     _LOGGER.info("Status API: adding %s to restart_list", key)
 
+                # Installed, loaded and not configured yet: offer "Set up".
+                can_setup = bool(
+                    pkg_type == "integration" and disk_installed and domain
+                    and not needs_restart and config_flow_flags.get(domain, False)
+                    and not _has_config_entry(hass, domain)
+                )
+
                 status[key] = {
                     "is_installed": disk_installed,
                     "install_source": "yidstore" if disk_installed else None,
@@ -2838,6 +2894,8 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "update_available": pkg_data.get("update_available", False) if disk_installed else False,
                     "installed_version": pkg_data.get("installed_version"),
                     "latest_version": pkg_data.get("latest_version"),
+                    "domain": domain if pkg_type == "integration" else None,
+                    "can_setup": can_setup,
                 }
 
             # "Authenticated" = a Gitea token is configured. We deliberately
