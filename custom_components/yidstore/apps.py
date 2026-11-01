@@ -1125,6 +1125,11 @@ class AppsReposView(HomeAssistantView):
         # (installed add-ons and their info) is read on every poll.
         installed = await _installed_addons(hass)
 
+        # Stars / downloads from the public stats file (cached, no token).
+        from .stats import async_get_stats, stats_for
+
+        stats = await async_get_stats(hass)
+
         rows = []
         info_tasks = []
         for entry in catalog:
@@ -1187,6 +1192,7 @@ class AppsReposView(HomeAssistantView):
                 **(links(sup_slug, ingress) if sup_slug else {}),
                 "webui": info.get("webui") if sup_slug and not ingress else None,
                 "task": _task(app_id),
+                "stats": stats_for(stats, "gitea", owner, repo_name),
             })
         if any(a.get("update_available") for a in out["apps"]):
             _maybe_stage_soon(hass, self.entry_id)

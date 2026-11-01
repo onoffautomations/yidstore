@@ -1,0 +1,60 @@
+name: Update YidStore stats
+
+# Rebuilds stats.json (stars + downloads for every YidStore item) and
+# publishes it on the "stats" branch, which YidStore reads without a token:
+#   https://raw.githubusercontent.com/onoffautomations/yidstore/stats/stats.json
+# The branch holds a single commit with just that file; main and releases
+# are never touched, so HACS / the Marketplace are unaffected.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/scripts/build_stats.py"
+      - ".github/workflows/stats.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yidstore-stats
+  cancel-in-progress: false
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build stats.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: lets the stats include private store repositories
+          # (they are listed by hash only, never by name).
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: python3 .github/scripts/build_stats.py "$RUNNER_TEMP/stats.json"
+
+      - name: Publish to the stats branch (only when the counts changed)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          new="$RUNNER_TEMP/stats.json"
+          old="$RUNNER_TEMP/old.json"
+          if git fetch -q origin stats 2>/dev/null && git show FETCH_HEAD:stats.json > "$old" 2>/dev/null; then
+            if python3 -c "import json,sys; a=json.load(open(sys.argv[1]))['items']; b=json.load(open(sys.argv[2]))['items']; sys.exit(0 if a==b else 1)" "$old" "$new"; then
+              echo "Counts unchanged; nothing to publish"
+              exit 0
+            fi
+          fi
+          dir="$(mktemp -d)"
+          cp "$new" "$dir/stats.json"
+          cd "$dir"
+          git init -q -b stats
+          git add stats.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Update stats"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:stats
+          echo "Published stats.json to the stats branch"

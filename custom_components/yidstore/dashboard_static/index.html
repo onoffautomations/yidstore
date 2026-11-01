@@ -487,6 +487,10 @@
         .app-chip.update { background:rgba(3,169,244,0.14); color:var(--primary); font-weight:600; }
         .app-chip.running { background:rgba(76,175,80,0.14); color:var(--success); }
         .app-actions { display:flex; gap:0.35rem; flex-wrap:wrap; justify-content:flex-end; }
+        /* Stars / downloads (public stats file, no token). */
+        .stat-chips { display:inline-flex; align-items:center; gap:0.55rem; margin-left:0.35rem; vertical-align:middle; }
+        .stat-chip { display:inline-flex; align-items:center; gap:0.15rem; color:var(--dim); font-size:0.75rem; white-space:nowrap; }
+        .stat-chip .mdi { font-size:0.85rem; }
         /* App details: release notes / changelog for the selected version. */
         .app-changelog { margin-top:0.9rem; border-top:1px solid var(--divider); padding-top:0.7rem; text-align:left; }
         .app-changelog:empty { display:none; }
@@ -3510,7 +3514,44 @@
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
 
+        // Stars & downloads for every item, from the public stats file the
+        // YidStore GitHub repo publishes (read by the backend, no token).
+        let storeStats = {};
+        let storeStatsKey = '';
+        let storeStatsTimer = null;
+        async function loadStoreStats() {
+            if (!storeStatsTimer) storeStatsTimer = setInterval(loadStoreStats, 60 * 60 * 1000);
+            try {
+                const res = await fetch('/api/yidstore/stats');
+                if (!res.ok) return;
+                const data = await parseJsonSafe(res);
+                const next = (data && data.items) || {};
+                const key = JSON.stringify(next);
+                if (key === storeStatsKey) return;
+                storeStatsKey = key;
+                storeStats = next;
+                if (hasCompletedInitialLoad && toolbarView !== 'apps' && !isOverlayOpen()) apply();
+            } catch (_) {}
+        }
+        function storeStatsFor(i) {
+            return (i && storeStats[`${i.owner}/${i.repo_name}`.toLowerCase()]) || null;
+        }
+        function formatCount(n) {
+            n = Number(n) || 0;
+            if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '') + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
+            return String(n);
+        }
+        function statsHtml(st) {
+            if (!st) return '';
+            return `<span class="stat-chips">`
+                + `<span class="stat-chip" title="${Number(st.stars) || 0} stars"><i class="mdi mdi-star-outline"></i> ${formatCount(st.stars)}</span>`
+                + `<span class="stat-chip" title="${Number(st.downloads) || 0} downloads"><i class="mdi mdi-download-outline"></i> ${formatCount(st.downloads)}</span>`
+                + `</span>`;
+        }
+
         async function load(forceRefresh = false, showLoader = true) {
+            loadStoreStats();
             // Check cache first (unless forcing refresh)
             if (!forceRefresh) {
                 const cached = getCachedData();
@@ -3861,7 +3902,7 @@
                         <span>${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${typeLabel}</span>
                     </div>
-                    <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}
+                    <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}${statsHtml(storeStatsFor(i))}
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.85rem;"></i>' : ''}
                     </div>
                     <div class="card-desc">${i.description || ''}</div>
@@ -3941,7 +3982,7 @@
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
                         ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${i.installed_version} → ${i.latest_version}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
-                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
+                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}${statsHtml(storeStatsFor(i))}</div>
                 </div>
                 <div class="list-actions">
                     <button class="btn btn-p" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
@@ -4508,7 +4549,7 @@
                             ${logoMarkup}
                             <div class="modal-top-text">
                                 <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
-                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}</div>
+                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}${statsHtml(storeStatsFor(item))}</div>
                             </div>
                         </div>
                         <div class="modal-divider"></div>
@@ -6105,7 +6146,7 @@
                                 <span>${escapeHtml(app.name || formatName(app.repo_name))}</span>
                                 <span class="type-tag tag-blue"><i class="mdi mdi-puzzle"></i> App</span>
                             </div>
-                            <div class="card-author">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` &middot; ${escapeHtml(version)}` : ''}</div>
+                            <div class="card-author">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` &middot; ${escapeHtml(version)}` : ''}${statsHtml(app.stats)}</div>
                             <div class="card-desc">${escapeHtml(app.description || '')}</div>
                             ${error}
                         </div>
@@ -6152,7 +6193,7 @@
                             <span class="type-tag tag-blue"><i class="mdi mdi-puzzle"></i> app</span>
                             ${badge}
                         </div>
-                        <div class="list-meta">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` • ${escapeHtml(version)}` : ''}${app.description ? ` • ${escapeHtml(app.description)}` : ''}</div>
+                        <div class="list-meta">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` • ${escapeHtml(version)}` : ''}${app.description ? ` • ${escapeHtml(app.description)}` : ''}${statsHtml(app.stats)}</div>
                     </div>
                     <div class="list-actions">
                         ${action}
@@ -6388,7 +6429,7 @@
                     ${appIconHtml(app)}
                     <div style="min-width:0;">
                         <div style="color:var(--dim); font-size:0.85rem; line-height:1.4;">${escapeHtml(app.description || '')}</div>
-                        ${versions.length ? `<div style="font-size:0.8rem; margin-top:0.3rem;">${versions.join(' &middot; ')}</div>` : ''}
+                        ${versions.length || app.stats ? `<div style="font-size:0.8rem; margin-top:0.3rem;">${versions.join(' &middot; ')}${statsHtml(app.stats)}</div>` : ''}
                     </div>
                 </div>
                 <div class="card-status" style="border-top:1px solid var(--divider); border-bottom:1px solid var(--divider); padding:0.6rem 0; margin-bottom:0.6rem;">

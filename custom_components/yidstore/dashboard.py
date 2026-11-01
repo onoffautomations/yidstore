@@ -832,6 +832,7 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(LocalBrandsIconView())
     hass.http.register_view(RepoIconView(eid))
     hass.http.register_view(BetaReleasesView(eid))
+    hass.http.register_view(OnOffStoreStatsView(eid))
     hass.http.register_view(LocalBrandsListView())
     hass.http.register_view(LocalBrandsUploadView())
     hass.http.register_view(DocumentationReposView(eid))
@@ -2733,6 +2734,39 @@ class OnOffStoreUninstallView(HomeAssistantView):
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
+
+
+class OnOffStoreStatsView(HomeAssistantView):
+    """Stars and download counts for the store items (read without a token)."""
+    url = "/api/yidstore/stats"
+    name = "api:yidstore:stats"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        from .stats import async_get_stats, stats_for
+
+        hass = request.app["hass"]
+        eid = self.entry_id
+        if DOMAIN in hass.data and eid not in hass.data[DOMAIN]:
+            eids = list(hass.data[DOMAIN].keys())
+            eid = eids[0] if eids else eid
+        stats = await async_get_stats(hass)
+        out: dict[str, dict] = {}
+        if stats:
+            cached = _REPOS_CACHE.get(eid)
+            store_items = cached[1] if cached else (_REPOS_PREV_ITEMS.get(eid) or [])
+            for item in store_items or []:
+                if not isinstance(item, dict):
+                    continue
+                owner = item.get("owner") or ""
+                repo = item.get("repo_name") or ""
+                found = stats_for(stats, item.get("source"), owner, repo)
+                if found:
+                    out[f"{owner}/{repo}".lower()] = found
+        return web.json_response({"items": out})
 
 
 class OnOffStoreStatusView(HomeAssistantView):
