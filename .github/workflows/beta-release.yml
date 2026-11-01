@@ -1,0 +1,42 @@
+name: Publish YidStore beta (pre-release)
+
+# Pushing a beta tag such as v1.8.0b1 publishes a GitHub pre-release with
+# yidstore.zip attached. HACS / the Marketplace only offer it to users who
+# turn on beta versions for YidStore. Stable releases keep the manual flow
+# (publish-assets.yml).
+on:
+  push:
+    tags:
+      - "v*b*"
+
+permissions:
+  contents: write
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read release notes from the tag message
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          git tag -l --format='%(contents)' "${TAG}" > release_notes.md
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Package YidStore
+        run: |
+          cd custom_components/yidstore
+          zip -r __artifact__.zip .
+          mv __artifact__.zip "$GITHUB_WORKSPACE/yidstore.zip"
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: YidStore ${{ env.TAG }} (beta)
+          body_path: release_notes.md
+          prerelease: true
+          files: yidstore.zip
