@@ -144,6 +144,103 @@ async def _maybe_notify_marketplace_migration(hass: HomeAssistant) -> None:
         _LOGGER.debug("Could not create Marketplace migration notice: %s", exc)
 
 
+def _integration_config_flow(hass: HomeAssistant, domain: str | None) -> bool:
+    """Whether a freshly installed integration supports config-flow setup."""
+    if not domain:
+        return False
+    try:
+        data = json.loads(
+            Path(hass.config.path("custom_components", domain, "manifest.json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        return bool(data.get("config_flow"))
+    except Exception:
+        return False
+
+
+def _domain_known_to_loader(hass: HomeAssistant, domain: str | None) -> bool:
+    """Whether Home Assistant's loader already resolved this domain this run.
+
+    If it has, the old code is already imported and a restart is the only way
+    to pick up newly written files.
+    """
+    if not domain:
+        return False
+    try:
+        from homeassistant.loader import async_get_loaded_integration
+
+        async_get_loaded_integration(hass, domain)
+        return True
+    except Exception:
+        return False
+
+
+async def _async_refresh_custom_integrations(hass: HomeAssistant, domain: str | None) -> set[str]:
+    """Rescan custom_components so a freshly installed integration is found
+    without a restart (mirrors Home Assistant's Marketplace). Returns the set
+    of custom-component domains the loader now sees, or an empty set when this
+    Home Assistant version can't refresh the cache."""
+    try:
+        from homeassistant.loader import async_get_custom_components
+    except Exception:
+        return set()
+    import sys
+
+    try:
+        try:
+            from homeassistant.loader import (
+                PACKAGE_CUSTOM_COMPONENTS,
+                async_mount_config_dir,
+            )
+
+            # The loader mounts custom_components at startup; the very first
+            # install creates that folder afterwards.
+            if PACKAGE_CUSTOM_COMPONENTS not in sys.modules:
+                async_mount_config_dir(hass)
+        except Exception:
+            pass
+        try:
+            from homeassistant.loader import async_clear_custom_components_cache
+
+            async_clear_custom_components_cache(hass)
+        except Exception:
+            # Older Home Assistant: drop the cached mapping directly.
+            try:
+                hass.data.pop("custom_components", None)
+            except Exception:
+                pass
+        if domain:
+            try:
+                from homeassistant.helpers.translation import async_invalidate_translations
+
+                async_invalidate_translations(hass, {domain})
+            except Exception:
+                pass
+        found = await async_get_custom_components(hass)
+        return set(found or [])
+    except Exception as exc:
+        _LOGGER.debug("Could not refresh custom integrations: %s", exc)
+        return set()
+
+
+async def _integration_pending_restart(hass: HomeAssistant, domain: str | None) -> bool:
+    """Decide whether an installed/updated integration needs a restart.
+
+    Follows Home Assistant's Marketplace: a brand-new config-flow integration
+    is loaded on the fly; code already imported this run (an update) or a
+    YAML-only integration needs a restart.
+    """
+    if not domain:
+        return True
+    was_loaded = _domain_known_to_loader(hass, domain)
+    found = await _async_refresh_custom_integrations(hass, domain)
+    if found and _integration_config_flow(hass, domain):
+        return was_loaded or (domain not in found)
+    # Loader refresh unsupported, or a YAML-only integration: restart needed.
+    return True
+
+
 def _get_datetime_timestamp() -> str:
     """
     Get current date and time as a timestamp string.
@@ -1019,28 +1116,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if domains:
                     installed_domain = domains[0]
 
-            # Create repair issue for integration installs (requires restart)
+            # Like Home Assistant's Marketplace: a brand-new config-flow
+            # integration is loaded without a restart. A restart is only
+            # needed when the integration was already running this session
+            # (an update/reinstall, where the old code stays loaded) or when
+            # it is YAML-only.
+            pending_restart = True
             if package_type == TYPE_INTEGRATION:
-                _LOGGER.info("Creating repair issue for integration restart requirement")
+                domain_for_restart = installed_domain or repo.lower().replace("-", "_")
                 try:
-                    from homeassistant.helpers import issue_registry as ir
-                    # Create a fixable repair issue with restart button.
-                    # issue_domain makes HA show the installed integration's
-                    # own brand icon on the repair instead of YidStore's.
-                    ir.async_create_issue(
-                        hass,
-                        domain=DOMAIN,
-                        issue_id=f"onoff_restart_{repo}_{_get_datetime_timestamp()}",
-                        is_fixable=True,
-                        severity=ir.IssueSeverity.WARNING,
-                        translation_key="integration_restart_required",
-                        translation_placeholders={"integration_name": repo},
-                        data={"integration_name": repo},
-                        issue_domain=installed_domain or repo.lower().replace("-", "_"),
-                    )
-                    _LOGGER.info("✓ Created fixable repair issue for restart")
+                    pending_restart = await _integration_pending_restart(hass, domain_for_restart)
                 except Exception as e:
-                    _LOGGER.debug("Could not create repair issue (non-critical): %s", e)
+                    _LOGGER.debug("Restart-need check failed, assuming restart needed: %s", e)
+                    pending_restart = True
+
+                if pending_restart:
+                    _LOGGER.info("Creating repair issue for integration restart requirement")
+                    try:
+                        from homeassistant.helpers import issue_registry as ir
+                        # Create a fixable repair issue with restart button.
+                        # issue_domain makes HA show the installed integration's
+                        # own brand icon on the repair instead of YidStore's.
+                        ir.async_create_issue(
+                            hass,
+                            domain=DOMAIN,
+                            issue_id=f"onoff_restart_{repo}_{_get_datetime_timestamp()}",
+                            is_fixable=True,
+                            severity=ir.IssueSeverity.WARNING,
+                            translation_key="integration_restart_required",
+                            translation_placeholders={"integration_name": repo},
+                            data={"integration_name": repo},
+                            issue_domain=installed_domain or repo.lower().replace("-", "_"),
+                        )
+                        _LOGGER.info("✓ Created fixable repair issue for restart")
+                    except Exception as e:
+                        _LOGGER.debug("Could not create repair issue (non-critical): %s", e)
+                else:
+                    _LOGGER.info("✓ %s loaded without needing a restart", repo)
 
             if package_type == TYPE_LOVELACE:
                 base_resource_url = result.get("dest_url")
@@ -1094,6 +1206,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 asset_name=asset_name,
                 source=source or "gitea",
                 domain=installed_domain,
+                # Only integrations can need a restart, and only when the new
+                # code could not be loaded on the fly (see above).
+                requires_restart=(pending_restart if package_type == TYPE_INTEGRATION else False),
             )
 
             _LOGGER.info("✓ Package registered with ID: %s", package_id)

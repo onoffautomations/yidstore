@@ -148,6 +148,12 @@ def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict |
     if not isinstance(package_data, dict):
         return False
 
+    # Authoritative flag set at install time (fresh config-flow integrations
+    # load without a restart, like Home Assistant's Marketplace).
+    restart_flag = package_data.get("restart_required")
+    if restart_flag is not None:
+        return bool(restart_flag)
+
     last_update_str = package_data.get("last_update")
     if not last_update_str:
         return False
@@ -1898,11 +1904,6 @@ class OnOffStoreInstallView(HomeAssistantView):
 
             await hass.services.async_call(DOMAIN, SERVICE_INSTALL, svc_data, blocking=True)
 
-            # Track that this repo requires restart
-            if "yidstore_requires_restart" not in hass.data:
-                hass.data["yidstore_requires_restart"] = set()
-            hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
-
             # The service resolves the *effective* download mode. For GitHub
             # integrations this may change the frontend's requested zipball
             # mode to a HACS release asset. Read the tracked package back so
@@ -1911,6 +1912,19 @@ class OnOffStoreInstallView(HomeAssistantView):
             tracked_pkg = coordinator.get_package_by_repo(o, r) or {}
             effective_mode = tracked_pkg.get("mode")
             effective_asset_name = tracked_pkg.get("asset_name")
+
+            # Only integrations can need a restart, and only when the new code
+            # could not be loaded on the fly (a fresh config-flow integration
+            # loads without a restart, like Home Assistant's Marketplace).
+            restart_required = t == "integration" and bool(
+                tracked_pkg.get("restart_required", True)
+            )
+            if "yidstore_requires_restart" not in hass.data:
+                hass.data["yidstore_requires_restart"] = set()
+            if restart_required:
+                hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
+            else:
+                hass.data["yidstore_requires_restart"].discard(f"{o}/{r}".lower())
 
             _patch_repos_cache(
                 o, r,
@@ -1925,7 +1939,7 @@ class OnOffStoreInstallView(HomeAssistantView):
             _invalidate_local_state_cache()
             return web.json_response({
                 "success": True,
-                "requires_restart": True,
+                "requires_restart": restart_required,
                 "mode": effective_mode,
                 "asset_name": effective_asset_name,
                 "installed_version": tracked_pkg.get("installed_version"),

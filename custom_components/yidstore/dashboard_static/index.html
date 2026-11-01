@@ -3125,6 +3125,12 @@
                 item.is_installed = !!status.is_installed;
                 item.install_source = status.install_source || null;
                 item.requires_restart = !!status.requires_restart;
+                // Backend is authoritative: if it says no restart is needed
+                // (e.g. a fresh config-flow integration loaded on the fly),
+                // drop any optimistic "restart pending" marker.
+                if (!status.requires_restart) {
+                    optimisticRestartUntil.delete(normalizeRestartKey(key));
+                }
                 if (status.update_available !== undefined) {
                     item.update_available = !!status.update_available;
                 }
@@ -4608,18 +4614,7 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Integrations need restart; cards/blueprints may need a UI reload.
-                    if (t === 'integration') {
-                        addToRestartSet(o, r);
-                        await syncBackendAfterAction();
-                    } else if (t === 'audio') {
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
-                    } else {
-                        // Cards and blueprints - show reload popup
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
-                    }
+                    await afterStoreInstall(o, r, t, data);
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
         }
@@ -4905,20 +4900,38 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Integrations need restart; cards/blueprints may need a UI reload.
-                    if (t === 'integration') {
-                        addToRestartSet(o, r);
-                        await syncBackendAfterAction();
-                    } else if (t === 'audio') {
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
-                    } else {
-                        // Cards and blueprints - show reload popup
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
-                    }
+                    await afterStoreInstall(o, r, t, data);
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
+        }
+
+        // Shared post-install handling for the Store tab. Integrations now
+        // follow the Marketplace: a fresh config-flow integration loads without
+        // a restart; an update of a running one needs a restart, and the
+        // "Restart required" repair (Settings → System → Repairs) does it.
+        async function afterStoreInstall(o, r, t, data) {
+            if (t === 'integration') {
+                const needsRestartNow = !!(data && data.requires_restart);
+                if (needsRestartNow) {
+                    addToRestartSet(o, r);
+                    await syncBackendAfterAction();
+                    pop('Restart required',
+                        `${formatName(r)} was updated. Restart Home Assistant to finish — open the "Restart required" repair under Settings → System → Repairs.`,
+                        'mdi-restart', false);
+                } else {
+                    await syncBackendAfterAction();
+                    pop('Installed',
+                        `${formatName(r)} is installed and ready — no restart needed. Add it under Settings → Devices &amp; Services.`,
+                        'mdi-check-circle', false);
+                }
+            } else if (t === 'audio') {
+                await syncBackendAfterAction();
+                pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
+            } else {
+                // Cards and blueprints - show reload popup
+                await syncBackendAfterAction();
+                pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
+            }
         }
 
         function pop(t, m, i, isReload, customActions) {
