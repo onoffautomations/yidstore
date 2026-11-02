@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -41,6 +42,9 @@ from ._utils import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Set up from the UI only (no YAML).
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 SERVICE_SCHEMA_GENERIC = vol.Schema(
     {
@@ -130,12 +134,10 @@ async def _maybe_notify_marketplace_migration(hass: HomeAssistant) -> None:
                 "You're on Home Assistant {ver}. After this update, YidStore "
                 "sometimes needs to be re-added as a **custom repository** in "
                 "the Marketplace (HACS).\n\n"
-                "**If YidStore is missing, re-add it:**\n"
-                "1. Open **Marketplace** (HACS) from the sidebar.\n"
-                "2. Click the **⋮** menu in the top-right → **Custom repositories**.\n"
-                "3. Paste the YidStore repository URL and pick the **Integration** category.\n"
-                "4. Click **Add**, then search for and install **YidStore**.\n"
-                "5. Restart Home Assistant.\n\n"
+                "**If YidStore is missing, add it back:**\n"
+                "1. Open **Marketplace** and tap the **add link** button next to the search bar.\n"
+                "2. Paste `https://github.com/onoffautomations/yidstore` and tap **Add**.\n"
+                "3. Install **YidStore**, then restart Home Assistant.\n\n"
                 "Everything already working? You can safely dismiss this notice."
             ).format(ver=ha_version),
             notification_id="yidstore_marketplace_migration",

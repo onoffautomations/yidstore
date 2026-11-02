@@ -73,7 +73,6 @@
   "issues": {
     "integration_restart_required": {
       "title": "Restart required",
-      "description": "Restart of Home Assistant is required to finish download/update of **{integration_name}**, click submit to restart now.",
       "fix_flow": {
         "step": {
           "confirm": {

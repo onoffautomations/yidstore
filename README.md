@@ -11,26 +11,24 @@ YidStore is a Home Assistant integration that adds a full in-app “store” for
 
 ## Installation
 
-The link below works with both HACS and the Marketplace built into Home Assistant 2026.11+. Existing HACS addresses keep working there.
-
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=onoffautomations&repository=yidstore&category=Integration)
 
-### Home Assistant 2026.11 and newer (built-in Marketplace)
-1) Go to **Settings → Marketplace**.
-2) Open the menu (⋮) and choose **Custom repositories**. Custom repositories need a connected GitHub account.
-3) Add `https://github.com/onoffautomations/yidstore` with type **Integration**.
-4) Install **YidStore** and restart Home Assistant.
+The button works with both the Marketplace built into Home Assistant 2026.11+ and HACS.
 
-If you already installed YidStore through HACS, nothing changes. Home Assistant moves it into the Marketplace on its own.
+### Home Assistant 2026.11 and newer (Marketplace)
+1) Open **Marketplace** and tap the **add link** button next to the search bar.
+2) Paste `https://github.com/onoffautomations/yidstore` and tap **Add**.
+3) Install **YidStore**, then restart Home Assistant.
+
+If YidStore is missing from the Marketplace after updating to Home Assistant 2026.11.1, add it back with the same three steps.
 
 ### Older versions (HACS)
-1) In Home Assistant, open HACS.
-2) Click the three dots in the top-right and choose **Custom repositories**.
-3) Add this repository URL:
-   - `https://github.com/onoffautomations/yidstore`
-4) Select category **Integration** and click **Add**.
-5) Find **YidStore** in HACS and install it.
-6) Restart Home Assistant.
+1) Open **HACS**, click the three dots in the top-right and choose **Custom repositories**.
+2) Add `https://github.com/onoffautomations/yidstore` with category **Integration**.
+3) Install **YidStore**, then restart Home Assistant.
+
+### Beta versions
+To try a beta, open YidStore in the Marketplace (or HACS) and turn on beta versions for it.
 
 ## Setup
 1) Go to **Settings → Devices & Services → Add Integration**.
@@ -39,7 +37,9 @@ If you already installed YidStore through HACS, nothing changes. Home Assistant 
 
 ## Using the Store
 - Open **YidStore** in the left sidebar.
-- Install packages directly from the list.
+- Each item shows its stars and downloads.
+- **Install** works like the Marketplace: a new integration loads without a restart and its setup opens right in YidStore. When an update needs a restart, **Restart** opens Home Assistant's own restart dialog.
+- An installed integration that isn't set up yet has a **Set up** button.
 
 ## Apps
 The **Apps** tab installs add-ons on Home Assistant OS or Supervised installs.

@@ -3078,13 +3078,11 @@
                 <div style="text-align:left; line-height:1.55;">
                     <p style="margin:0 0 0.6rem;">After updating to <strong>Home Assistant ${escapeHtml(haVersion || '2026.11.1')}</strong>,
                     YidStore sometimes needs to be re-added as a <strong>custom repository</strong> in the Marketplace (HACS).</p>
-                    <p style="margin:0 0 0.4rem; font-weight:600;"><i class="mdi mdi-store-plus"></i> If YidStore is missing, re-add it:</p>
+                    <p style="margin:0 0 0.4rem; font-weight:600;"><i class="mdi mdi-store-plus"></i> If YidStore is missing, add it back:</p>
                     <ol style="margin:0 0 0.6rem 1.1rem; padding:0;">
-                        <li>Open <strong>Marketplace</strong> (HACS) from the sidebar.</li>
-                        <li>Click the <strong><i class="mdi mdi-dots-vertical"></i></strong> menu (top-right) → <strong>Custom repositories</strong>.</li>
-                        <li>Paste the YidStore repository URL and choose the <strong>Integration</strong> category.</li>
-                        <li>Click <strong>Add</strong>, then search for and install <strong>YidStore</strong>.</li>
-                        <li>Restart Home Assistant.</li>
+                        <li>Open <strong>Marketplace</strong> and tap the <strong><i class="mdi mdi-link-plus"></i> add link</strong> button next to the search bar.</li>
+                        <li>Paste <code>https://github.com/onoffautomations/yidstore</code> and tap <strong>Add</strong>.</li>
+                        <li>Install <strong>YidStore</strong>, then restart Home Assistant.</li>
                     </ol>
                     <p style="margin:0; color:var(--dim); font-size:0.85rem;">Everything already working? You can safely dismiss this notice.</p>
                 </div>`;
