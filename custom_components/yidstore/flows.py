@@ -100,10 +100,22 @@ async def _integration_name(hass, domain: str) -> str:
         return domain
 
 
-def _flow_handler(hass, flow_id: str) -> str | None:
-    for flow in hass.config_entries.flow.async_progress():
-        if flow.get("flow_id") == flow_id:
-            return flow.get("handler")
+def _manager(hass, kind: str):
+    """Setup wizard ("config") or an integration's settings ("options")."""
+    return hass.config_entries.options if kind == "options" else hass.config_entries.flow
+
+
+def _flow_domain(hass, kind: str, flow_id: str) -> str | None:
+    """The integration a running flow belongs to."""
+    for flow in _manager(hass, kind).async_progress():
+        if flow.get("flow_id") != flow_id:
+            continue
+        handler = flow.get("handler")
+        if kind != "options":
+            return handler
+        # Options flows are keyed by config entry id.
+        entry = hass.config_entries.async_get_entry(handler)
+        return entry.domain if entry else None
     return None
 
 
@@ -119,19 +131,31 @@ class FlowStartView(HomeAssistantView):
             return web.json_response({"error": "unauthorized"}, status=403)
         body = await request.json()
         domain = str(body.get("domain") or "").strip()
+        kind = "options" if body.get("kind") == "options" else "config"
         if not domain or domain not in _tracked_integration_domains(hass):
             return web.json_response({"error": "Unknown integration"}, status=400)
         language = str(body.get("language") or hass.config.language or "en")
         user = request.get("hass_user")
         try:
-            result = await hass.config_entries.flow.async_init(
-                domain,
-                context={"source": "user", "show_advanced_options": False, "user_id": user.id if user else None},
-            )
+            if kind == "options":
+                entry = next(
+                    (e for e in hass.config_entries.async_entries(domain) if e.supports_options),
+                    None,
+                )
+                if entry is None:
+                    return web.json_response({"error": "This integration has no settings"}, status=400)
+                result = await hass.config_entries.options.async_init(entry.entry_id)
+            else:
+                result = await hass.config_entries.flow.async_init(
+                    domain,
+                    context={"source": "user", "show_advanced_options": False, "user_id": user.id if user else None},
+                )
         except Exception as exc:
             _LOGGER.warning("Could not start setup for %s: %s", domain, exc)
             return web.json_response({"error": str(exc) or "Could not start the setup"}, status=400)
         out = _result_json(result)
+        out["kind"] = kind
+        out["domain"] = domain
         out["integration_name"] = await _integration_name(hass, domain)
         out["translations"] = await _translations(hass, language, domain)
         return web.json_response(out)
@@ -143,13 +167,17 @@ class FlowStepView(HomeAssistantView):
     name = "api:yidstore:flow:step"
     requires_auth = True
 
-    def _allowed(self, hass, flow_id: str) -> bool:
-        handler = _flow_handler(hass, flow_id)
-        return bool(handler and handler in _tracked_integration_domains(hass))
+    @staticmethod
+    def _kind(request) -> str:
+        return "options" if request.query.get("kind") == "options" else "config"
 
-    async def _configure(self, hass, flow_id: str, user_input) -> web.Response:
+    def _allowed(self, hass, kind: str, flow_id: str) -> bool:
+        domain = _flow_domain(hass, kind, flow_id)
+        return bool(domain and domain in _tracked_integration_domains(hass))
+
+    async def _configure(self, hass, kind: str, flow_id: str, user_input) -> web.Response:
         try:
-            result = await hass.config_entries.flow.async_configure(flow_id, user_input)
+            result = await _manager(hass, kind).async_configure(flow_id, user_input)
         except Exception as exc:
             # Schema validation and other errors come back as a message.
             return web.json_response({"error": str(exc) or "Invalid input"}, status=400)
@@ -159,43 +187,78 @@ class FlowStepView(HomeAssistantView):
         hass = request.app["hass"]
         if not _is_admin(request):
             return web.json_response({"error": "unauthorized"}, status=403)
-        if not self._allowed(hass, flow_id):
+        kind = self._kind(request)
+        if not self._allowed(hass, kind, flow_id):
             return web.json_response({"error": "This setup has ended"}, status=404)
         body = await request.json()
         user_input = body if isinstance(body, dict) else {}
-        return await self._configure(hass, flow_id, user_input)
+        return await self._configure(hass, kind, flow_id, user_input)
 
     async def get(self, request: web.Request, flow_id: str) -> web.Response:
         hass = request.app["hass"]
         if not _is_admin(request):
             return web.json_response({"error": "unauthorized"}, status=403)
-        if not self._allowed(hass, flow_id):
+        kind = self._kind(request)
+        if not self._allowed(hass, kind, flow_id):
             return web.json_response({"error": "This setup has ended"}, status=404)
-        return await self._configure(hass, flow_id, None)
+        return await self._configure(hass, kind, flow_id, None)
 
     async def delete(self, request: web.Request, flow_id: str) -> web.Response:
         hass = request.app["hass"]
         if not _is_admin(request):
             return web.json_response({"error": "unauthorized"}, status=403)
-        if self._allowed(hass, flow_id):
+        kind = self._kind(request)
+        if self._allowed(hass, kind, flow_id):
             try:
-                hass.config_entries.flow.async_abort(flow_id)
+                _manager(hass, kind).async_abort(flow_id)
             except Exception:
                 pass
         return web.json_response({"success": True})
 
 
 class RestartView(HomeAssistantView):
-    """Restart Home Assistant (after an update that needs it)."""
+    """Restart options, like Home Assistant's own restart dialog:
+    quick reload, restart, and (with a Supervisor) reboot / shut down."""
     url = "/api/yidstore/restart"
     name = "api:yidstore:restart"
     requires_auth = True
+
+    _ACTIONS = {
+        "reload": ("homeassistant", "reload_all"),
+        "restart": ("homeassistant", "restart"),
+        "reboot": ("hassio", "host_reboot"),
+        "shutdown": ("hassio", "host_shutdown"),
+    }
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        if not _is_admin(request):
+            return web.json_response({"error": "unauthorized"}, status=403)
+        return web.json_response({
+            "supervisor": hass.services.has_service("hassio", "host_reboot"),
+        })
 
     async def post(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         if not _is_admin(request):
             return web.json_response({"error": "unauthorized"}, status=403)
-        hass.async_create_task(hass.services.async_call("homeassistant", "restart"))
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        action = str((body or {}).get("action") or "restart")
+        if action not in self._ACTIONS:
+            return web.json_response({"error": "Unknown action"}, status=400)
+        domain, service = self._ACTIONS[action]
+        if not hass.services.has_service(domain, service):
+            return web.json_response({"error": "Not available on this system"}, status=400)
+        if action == "reload":
+            try:
+                await hass.services.async_call(domain, service, blocking=True)
+            except Exception as exc:
+                return web.json_response({"error": str(exc) or "Failed to reload configuration"}, status=500)
+        else:
+            hass.async_create_task(hass.services.async_call(domain, service))
         return web.json_response({"success": True})
 
 

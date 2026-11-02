@@ -1,14 +1,6 @@
-## Ready for the Marketplace
+**Beta** — fixes for 1.8.0. Only offered to users who turn on beta versions for YidStore.
 
-YidStore now works like Home Assistant's built-in Marketplace.
-
-- **Install and set up in one go.** New integrations load without a restart, and their setup opens right inside YidStore.
-- **Native restart.** When an update needs a restart, **Restart** opens Home Assistant's own restart dialog.
-- **Stars and downloads** on every integration, card and app.
-- **Apps** load faster, show release notes, and can be switched back to older versions.
-
-### After updating to Home Assistant 2026.11.1
-YidStore may be missing from the Marketplace. To add it back:
-1. Open **Marketplace** and tap the **add link** button next to the search bar.
-2. Paste `https://github.com/onoffautomations/yidstore` and tap **Add**.
-3. Install **YidStore**, then restart Home Assistant.
+- **Restart required no longer sticks.** After you restart, the message clears and the updated integration runs.
+- **Updating doesn't ask you to set up.** The setup wizard only opens after a fresh install, like the Marketplace.
+- **Restart stays on the page.** Restart opens the restart dialog right in YidStore (Quick reload, Restart, and Reboot / Shut down on Home Assistant OS) instead of jumping to Settings.
+- **Configure in YidStore.** Set-up integrations get a **Configure** button that opens their settings in the same dialog.
