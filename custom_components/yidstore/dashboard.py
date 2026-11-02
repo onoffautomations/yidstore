@@ -165,6 +165,16 @@ def _has_config_entry(hass: HomeAssistant, domain: str | None) -> bool:
         return False
 
 
+def _supports_options(hass: HomeAssistant, domain: str | None) -> bool:
+    """Whether a set-up integration has settings (an options flow)."""
+    try:
+        return bool(domain) and any(
+            e.supports_options for e in hass.config_entries.async_entries(domain)
+        )
+    except Exception:
+        return False
+
+
 def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict | None) -> bool:
     """Return restart-needed flag from tracked package data."""
     if not isinstance(package_data, dict):
@@ -172,9 +182,11 @@ def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict |
 
     # Authoritative flag set at install time (fresh config-flow integrations
     # load without a restart, like Home Assistant's Marketplace).
-    restart_flag = package_data.get("restart_required")
-    if restart_flag is not None:
-        return bool(restart_flag)
+    # "No restart needed" (loaded on the fly) is final. "Restart needed" only
+    # holds until Home Assistant restarts, which the timestamp check below
+    # covers, so it clears itself after the restart.
+    if package_data.get("restart_required") is False:
+        return False
 
     last_update_str = package_data.get("last_update")
     if not last_update_str:
@@ -2902,6 +2914,9 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "can_setup": can_setup,
                     "configured": bool(
                         pkg_type == "integration" and disk_installed and _has_config_entry(hass, domain)
+                    ),
+                    "can_configure": bool(
+                        pkg_type == "integration" and disk_installed and _supports_options(hass, domain)
                     ),
                 }
 

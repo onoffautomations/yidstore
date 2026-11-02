@@ -2917,6 +2917,17 @@
         }
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
+        // "v1.99.67" newer than "v1.93.0"? Numeric parts, left to right.
+        function versionNewer(a, b) {
+            const pa = String(a || '').match(/\d+/g) || [];
+            const pb = String(b || '').match(/\d+/g) || [];
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const x = Number(pa[i] || 0), y = Number(pb[i] || 0);
+                if (x !== y) return x > y;
+            }
+            return false;
+        }
+
         function formatReleaseDate(dateString) {
             if (!dateString) return '';
             try {
@@ -3241,6 +3252,7 @@
                 item.domain = status.domain || item.domain || null;
                 item.can_setup = !!status.can_setup;
                 item.configured = !!status.configured;
+                item.can_configure = !!status.can_configure;
                 // Backend is authoritative: if it says no restart is needed
                 // (e.g. a fresh config-flow integration loaded on the fly),
                 // drop any optimistic "restart pending" marker.
@@ -4616,6 +4628,19 @@
                 console.log('Failed to fetch releases:', e);
             }
 
+            // The update check runs every couple of hours; the release list is
+            // live. If it already has a newer version than the one installed,
+            // offer the update now and let the backend catch up.
+            if (item.is_installed && Array.isArray(releases) && releases.length) {
+                const newest = releases[0] && releases[0].tag_name;
+                if (newest && item.installed_version && versionNewer(newest, item.installed_version) && !item.update_available) {
+                    item.update_available = true;
+                    item.latest_version = newest;
+                    fetch('/api/yidstore/refresh', { method: 'POST' }).catch(() => {});
+                    if (!isOverlayOpen()) apply();
+                }
+            }
+
             // Build version selector if releases are available
             let versionSelector = '';
             if (releases && releases.length > 0) {
@@ -5079,8 +5104,8 @@
             return `<button class="${cls}" onclick="setupStoreItem('${i.owner}','${i.repo_name}',event)" title="Set up this integration"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
         }
 
-        async function afterStoreInstall(o, r, t, data) {
-            if (t === 'integration' && data && data.can_setup && data.domain) {
+        async function afterStoreInstall(o, r, t, data, wasInstalled = false) {
+            if (t === 'integration' && !wasInstalled && data && data.can_setup && data.domain) {
                 // Fresh integration, loaded without a restart: go straight to
                 // its setup, like the Marketplace does.
                 await syncBackendAfterAction();
@@ -5113,54 +5138,91 @@
         // Marketplace-style install + setup, and Home Assistant's own restart.
         // =====================================================================
 
-        // ---- Restart: open Home Assistant's native restart dialog ----------
-        // Runs inside the Home Assistant page (not this iframe) so it keeps
-        // working while Home Assistant switches pages. Order:
-        //  1. the restart dialog is already loaded: show it right here;
-        //  2. Settings -> System's code is loaded: use its restart action here;
-        //  3. otherwise open Settings -> System and open the dialog there.
-        function openNativeRestart() {
-            try {
-                const doc = window.parent.document;
-                if (!doc || window.parent === window) throw new Error('no parent');
-                const script = doc.createElement('script');
-                script.textContent = `(() => {
-                    const ha = document.querySelector('home-assistant');
-                    if (!ha) return;
-                    const open = () => {
-                        if (customElements.get('dialog-restart')) {
-                            ha.dispatchEvent(new CustomEvent('show-dialog', { bubbles: true, composed: true,
-                                detail: { dialogTag: 'dialog-restart', dialogImport: () => Promise.resolve(), dialogParams: {} } }));
-                            return true;
-                        }
-                        const Nav = customElements.get('ha-config-system-navigation');
-                        if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
-                            Nav.prototype._showRestartDialog.call(ha);
-                            return true;
-                        }
-                        return false;
-                    };
-                    if (open()) return;
-                    history.pushState(null, '', '/config/system');
-                    window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
-                    let tries = 0;
-                    const timer = setInterval(() => {
-                        if (open() || ++tries > 40) clearInterval(timer);
-                    }, 250);
-                })();`;
-                doc.head.appendChild(script);
-                script.remove();
-                return true;
-            } catch (_) {
-                // Not inside Home Assistant (e.g. opened directly): restart via YidStore.
-                restartViaYidStore();
-                return false;
+        // ---- Restart: Home Assistant's own (native) restart dialog -----------
+        // Home Assistant only loads its restart dialog with Settings -> System.
+        // YidStore loads that code the same way Home Assistant's router does
+        // (Settings page -> System page), in the background, then opens the
+        // native dialog over the page you are on. Nothing is navigated.
+        function haDeepFind(root, selector) {
+            const stack = [root];
+            let guard = 0;
+            while (stack.length && guard++ < 5000) {
+                const r = stack.pop();
+                if (!r || !r.querySelector) continue;
+                const hit = r.querySelector(selector);
+                if (hit) return hit;
+                for (const el of r.querySelectorAll('*')) if (el.shadowRoot) stack.push(el.shadowRoot);
             }
+            return null;
+        }
+
+        async function openNativeRestart() {
+            let pw, ha, ce;
+            try {
+                pw = window.parent;
+                if (!pw || pw === window) throw new Error('not inside Home Assistant');
+                ha = pw.document.querySelector('home-assistant');
+                ce = pw.customElements;
+                if (!ha || !ce) throw new Error('Home Assistant page not found');
+            } catch (_) {
+                restartViaYidStore();
+                return;
+            }
+            const show = () => {
+                if (ce.get('dialog-restart')) {
+                    ha.dispatchEvent(new pw.CustomEvent('show-dialog', { bubbles: true, composed: true,
+                        detail: { dialogTag: 'dialog-restart', dialogImport: () => pw.Promise.resolve(), dialogParams: {} } }));
+                    return true;
+                }
+                const Nav = ce.get('ha-config-system-navigation');
+                if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
+                    Nav.prototype._showRestartDialog.call(ha);
+                    return true;
+                }
+                return false;
+            };
+            try {
+                if (show()) return;
+                // 1) The Settings panel, through Home Assistant's own panel router.
+                if (!ce.get('ha-panel-config')) {
+                    const resolver = haDeepFind(ha.shadowRoot || ha, 'partial-panel-resolver');
+                    const route = resolver && resolver.routerOptions && resolver.routerOptions.routes
+                        && resolver.routerOptions.routes.config;
+                    if (route && typeof route.load === 'function') await route.load();
+                }
+                // 2) Its System page, which brings the restart dialog with it.
+                if (ce.get('ha-panel-config') && !ce.get('ha-config-system-navigation')) {
+                    const cfg = pw.document.createElement('ha-panel-config');
+                    const route = cfg.routerOptions && cfg.routerOptions.routes && cfg.routerOptions.routes.system;
+                    if (route && typeof route.load === 'function') await route.load();
+                }
+                if (show()) return;
+            } catch (e) {
+                console.warn('YidStore: could not load the restart dialog in place', e);
+            }
+            // Last resort: open Settings -> System and its restart dialog there.
+            const script = pw.document.createElement('script');
+            script.textContent = `(() => {
+                const ha = document.querySelector('home-assistant');
+                history.pushState(null, '', '/config/system');
+                window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+                let tries = 0;
+                const t = setInterval(() => {
+                    const Nav = customElements.get('ha-config-system-navigation');
+                    if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
+                        clearInterval(t); Nav.prototype._showRestartDialog.call(ha);
+                    } else if (++tries > 40) clearInterval(t);
+                }, 250);
+            })();`;
+            pw.document.head.appendChild(script);
+            script.remove();
         }
 
         async function restartViaYidStore() {
             if (!confirm('Restart Home Assistant now?')) return;
-            try { await fetch('/api/yidstore/restart', { method: 'POST' }); } catch (_) {}
+            try {
+                await fetch('/api/yidstore/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'restart' }) });
+            } catch (_) {}
         }
 
         // "Restart required" with a Restart button that opens the native dialog.
@@ -5241,7 +5303,8 @@
             mpEl('mpO').classList.remove('open');
             updateScrollLock();
             if (flow && flow.flow_id && !finished) {
-                try { await fetch(`/api/yidstore/flow/${encodeURIComponent(flow.flow_id)}`, { method: 'DELETE' }); } catch (_) {}
+                const kindQ = mp.kind === 'options' ? '?kind=options' : '';
+                try { await fetch(`/api/yidstore/flow/${encodeURIComponent(flow.flow_id)}${kindQ}`, { method: 'DELETE' }); } catch (_) {}
             }
             const done = mp.onDone;
             mp.onDone = null;
@@ -5277,6 +5340,7 @@
         async function mpDoInstall(o, r, t, version) {
             const item = findItemByRepo(o, r);
             const name = mpItemName(item, r);
+            const wasInstalled = !!(item && item.is_installed);
             const warnHtml = mpEl('mpWarn').style.display === 'none' ? '' : mpEl('mpWarn').innerHTML;
             const bodyHtml = mpEl('mpBody').innerHTML;
             mp.busy = true;
@@ -5324,13 +5388,14 @@
             // Closed while installing: fall back to the plain follow-up.
             if (!mp.open || mp.installClosed) {
                 try { closeModal(); } catch (_) {}
-                await afterStoreInstall(o, r, t, data);
+                await afterStoreInstall(o, r, t, data, wasInstalled);
                 return;
             }
             await syncBackendAfterAction();
             refreshDetailCards(o, r);
 
-            if (t === 'integration' && data.can_setup && data.domain) {
+            // Like the Marketplace: only a fresh install goes on to the setup.
+            if (t === 'integration' && !wasInstalled && data.can_setup && data.domain) {
                 await mpStartFlow(data.domain, name);
                 return;
             }
@@ -5348,10 +5413,14 @@
                 return;
             }
             const reload = t === 'lovelace' || t === 'blueprints';
+            const verNow = (data && data.installed_version) || version || '';
+            const doneText = wasInstalled
+                ? `${escapeHtml(name)} is updated${verNow ? ` to ${escapeHtml(verNow)}` : ''}`
+                : `${escapeHtml(name)} is installed`;
             mpRender({
                 title: name,
                 body: mpCenter('<i class="mdi mdi-check-circle" style="color:var(--success);"></i>',
-                    `<strong style="color:var(--text);">${escapeHtml(name)} is installed</strong>${reload ? '<br>Reload the page to start using it.' : ''}`),
+                    `<strong style="color:var(--text);">${doneText}</strong>${reload ? '<br>Reload the page to start using it.' : ''}`),
                 buttons: reload
                     ? [{ t: 'Close', c: 'btn-o', f: () => mpClose() }, { t: 'Reload', c: 'btn-p', f: () => window.top.location.reload() }]
                     : [{ t: 'Close', c: 'btn-p', f: () => mpClose() }],
@@ -5375,21 +5444,32 @@
             mpStartFlow(domain, name);
         }
 
-        async function mpStartFlow(domain, name) {
+        // "Configure": the integration's settings, in the same dialog.
+        function mpOpenConfigure(domain, name) {
+            closePop();
+            mp.flow = null; mp.finished = false; mp.busy = false; mp.onDone = null;
+            mpShow();
+            mpStartFlow(domain, name, 'options');
+        }
+
+        async function mpStartFlow(domain, name, kind = 'config') {
+            mp.kind = kind;
             mp.domain = domain;
             mp.name = name || domain;
             mp.finished = false;
             mp.onDone = async () => { await syncBackendAfterAction(); refreshDetailCardsByDomain(domain); };
             mpRender({
                 title: mp.name,
-                body: mpCenter(MP_SPINNER, `Please wait, starting configuration wizard for ${escapeHtml(mp.name)}`),
+                body: mpCenter(MP_SPINNER, kind === 'options'
+                    ? `Please wait, loading the settings for ${escapeHtml(mp.name)}`
+                    : `Please wait, starting configuration wizard for ${escapeHtml(mp.name)}`),
                 buttons: [],
             });
             try {
                 const res = await fetch('/api/yidstore/flow/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ domain, language: mpLanguage() }),
+                    body: JSON.stringify({ domain, kind, language: mpLanguage() }),
                 });
                 const data = await parseJsonSafe(res);
                 if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
@@ -5407,7 +5487,7 @@
                 placeholders && placeholders[k] != null ? String(placeholders[k]) : m);
         }
         function mpTr(key, placeholders) {
-            const s = mp.translations[`component.${mp.trDomain}.config.${key}`];
+            const s = mp.translations[`component.${mp.trDomain}.${mp.kind === 'options' ? 'options' : 'config'}.${key}`];
             return s ? mpFill(s, placeholders) : '';
         }
         function mpMd(text) {
@@ -5429,7 +5509,7 @@
                     `${escapeHtml(message)}<br>Continue the setup in Home Assistant.`),
                 buttons: [
                     { t: 'Close', c: 'btn-o', f: () => mpClose() },
-                    { t: 'Continue in Home Assistant', c: 'btn-p', f: async () => { await mpClose(); openIntegrationSetup(domain); } },
+                    { t: 'Continue in Home Assistant', c: 'btn-p', f: async () => { const k = mp.kind; await mpClose(); if (k === 'options') haNavigate(`/config/integrations/integration/${encodeURIComponent(domain)}`); else openIntegrationSetup(domain); } },
                 ],
             });
         }
@@ -5437,7 +5517,8 @@
         async function mpCall(method, body) {
             const id = mp.flow && mp.flow.flow_id;
             if (!id) throw new Error('This setup has ended');
-            const res = await fetch(`/api/yidstore/flow/${encodeURIComponent(id)}`, {
+            const kindQ = mp.kind === 'options' ? '?kind=options' : '';
+            const res = await fetch(`/api/yidstore/flow/${encodeURIComponent(id)}${kindQ}`, {
                 method,
                 headers: body ? { 'Content-Type': 'application/json' } : undefined,
                 body: body ? JSON.stringify(body) : undefined,
@@ -5450,10 +5531,11 @@
         function mpShowStep(step) {
             mpStopPoll();
             mp.flow = step;
-            mp.trDomain = step.translation_domain || step.handler || mp.domain;
+            // Options flows are keyed by config entry, so translate by the integration.
+            mp.trDomain = step.translation_domain || (mp.kind === 'options' ? mp.domain : step.handler) || mp.domain;
             const ph = step.description_placeholders || {};
             const type = step.type;
-            const link = { t: 'Continue in Home Assistant', f: async () => { const d = mp.domain; await mpClose(); openIntegrationSetup(d); } };
+            const link = { t: 'Continue in Home Assistant', f: async () => { const d = mp.domain, k = mp.kind; await mpClose(); if (k === 'options') haNavigate(`/config/integrations/integration/${encodeURIComponent(d)}`); else openIntegrationSetup(d); } };
 
             if (type === 'form') {
                 const fields = Array.isArray(step.data_schema) ? step.data_schema : [];
@@ -5504,6 +5586,15 @@
             }
             if (type === 'external_done' || type === 'progress_done' || type === 'show_progress_done') {
                 mpPoll();
+                return;
+            }
+            if (type === 'create_entry' && mp.kind === 'options') {
+                mp.finished = true;
+                mpRender({
+                    title: 'Success',
+                    body: mpCenter('<i class="mdi mdi-check-circle" style="color:var(--success);"></i>', 'Options successfully saved.'),
+                    buttons: [{ t: 'Finish', c: 'btn-p', f: () => mpClose() }],
+                });
                 return;
             }
             if (type === 'create_entry') {
@@ -5732,7 +5823,8 @@
                 icon = ok;
                 title = `Version ${escapeHtml(verLabel)} installed`;
                 text = `${escapeHtml(name)} is installed and set up.`;
-                action = `<button class="mp-tonal" onclick="closeModal(); haNavigate('/config/integrations/integration/${encodeURIComponent(i.domain)}')"><i class="mdi mdi-open-in-new"></i> Open integration</button>`;
+                action = (i.can_configure ? `<button class="mp-tonal" onclick="mpOpenConfigure('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Configure</button>` : '')
+                    + `<button class="mp-tonal" onclick="closeModal(); haNavigate('/config/integrations/integration/${encodeURIComponent(i.domain)}')"><i class="mdi mdi-open-in-new"></i> Open integration</button>`;
             } else {
                 icon = ok;
                 title = verLabel ? `Version ${escapeHtml(verLabel)} installed` : 'Installed';

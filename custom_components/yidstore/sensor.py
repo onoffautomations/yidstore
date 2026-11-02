@@ -326,9 +326,10 @@ class WaitingRestartSensor(SensorEntity):
 
         # Authoritative flag set at install time (a fresh config-flow
         # integration loads without a restart, like the Marketplace).
-        restart_flag = package_data.get('restart_required')
-        if restart_flag is not None:
-            return "Yes" if restart_flag else "No"
+        # "No restart needed" is final; "restart needed" clears itself after
+        # the next restart (timestamp check below).
+        if package_data.get('restart_required') is False:
+            return "No"
 
         # Get last_update timestamp (when package was last installed/updated)
         last_update_str = package_data.get('last_update')
