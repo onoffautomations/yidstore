@@ -487,6 +487,75 @@
         .app-chip.update { background:rgba(3,169,244,0.14); color:var(--primary); font-weight:600; }
         .app-chip.running { background:rgba(76,175,80,0.14); color:var(--success); }
         .app-actions { display:flex; gap:0.35rem; flex-wrap:wrap; justify-content:flex-end; }
+        /* ---- Marketplace-style install + setup dialog ---- */
+        .mp-o { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2200; display:none; align-items:center; justify-content:center; padding:1rem; }
+        .mp-o.open { display:flex; }
+        .mp { background:var(--card); color:var(--text); width:100%; max-width:560px; max-height:calc(100vh - 2rem); max-height:calc(100dvh - 2rem); border-radius:16px; border:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.35); }
+        .mp-head { display:flex; align-items:center; gap:0.5rem; padding:0.75rem 0.75rem 0.75rem 0.5rem; flex-shrink:0; }
+        .mp-head h3 { flex:1; margin:0; font-size:1.15rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .mp-x { width:2.5rem; height:2.5rem; border:none; border-radius:50%; background:transparent; color:var(--text); font-size:1.35rem; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }
+        .mp-x:hover { background:rgba(127,127,127,0.15); }
+        .mp-warn { display:flex; gap:0.7rem; align-items:flex-start; padding:0.7rem 1rem; background:rgba(255,152,0,0.14); font-size:0.85rem; line-height:1.4; flex-shrink:0; }
+        .mp-warn .mdi { color:#ff9800; font-size:1.25rem; line-height:1; }
+        .mp-warn strong { display:block; }
+        .mp-progress { height:4px; background:rgba(3,169,244,0.2); position:relative; overflow:hidden; flex-shrink:0; margin:0 1rem; border-radius:2px; }
+        .mp-progress::after { content:''; position:absolute; top:0; bottom:0; left:-40%; width:40%; background:var(--primary); border-radius:2px; animation:mp-indet 1.2s ease-in-out infinite; }
+        @keyframes mp-indet { from { left:-40%; } to { left:100%; } }
+        .mp-body { padding:1rem; overflow-y:auto; flex:1 1 auto; min-height:0; font-size:0.9rem; line-height:1.5; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+        .mp-body p { margin:0 0 0.8rem; }
+        .mp-body a { color:var(--primary); }
+        .mp-foot { display:flex; justify-content:flex-end; align-items:center; gap:0.6rem; padding:0.75rem 1rem; flex-shrink:0; flex-wrap:wrap; }
+        .mp-foot .mp-link { margin-right:auto; background:none; border:none; color:var(--primary); cursor:pointer; font-size:0.85rem; padding:0.3rem 0; }
+        .mp-center { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.9rem; padding:2.5rem 1rem; text-align:center; color:var(--dim); }
+        .mp-center .mdi { font-size:2.6rem; }
+        .mp-desc { margin-bottom:1.1rem; color:var(--dim); }
+        .mp-desc p:last-child { margin-bottom:0; }
+        .mp-field { margin-bottom:1.1rem; }
+        .mp-label { display:block; font-size:0.85rem; font-weight:600; margin-bottom:0.35rem; }
+        .mp-input { width:100%; box-sizing:border-box; padding:0.7rem 0.8rem; border:1px solid var(--border); border-radius:10px; background:rgba(127,127,127,0.08); color:var(--text); font-size:0.95rem; font-family:inherit; }
+        .mp-input:focus { outline:none; border-color:var(--primary); }
+        textarea.mp-input { min-height:5rem; resize:vertical; }
+        .mp-help { font-size:0.78rem; color:var(--dim); margin-top:0.3rem; line-height:1.4; }
+        .mp-field-error { font-size:0.8rem; color:#ef5350; margin-top:0.3rem; }
+        .mp-base-error { display:flex; gap:0.5rem; align-items:flex-start; background:rgba(239,83,80,0.12); color:#ef5350; border-radius:10px; padding:0.6rem 0.75rem; margin-bottom:1rem; font-size:0.85rem; }
+        .mp-check { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+        .mp-check input { width:1.2rem; height:1.2rem; accent-color:var(--primary); }
+        .mp-multi label { display:flex; align-items:center; gap:0.5rem; padding:0.2rem 0; font-weight:400; }
+        .mp-section { border:1px solid var(--border); border-radius:10px; padding:0.5rem 0.8rem; margin-bottom:1.1rem; }
+        .mp-section summary { cursor:pointer; font-weight:600; padding:0.3rem 0; }
+        .mp-menu { display:flex; flex-direction:column; gap:0.5rem; }
+        .mp-menu button { text-align:left; padding:0.8rem 1rem; border:1px solid var(--border); border-radius:10px; background:transparent; color:var(--text); cursor:pointer; font-size:0.95rem; display:flex; justify-content:space-between; align-items:center; }
+        .mp-menu button:hover { border-color:var(--primary); }
+        @media (max-width: 600px) {
+            .mp-o { padding:0; }
+            .mp { max-width:none; width:100%; height:100%; max-height:none; border-radius:0; border:none; }
+        }
+        /* Store details: status + facts cards (Marketplace-style). */
+        .mp-card { border:1px solid var(--border); border-radius:14px; padding:0.9rem 1rem; margin:0 0 1rem; background:var(--card); }
+        .mp-status { display:flex; gap:0.8rem; align-items:flex-start; }
+        .mp-status > .mdi { font-size:1.4rem; line-height:1.2; }
+        .mp-status-title { font-weight:600; }
+        .mp-status-text { color:var(--dim); font-size:0.85rem; margin-top:0.15rem; }
+        .mp-status-actions { margin-top:0.7rem; display:flex; gap:0.5rem; flex-wrap:wrap; }
+        .mp-tonal { border:none; border-radius:999px; padding:0.5rem 1rem; background:rgba(3,169,244,0.14); color:var(--primary); font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-size:0.88rem; }
+        .mp-tonal:hover { background:rgba(3,169,244,0.22); }
+        .mp-facts { list-style:none; margin:0; padding:0; }
+        .mp-facts li { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 0; font-size:0.88rem; }
+        .mp-facts .mdi { color:var(--dim); font-size:1.1rem; }
+        /* Stars / downloads (public stats file, no token). */
+        .stat-chips { display:inline-flex; align-items:center; gap:0.55rem; margin-left:0.35rem; vertical-align:middle; }
+        .stat-chip { display:inline-flex; align-items:center; gap:0.15rem; color:var(--dim); font-size:0.75rem; white-space:nowrap; }
+        .stat-chip .mdi { font-size:0.85rem; }
+        /* App details: release notes / changelog for the selected version. */
+        .app-changelog { margin-top:0.9rem; border-top:1px solid var(--divider); padding-top:0.7rem; text-align:left; }
+        .app-changelog:empty { display:none; }
+        .app-changelog-title { font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:0.4rem; margin-bottom:0.4rem; }
+        .app-changelog-body { font-size:0.85rem; color:var(--dim); line-height:1.5; max-height:240px; overflow:auto; word-break:break-word; }
+        .app-changelog-body h1, .app-changelog-body h2, .app-changelog-body h3 { font-size:0.9rem; margin:0.6rem 0 0.3rem; color:var(--text); }
+        .app-changelog-body ul, .app-changelog-body ol { margin:0.3rem 0 0.3rem 1.1rem; padding:0; }
+        .app-changelog-body a { color:var(--primary); }
+        .app-changelog-body code { background:rgba(127,127,127,0.14); border-radius:4px; padding:0 0.25rem; }
+        .app-changelog-body pre { background:rgba(127,127,127,0.12); border-radius:6px; padding:0.5rem; overflow:auto; }
         .app-actions .btn { font-size:0.75rem; padding:0.28rem 0.6rem; }
         .app-busy { display:flex; align-items:center; gap:0.4rem; color:var(--primary); font-size:0.78rem; }
         .app-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:0.6rem 0; border-bottom:1px solid var(--divider); text-align:left; }
@@ -1178,6 +1247,48 @@
             max-width: 400px;
             box-shadow: 0 0 40px var(--glow);
             animation: pop 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+            /* Never taller than the screen: the message scrolls, the icon,
+               title and buttons stay in view (tall app details on phones). */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 2rem);
+            max-height: calc(100dvh - 2rem);
+        }
+        .pop > #pi, .pop > #pt, .pop > #pa { flex-shrink: 0; }
+        .pop > #pm {
+            flex: 0 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+        }
+        .pop-x {
+            position: absolute;
+            top: 0.6rem;
+            right: 0.6rem;
+            width: 2.2rem;
+            height: 2.2rem;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            color: var(--dim);
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1;
+        }
+        .pop-x:hover { background: rgba(127,127,127,0.15); color: var(--text); }
+        @media (max-width: 600px) {
+            .pop-o { padding: 0.6rem; }
+            .pop { padding: 1.1rem 1rem; border-radius: 16px; max-height: calc(100vh - 1.2rem); max-height: calc(100dvh - 1.2rem); }
+            .pop > #pi { font-size: 2.4rem !important; margin-bottom: 0.4rem !important; }
+            .pop > #pt { font-size: 1.15rem !important; margin: 0 2rem 0.6rem !important; }
+            .pop > #pm { margin-bottom: 0.9rem !important; }
+            /* The whole dialog scrolls on phones; no scroll box inside it. */
+            .app-changelog-body { max-height: none; overflow: visible; }
         }
 
         @keyframes pop {
@@ -2609,8 +2720,22 @@
         </div>
     </div>
 
+    <div id="mpO" class="mp-o" onclick="if (event.target === this) mpRequestClose()">
+        <div class="mp" role="dialog" aria-modal="true" aria-labelledby="mpTitle">
+            <div class="mp-head">
+                <button type="button" class="mp-x" onclick="mpRequestClose()" aria-label="Close" title="Close"><i class="mdi mdi-close"></i></button>
+                <h3 id="mpTitle"></h3>
+            </div>
+            <div id="mpWarn" class="mp-warn" style="display:none;"></div>
+            <div id="mpProg" class="mp-progress" style="display:none;"></div>
+            <div id="mpBody" class="mp-body"></div>
+            <div id="mpFoot" class="mp-foot"></div>
+        </div>
+    </div>
+
     <div id="pop-o" class="pop-o">
         <div class="pop">
+            <button type="button" class="pop-x" onclick="closePop()" aria-label="Close" title="Close"><i class="mdi mdi-close"></i></button>
             <div id="pi" style="font-size:3.5rem; color:var(--success); margin-bottom:1rem;"></div>
             <h3 id="pt" style="font-size:1.4rem; margin-bottom:0.8rem;"></h3>
             <p id="pm" style="color:var(--dim); margin-bottom:1.5rem; line-height:1.5; font-size:0.9rem;"></p>
@@ -2900,6 +3025,79 @@
             el.innerHTML = `<i class="mdi mdi-music-note"></i> Audio Download: ${label}`;
         }
 
+        // Running Home Assistant Core version, provided by /api/yidstore/status.
+        let haVersion = '';
+        // HA 2026.11.1+ renamed the community store to "Marketplace".
+        const MARKETPLACE_MIN = [2026, 11, 1];
+
+        // true / false when the version is known, null while still unknown.
+        function haVersionAtLeast(target) {
+            const m = String(haVersion || '').match(/\d+/g);
+            if (!m) return null;
+            const v = m.slice(0, 3).map(Number);
+            for (let i = 0; i < target.length; i++) {
+                const a = v[i] || 0, b = target[i] || 0;
+                if (a !== b) return a > b;
+            }
+            return true;
+        }
+
+        // Badge/label wording for community-store installs: "Marketplace" on
+        // HA 2026.11.1+, "HACS" below it, both while the version is unknown.
+        function marketplaceBadge() {
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return '<span class="badge badge-inst">Installed by HACS / Marketplace</span>';
+            return at
+                ? '<span class="badge badge-inst">Installed via Marketplace</span>'
+                : '<span class="badge badge-inst">Installed by HACS</span>';
+        }
+        function marketplaceLabel() {
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return 'Installed (HACS / Marketplace)';
+            return at ? 'Installed (Marketplace)' : 'Installed (HACS)';
+        }
+
+        // One-time popup (mirrors the Home Assistant persistent notification):
+        // after the HA 2026.11.1 update YidStore may need re-adding as a custom
+        // repository in the Marketplace (HACS).
+        let marketplaceNoticeChecked = false;
+        function maybeShowMarketplaceNotice() {
+            if (marketplaceNoticeChecked) return;
+            const at = haVersionAtLeast(MARKETPLACE_MIN);
+            if (at === null) return;       // version not known yet
+            marketplaceNoticeChecked = true;
+            if (!at) return;               // older HA: nothing to show
+            let seen = false;
+            try { seen = localStorage.getItem('yidstore_marketplace_notice') === '1'; } catch (_) {}
+            if (seen) return;
+            showMarketplaceNotice();
+        }
+
+        function marketplaceNoticeBody() {
+            return `
+                <div style="text-align:left; line-height:1.55;">
+                    <p style="margin:0 0 0.6rem;">After updating to <strong>Home Assistant ${escapeHtml(haVersion || '2026.11.1')}</strong>,
+                    YidStore sometimes needs to be re-added as a <strong>custom repository</strong> in the Marketplace (HACS).</p>
+                    <p style="margin:0 0 0.4rem; font-weight:600;"><i class="mdi mdi-store-plus"></i> If YidStore is missing, add it back:</p>
+                    <ol style="margin:0 0 0.6rem 1.1rem; padding:0;">
+                        <li>Open <strong>Marketplace</strong> and tap the <strong><i class="mdi mdi-link-plus"></i> add link</strong> button next to the search bar.</li>
+                        <li>Paste <code>https://github.com/onoffautomations/yidstore</code> and tap <strong>Add</strong>.</li>
+                        <li>Install <strong>YidStore</strong>, then restart Home Assistant.</li>
+                    </ol>
+                    <p style="margin:0; color:var(--dim); font-size:0.85rem;">Everything already working? You can safely dismiss this notice.</p>
+                </div>`;
+        }
+        function showMarketplaceNotice() {
+            pop('Marketplace update notice', marketplaceNoticeBody(), 'mdi-store-alert', false, [
+                { t: "Don't show again", c: 'btn-o', f: 'dismissMarketplaceNotice()' },
+                { t: 'Got it', c: 'btn-p', f: 'closePop()' }
+            ]);
+        }
+        function dismissMarketplaceNotice() {
+            try { localStorage.setItem('yidstore_marketplace_notice', '1'); } catch (_) {}
+            closePop();
+        }
+
         function getInstalledBadge(installSource, needsRestart = false, itemType = 'integration') {
             // Only integrations need restart - cards and blueprints just need reload
             if (needsRestart && itemType === 'integration') {
@@ -2907,7 +3105,7 @@
             }
             switch (installSource) {
                 case 'hacs':
-                    return '<span class="badge badge-inst">Installed by HACS / Marketplace</span>';
+                    return marketplaceBadge();
                 case 'manual':
                     return '<span class="badge badge-inst">Manually installed</span>';
                 case 'yidstore':
@@ -3003,6 +3201,14 @@
                 optimisticRestartUntil.delete(normalizeRestartKey(k));
             }
 
+            if (data.ha_version && data.ha_version !== haVersion) {
+                haVersion = data.ha_version;
+                // The install labels (Marketplace vs HACS) depend on this, so
+                // re-render once the version becomes known.
+                try { if (toolbarView !== 'apps') apply(); } catch (_) {}
+                maybeShowMarketplaceNotice();
+            }
+
             if (data.is_authenticated !== undefined) {
                 isAuthenticated = !!data.is_authenticated;
                 authKnown = true;
@@ -3032,6 +3238,15 @@
                 item.is_installed = !!status.is_installed;
                 item.install_source = status.install_source || null;
                 item.requires_restart = !!status.requires_restart;
+                item.domain = status.domain || item.domain || null;
+                item.can_setup = !!status.can_setup;
+                item.configured = !!status.configured;
+                // Backend is authoritative: if it says no restart is needed
+                // (e.g. a fresh config-flow integration loaded on the fly),
+                // drop any optimistic "restart pending" marker.
+                if (!status.requires_restart) {
+                    optimisticRestartUntil.delete(normalizeRestartKey(key));
+                }
                 if (status.update_available !== undefined) {
                     item.update_available = !!status.update_available;
                 }
@@ -3058,6 +3273,7 @@
                     i.install_source || '',
                     i.update_available ? 1 : 0,
                     i.requires_restart ? 1 : 0,
+                    i.can_setup ? 1 : 0,
                     i.is_hidden ? 1 : 0,
                     i.installed_version || '',
                     i.latest_version || '',
@@ -3394,7 +3610,9 @@
             const modal = document.getElementById('modal');
             const customModal = document.getElementById('customModal');
             const pop = document.getElementById('pop-o');
-            return (modal && modal.style.display === 'flex') ||
+            const mpo = document.getElementById('mpO');
+            return (mpo && mpo.classList.contains('open')) ||
+                (modal && modal.style.display === 'flex') ||
                 (customModal && customModal.style.display === 'flex') ||
                 (pop && pop.style.display === 'flex');
         }
@@ -3411,7 +3629,46 @@
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
 
+        // Stars & downloads for every item, from the public stats file the
+        // YidStore GitHub repo publishes (read by the backend, no token).
+        let storeStats = {};
+        let storeStatsKey = '';
+        let storeStatsTimer = null;
+        async function loadStoreStats() {
+            if (!storeStatsTimer) storeStatsTimer = setInterval(loadStoreStats, 60 * 60 * 1000);
+            try {
+                const res = await fetch('/api/yidstore/stats');
+                if (!res.ok) return;
+                const data = await parseJsonSafe(res);
+                const next = (data && data.items) || {};
+                const key = JSON.stringify(next);
+                if (key === storeStatsKey) return;
+                storeStatsKey = key;
+                storeStats = next;
+                if (hasCompletedInitialLoad && toolbarView !== 'apps' && !isOverlayOpen()) apply();
+            } catch (_) {}
+        }
+        function storeStatsFor(i) {
+            return (i && storeStats[`${i.owner}/${i.repo_name}`.toLowerCase()]) || null;
+        }
+        function formatCount(n) {
+            n = Number(n) || 0;
+            if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '') + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
+            return String(n);
+        }
+        function statsHtml(st) {
+            if (!st) return '';
+            return `<span class="stat-chips">`
+                + `<span class="stat-chip" title="${Number(st.stars) || 0} stars"><i class="mdi mdi-star-outline"></i> ${formatCount(st.stars)}</span>`
+                // The store server only counts downloads of attached release
+                // files, so hide a zero rather than show a misleading count.
+                + (Number(st.downloads) > 0 ? `<span class="stat-chip" title="${Number(st.downloads)} downloads"><i class="mdi mdi-download-outline"></i> ${formatCount(st.downloads)}</span>` : '')
+                + `</span>`;
+        }
+
         async function load(forceRefresh = false, showLoader = true) {
+            loadStoreStats();
             // Check cache first (unless forcing refresh)
             if (!forceRefresh) {
                 const cached = getCachedData();
@@ -3732,7 +3989,7 @@
                 } else {
                     dotClass += ' installed';
                     statusLabel = i.install_source === 'hacs'
-                        ? 'Installed (HACS / Marketplace)'
+                        ? marketplaceLabel()
                         : (i.install_source === 'manual' ? 'Installed (manual)' : 'Installed');
                 }
             }
@@ -3762,7 +4019,7 @@
                         <span>${displayTitle}</span>
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${typeLabel}</span>
                     </div>
-                    <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}
+                    <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}${statsHtml(storeStatsFor(i))}
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.85rem;"></i>' : ''}
                     </div>
                     <div class="card-desc">${i.description || ''}</div>
@@ -3774,7 +4031,7 @@
                 <span style="flex:1;"></span>
                 ${newChip}
                 ${updateChip}
-                ${i.is_installed ? `
+                ${i.is_installed ? `${setupButtonHtml(i, 'card-install-btn')}
                 <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
                     <i class="mdi mdi-trash-can-outline"></i>
                 </button>` : `
@@ -3842,10 +4099,11 @@
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
                         ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${i.installed_version} → ${i.latest_version}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
-                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}</div>
+                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}${statsHtml(storeStatsFor(i))}</div>
                 </div>
                 <div class="list-actions">
-                    <button class="btn btn-p" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
+                    ${setupButtonHtml(i, 'btn btn-p')}
+                    <button class="btn ${i.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
 
                     ${i.is_installed ? `
                     <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
@@ -4387,9 +4645,10 @@
                     <div style="display:flex; align-items:center; gap:0.8rem;">
                         ${versionSelector || ''}
                     </div>
-                    <div style="display: flex; gap: 0.8rem; justify-content: flex-end;">
+                    <div style="display: flex; gap: 0.8rem; justify-content: flex-end; flex-wrap: wrap;">
                         <button class="btn btn-o" onclick="closeModal()">Close</button>
-                        <button class="btn btn-p" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                        ${setupButtonHtml(item, 'btn btn-p')}
+                        <button class="btn ${item.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
                     </div>
                 </div>
             `;
@@ -4409,12 +4668,12 @@
                             ${logoMarkup}
                             <div class="modal-top-text">
                                 <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
-                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}</div>
+                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}${statsHtml(storeStatsFor(item))}</div>
                             </div>
                         </div>
                         <div class="modal-divider"></div>
                     </div>`;
-                body.innerHTML = `${headerMarkup}${marked.parse(md)}`;
+                body.innerHTML = `${headerMarkup}<div id="mpDetailCards">${storeDetailCardsHtml(item)}</div>${marked.parse(md)}`;
                 initModalLogo();
                 setupModalScroll();
             } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
@@ -4477,13 +4736,8 @@
 
         function confirmInstWithVersion(o, r, t) {
             const versionSelect = document.getElementById('versionSelect');
-            const version = versionSelect ? versionSelect.value : null;
-
-            const versionText = version ? ` (version ${version})` : '';
-            pop('Confirm Install', `Install ${formatName(r)}${versionText}?`, 'mdi-download', false, [
-                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
-                { t: 'Install', c: 'btn-p', f: `executeInstWithVersion('${o}','${r}','${t}','${version || ''}')` }
-            ]);
+            const version = versionSelect ? (versionSelect.value || null) : null;
+            mpStartInstall(o, r, t, version);
         }
 
         async function executeInstWithVersion(o, r, t, version) {
@@ -4515,18 +4769,7 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Integrations need restart; cards/blueprints may need a UI reload.
-                    if (t === 'integration') {
-                        addToRestartSet(o, r);
-                        await syncBackendAfterAction();
-                    } else if (t === 'audio') {
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
-                    } else {
-                        // Cards and blueprints - show reload popup
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
-                    }
+                    await afterStoreInstall(o, r, t, data);
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
         }
@@ -4745,10 +4988,7 @@
         }
 
         function confirmInst(o, r, t) {
-            pop('Confirm Install', `Install ${formatName(r)}?`, 'mdi-download', false, [
-                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
-                { t: 'Install', c: 'btn-p', f: `executeInst('${o}','${r}','${t}')` }
-            ]);
+            mpStartInstall(o, r, t, null);
         }
 
         function confirmRemove(o, r, t, e) {
@@ -4812,20 +5052,723 @@
                         item.install_source = 'yidstore';
                         item.update_available = false;
                     }
-                    // Integrations need restart; cards/blueprints may need a UI reload.
-                    if (t === 'integration') {
-                        addToRestartSet(o, r);
-                        await syncBackendAfterAction();
-                    } else if (t === 'audio') {
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
-                    } else {
-                        // Cards and blueprints - show reload popup
-                        await syncBackendAfterAction();
-                        pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
-                    }
+                    await afterStoreInstall(o, r, t, data);
                 } else pop('Error', data.error, 'mdi-alert', false);
             } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
+        }
+
+        // Shared post-install handling for the Store tab. Integrations now
+        // follow the Marketplace: a fresh config-flow integration loads without
+        // a restart; an update of a running one needs a restart, and the
+        // "Restart required" repair (Settings → System → Repairs) does it.
+        // Open Home Assistant's "Add integration" dialog for a domain (the
+        // same place as Settings -> Devices & Services -> Add integration).
+        function openIntegrationSetup(domain) {
+            if (!domain) return;
+            closePop();
+            try { closeModal(); } catch (_) {}
+            haNavigate(`/config/integrations/dashboard/add?domain=${encodeURIComponent(domain)}`);
+        }
+        function setupStoreItem(o, r, ev) {
+            if (ev) ev.stopPropagation();
+            const item = findItemByRepo(o, r);
+            if (item && item.domain) mpOpenSetup(item.domain, formatName(item.repo_name));
+        }
+        function setupButtonHtml(i, cls) {
+            if (!i || i.type !== 'integration' || !i.can_setup || !i.domain) return '';
+            return `<button class="${cls}" onclick="setupStoreItem('${i.owner}','${i.repo_name}',event)" title="Set up this integration"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
+        }
+
+        async function afterStoreInstall(o, r, t, data) {
+            if (t === 'integration' && data && data.can_setup && data.domain) {
+                // Fresh integration, loaded without a restart: go straight to
+                // its setup, like the Marketplace does.
+                await syncBackendAfterAction();
+                mpOpenSetup(data.domain, formatName(r));
+                return;
+            }
+            if (t === 'integration') {
+                const needsRestartNow = !!(data && data.requires_restart);
+                if (needsRestartNow) {
+                    addToRestartSet(o, r);
+                    await syncBackendAfterAction();
+                    showRestartOffer(`${formatName(r)} was updated. Restart Home Assistant to finish.`);
+                } else {
+                    await syncBackendAfterAction();
+                    pop('Installed',
+                        `${formatName(r)} is installed and ready — no restart needed. Add it under Settings → Devices &amp; Services.`,
+                        'mdi-check-circle', false);
+                }
+            } else if (t === 'audio') {
+                await syncBackendAfterAction();
+                pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
+            } else {
+                // Cards and blueprints - show reload popup
+                await syncBackendAfterAction();
+                pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
+            }
+        }
+
+        // =====================================================================
+        // Marketplace-style install + setup, and Home Assistant's own restart.
+        // =====================================================================
+
+        // ---- Restart: open Home Assistant's native restart dialog ----------
+        // Runs inside the Home Assistant page (not this iframe) so it keeps
+        // working while Home Assistant switches pages. Order:
+        //  1. the restart dialog is already loaded: show it right here;
+        //  2. Settings -> System's code is loaded: use its restart action here;
+        //  3. otherwise open Settings -> System and open the dialog there.
+        function openNativeRestart() {
+            try {
+                const doc = window.parent.document;
+                if (!doc || window.parent === window) throw new Error('no parent');
+                const script = doc.createElement('script');
+                script.textContent = `(() => {
+                    const ha = document.querySelector('home-assistant');
+                    if (!ha) return;
+                    const open = () => {
+                        if (customElements.get('dialog-restart')) {
+                            ha.dispatchEvent(new CustomEvent('show-dialog', { bubbles: true, composed: true,
+                                detail: { dialogTag: 'dialog-restart', dialogImport: () => Promise.resolve(), dialogParams: {} } }));
+                            return true;
+                        }
+                        const Nav = customElements.get('ha-config-system-navigation');
+                        if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
+                            Nav.prototype._showRestartDialog.call(ha);
+                            return true;
+                        }
+                        return false;
+                    };
+                    if (open()) return;
+                    history.pushState(null, '', '/config/system');
+                    window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+                    let tries = 0;
+                    const timer = setInterval(() => {
+                        if (open() || ++tries > 40) clearInterval(timer);
+                    }, 250);
+                })();`;
+                doc.head.appendChild(script);
+                script.remove();
+                return true;
+            } catch (_) {
+                // Not inside Home Assistant (e.g. opened directly): restart via YidStore.
+                restartViaYidStore();
+                return false;
+            }
+        }
+
+        async function restartViaYidStore() {
+            if (!confirm('Restart Home Assistant now?')) return;
+            try { await fetch('/api/yidstore/restart', { method: 'POST' }); } catch (_) {}
+        }
+
+        // "Restart required" with a Restart button that opens the native dialog.
+        function showRestartOffer(message) {
+            pop('Restart required', escapeHtml(message), 'mdi-restart', false, [
+                { t: 'Later', c: 'btn-o', f: 'closePop()' },
+                { t: 'Restart', c: 'btn-p', f: 'closePop(); openNativeRestart();' }
+            ]);
+        }
+
+        // ---- Dialog shell ---------------------------------------------------
+        const mp = { open: false, busy: false, flow: null, finished: false, poll: null,
+                     translations: {}, trDomain: '', name: '', domain: '', fields: [],
+                     installClosed: false, onDone: null };
+
+        function mpEl(id) { return document.getElementById(id); }
+
+        function mpShow() {
+            mp.open = true;
+            mpEl('mpO').classList.add('open');
+            updateScrollLock();
+        }
+
+        function mpRender({ title = '', warn = '', progress = false, body = '', buttons = [], link = null }) {
+            mpEl('mpTitle').textContent = title;
+            const w = mpEl('mpWarn');
+            w.style.display = warn ? 'flex' : 'none';
+            w.innerHTML = warn;
+            mpEl('mpProg').style.display = progress ? 'block' : 'none';
+            mpEl('mpBody').innerHTML = body;
+            mpEl('mpBody').scrollTop = 0;
+            const foot = mpEl('mpFoot');
+            foot.innerHTML = '';
+            if (link) {
+                const a = document.createElement('button');
+                a.type = 'button';
+                a.className = 'mp-link';
+                a.textContent = link.t;
+                a.onclick = link.f;
+                foot.appendChild(a);
+            }
+            buttons.forEach(b => {
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.className = `btn ${b.c || 'btn-o'}`;
+                el.innerHTML = b.html || escapeHtml(b.t);
+                if (b.disabled) el.disabled = true;
+                if (b.id) el.id = b.id;
+                el.onclick = b.f;
+                foot.appendChild(el);
+            });
+        }
+
+        function mpCenter(icon, text) {
+            return `<div class="mp-center">${icon}<div>${text}</div></div>`;
+        }
+        const MP_SPINNER = '<i class="mdi mdi-loading mdi-spin" style="color:var(--primary);"></i>';
+
+        function mpStopPoll() {
+            if (mp.poll) { clearTimeout(mp.poll); mp.poll = null; }
+        }
+
+        // X / outside tap: cancel a running setup, then close.
+        function mpRequestClose() {
+            if (mp.busy && !mp.flow) {
+                // Install still running: let it finish in the background.
+                mp.installClosed = true;
+            }
+            mpClose();
+        }
+
+        async function mpClose() {
+            mpStopPoll();
+            const flow = mp.flow;
+            const finished = mp.finished;
+            mp.open = false;
+            mp.flow = null;
+            mpEl('mpO').classList.remove('open');
+            updateScrollLock();
+            if (flow && flow.flow_id && !finished) {
+                try { await fetch(`/api/yidstore/flow/${encodeURIComponent(flow.flow_id)}`, { method: 'DELETE' }); } catch (_) {}
+            }
+            const done = mp.onDone;
+            mp.onDone = null;
+            if (done) await done();
+        }
+
+        // ---- Install --------------------------------------------------------
+        function mpItemName(item, r) {
+            return formatName((item && item.repo_name) || r);
+        }
+
+        function mpStartInstall(o, r, t, version) {
+            closePop();
+            const item = findItemByRepo(o, r);
+            const name = mpItemName(item, r);
+            const ver = version || (item && item.latest_version) || '';
+            const verText = ver ? ` version <strong>${escapeHtml(ver)}</strong>` : '';
+            const author = item ? getDisplayAuthor(item.owner, item.owner_display_name) : escapeHtml(o);
+            const community = item && item.source === 'github';
+            mp.flow = null; mp.finished = false; mp.busy = false; mp.installClosed = false; mp.onDone = null;
+            mpRender({
+                title: name,
+                warn: community ? `<i class="mdi mdi-alert-outline"></i><div><strong>You install this at your own risk</strong>${escapeHtml(name)} is made by ${author}. It is not reviewed or supported by OnOff Automations.</div>` : '',
+                body: `<p>This installs ${escapeHtml(name)}${verText} in Home Assistant.</p>`,
+                buttons: [
+                    { t: 'Cancel', c: 'btn-o', f: () => mpClose() },
+                    { t: 'Install', c: 'btn-p', f: () => mpDoInstall(o, r, t, version) },
+                ],
+            });
+            mpShow();
+        }
+
+        async function mpDoInstall(o, r, t, version) {
+            const item = findItemByRepo(o, r);
+            const name = mpItemName(item, r);
+            const warnHtml = mpEl('mpWarn').style.display === 'none' ? '' : mpEl('mpWarn').innerHTML;
+            const bodyHtml = mpEl('mpBody').innerHTML;
+            mp.busy = true;
+            mpRender({
+                title: name, warn: warnHtml, progress: true, body: bodyHtml,
+                buttons: [
+                    { t: 'Close', c: 'btn-o', f: () => mpRequestClose() },
+                    { html: '<i class="mdi mdi-loading mdi-spin"></i>', c: 'btn-p', disabled: true, f: () => {} },
+                ],
+            });
+            let data;
+            try {
+                const body = { owner: o, repo: r, type: t };
+                if (t === 'audio') body.audio_location = getAudioInstallLocation();
+                if (item && item.mode) body.mode = item.mode;
+                if (item && item.asset_name) body.asset_name = item.asset_name;
+                if (version) body.version = version;
+                if (item && item.source === 'github') {
+                    body.source = 'github';
+                    if (item.repo_url) body.repo_url = item.repo_url;
+                }
+                const res = await fetch('/api/yidstore/install', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                data = await parseJsonSafe(res);
+                if (!res.ok || !data.success) throw new Error(data.error || `Install failed (HTTP ${res.status})`);
+            } catch (e) {
+                mp.busy = false;
+                if (!mp.open) { pop('Error', escapeHtml(e.message || 'Install failed'), 'mdi-alert', false); return; }
+                mpRender({
+                    title: name,
+                    body: `<div class="mp-base-error"><i class="mdi mdi-alert-circle-outline"></i><div>${escapeHtml(e.message || 'Install failed')}</div></div>`,
+                    buttons: [{ t: 'Close', c: 'btn-p', f: () => mpClose() }],
+                });
+                return;
+            }
+            mp.busy = false;
+            if (item) {
+                item.is_installed = true;
+                item.install_source = 'yidstore';
+                item.update_available = false;
+            }
+            // Closed while installing: fall back to the plain follow-up.
+            if (!mp.open || mp.installClosed) {
+                try { closeModal(); } catch (_) {}
+                await afterStoreInstall(o, r, t, data);
+                return;
+            }
+            await syncBackendAfterAction();
+            refreshDetailCards(o, r);
+
+            if (t === 'integration' && data.can_setup && data.domain) {
+                await mpStartFlow(data.domain, name);
+                return;
+            }
+            if (t === 'integration' && data.requires_restart) {
+                addToRestartSet(o, r);
+                mpRender({
+                    title: name,
+                    body: mpCenter('<i class="mdi mdi-restart" style="color:#ff9800;"></i>',
+                        `<strong style="color:var(--text);">Restart required</strong><br>${escapeHtml(name)} was updated. Restart Home Assistant to finish.`),
+                    buttons: [
+                        { t: 'Later', c: 'btn-o', f: () => mpClose() },
+                        { t: 'Restart', c: 'btn-p', f: () => { mpClose(); openNativeRestart(); } },
+                    ],
+                });
+                return;
+            }
+            const reload = t === 'lovelace' || t === 'blueprints';
+            mpRender({
+                title: name,
+                body: mpCenter('<i class="mdi mdi-check-circle" style="color:var(--success);"></i>',
+                    `<strong style="color:var(--text);">${escapeHtml(name)} is installed</strong>${reload ? '<br>Reload the page to start using it.' : ''}`),
+                buttons: reload
+                    ? [{ t: 'Close', c: 'btn-o', f: () => mpClose() }, { t: 'Reload', c: 'btn-p', f: () => window.top.location.reload() }]
+                    : [{ t: 'Close', c: 'btn-p', f: () => mpClose() }],
+            });
+        }
+
+        // ---- Setup wizard (config flow) --------------------------------------
+        function mpLanguage() {
+            try {
+                const ha = window.parent.document.querySelector('home-assistant');
+                if (ha && ha.hass && ha.hass.language) return ha.hass.language;
+            } catch (_) {}
+            return (navigator.language || 'en').split('-')[0];
+        }
+
+        // "Set up" from a card, row or details.
+        function mpOpenSetup(domain, name) {
+            closePop();
+            mp.flow = null; mp.finished = false; mp.busy = false; mp.onDone = null;
+            mpShow();
+            mpStartFlow(domain, name);
+        }
+
+        async function mpStartFlow(domain, name) {
+            mp.domain = domain;
+            mp.name = name || domain;
+            mp.finished = false;
+            mp.onDone = async () => { await syncBackendAfterAction(); refreshDetailCardsByDomain(domain); };
+            mpRender({
+                title: mp.name,
+                body: mpCenter(MP_SPINNER, `Please wait, starting configuration wizard for ${escapeHtml(mp.name)}`),
+                buttons: [],
+            });
+            try {
+                const res = await fetch('/api/yidstore/flow/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain, language: mpLanguage() }),
+                });
+                const data = await parseJsonSafe(res);
+                if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+                mp.translations = data.translations || {};
+                if (data.integration_name) mp.name = data.integration_name;
+                mpShowStep(data);
+            } catch (e) {
+                mpShowFallback(`The setup could not start here: ${e.message || 'unknown error'}.`);
+            }
+        }
+
+        function mpFill(text, placeholders) {
+            if (!text) return '';
+            return String(text).replace(/\{(\w+)\}/g, (m, k) =>
+                placeholders && placeholders[k] != null ? String(placeholders[k]) : m);
+        }
+        function mpTr(key, placeholders) {
+            const s = mp.translations[`component.${mp.trDomain}.config.${key}`];
+            return s ? mpFill(s, placeholders) : '';
+        }
+        function mpMd(text) {
+            if (!text) return '';
+            try { return window.marked ? marked.parse(text) : escapeHtml(text).replace(/\n/g, '<br>'); }
+            catch (_) { return escapeHtml(text).replace(/\n/g, '<br>'); }
+        }
+        function mpHumanize(key) {
+            const s = String(key || '').replace(/_/g, ' ');
+            return s.charAt(0).toUpperCase() + s.slice(1);
+        }
+
+        // "Continue in Home Assistant": anything this dialog can't draw.
+        function mpShowFallback(message) {
+            const domain = mp.domain;
+            mpRender({
+                title: mp.name,
+                body: mpCenter('<i class="mdi mdi-open-in-new" style="color:var(--primary);"></i>',
+                    `${escapeHtml(message)}<br>Continue the setup in Home Assistant.`),
+                buttons: [
+                    { t: 'Close', c: 'btn-o', f: () => mpClose() },
+                    { t: 'Continue in Home Assistant', c: 'btn-p', f: async () => { await mpClose(); openIntegrationSetup(domain); } },
+                ],
+            });
+        }
+
+        async function mpCall(method, body) {
+            const id = mp.flow && mp.flow.flow_id;
+            if (!id) throw new Error('This setup has ended');
+            const res = await fetch(`/api/yidstore/flow/${encodeURIComponent(id)}`, {
+                method,
+                headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            const data = await parseJsonSafe(res);
+            if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+            return data;
+        }
+
+        function mpShowStep(step) {
+            mpStopPoll();
+            mp.flow = step;
+            mp.trDomain = step.translation_domain || step.handler || mp.domain;
+            const ph = step.description_placeholders || {};
+            const type = step.type;
+            const link = { t: 'Continue in Home Assistant', f: async () => { const d = mp.domain; await mpClose(); openIntegrationSetup(d); } };
+
+            if (type === 'form') {
+                const fields = Array.isArray(step.data_schema) ? step.data_schema : [];
+                if (step.unsupported || fields.some(f => mpFieldKind(f).kind === 'unsupported')) {
+                    mpShowFallback('This setup step uses options YidStore can\'t show yet.');
+                    return;
+                }
+                const title = mpTr(`step.${step.step_id}.title`, ph) || mp.name;
+                const desc = mpTr(`step.${step.step_id}.description`, ph);
+                const errors = step.errors || {};
+                const base = errors.base ? (mpTr(`error.${errors.base}`, ph) || mpHumanize(errors.base)) : '';
+                mp.fields = [];
+                const html = fields.map(f => mpFieldHtml(f, step.step_id, null, errors)).join('');
+                mpRender({
+                    title,
+                    body: `${base ? `<div class="mp-base-error"><i class="mdi mdi-alert-circle-outline"></i><div>${escapeHtml(base)}</div></div>` : ''}`
+                        + `${desc ? `<div class="mp-desc">${mpMd(desc)}</div>` : ''}`
+                        + `<form id="mpForm" onsubmit="event.preventDefault(); mpSubmit();" autocomplete="off">${html}<button type="submit" style="display:none"></button></form>`,
+                    buttons: [{ t: step.last_step === false ? 'Next' : 'Submit', c: 'btn-p', id: 'mpSubmitBtn', f: () => mpSubmit() }],
+                    link,
+                });
+                return;
+            }
+            if (type === 'menu') {
+                const title = mpTr(`step.${step.step_id}.title`, ph) || mp.name;
+                const desc = mpTr(`step.${step.step_id}.description`, ph);
+                const opts = (step.menu_options || []).map(opt =>
+                    `<button type="button" onclick="mpChooseMenu('${escapeHtml(String(opt))}')"><span>${escapeHtml(mpTr(`step.${step.step_id}.menu_options.${opt}`, ph) || mpHumanize(opt))}</span><i class="mdi mdi-chevron-right"></i></button>`).join('');
+                mpRender({ title, body: `${desc ? mpMd(desc) : ''}<div class="mp-menu">${opts}</div>`, buttons: [], link });
+                return;
+            }
+            if (type === 'progress' || type === 'show_progress') {
+                const text = mpTr(`progress.${step.progress_action}`, ph) || 'Working…';
+                mpRender({ title: mp.name, progress: true, body: mpCenter(MP_SPINNER, mpMd(text)), buttons: [] });
+                mp.poll = setTimeout(mpPoll, 2000);
+                return;
+            }
+            if (type === 'external') {
+                mpRender({
+                    title: mp.name,
+                    body: mpCenter('<i class="mdi mdi-open-in-new" style="color:var(--primary);"></i>',
+                        'Finish this step on the website, then come back here.'),
+                    buttons: [{ t: 'Open website', c: 'btn-p', f: () => window.open(step.url, '_blank', 'noopener') }],
+                });
+                window.open(step.url, '_blank', 'noopener');
+                mp.poll = setTimeout(mpPoll, 3000);
+                return;
+            }
+            if (type === 'external_done' || type === 'progress_done' || type === 'show_progress_done') {
+                mpPoll();
+                return;
+            }
+            if (type === 'create_entry') {
+                mp.finished = true;
+                const extra = step.description ? mpTr(`create_entry.${step.description}`, ph) : '';
+                mpRender({
+                    title: 'Success',
+                    body: mpCenter('<i class="mdi mdi-check-circle" style="color:var(--success);"></i>',
+                        `Created configuration for <strong style="color:var(--text);">${escapeHtml(step.title || mp.name)}</strong>.${extra ? `<br>${mpMd(extra)}` : ''}`),
+                    buttons: [{ t: 'Finish', c: 'btn-p', f: () => mpClose() }],
+                });
+                return;
+            }
+            if (type === 'abort') {
+                mp.finished = true;
+                const reason = mpTr(`abort.${step.reason}`, ph) || mpHumanize(step.reason);
+                mpRender({
+                    title: mp.name,
+                    body: mpCenter('<i class="mdi mdi-information-outline" style="color:var(--primary);"></i>', mpMd(reason)),
+                    buttons: [{ t: 'Close', c: 'btn-p', f: () => mpClose() }],
+                });
+                return;
+            }
+            mpShowFallback('This setup step can\'t be shown here.');
+        }
+
+        async function mpPoll() {
+            mp.poll = null;
+            if (!mp.open || !mp.flow) return;
+            try { mpShowStep(await mpCall('GET')); }
+            catch (e) { mpShowFallback(e.message || 'The setup stopped.'); }
+        }
+
+        async function mpChooseMenu(opt) {
+            try { mpShowStep(await mpCall('POST', { next_step_id: opt })); }
+            catch (e) { mpShowFallback(e.message || 'The setup stopped.'); }
+        }
+
+        // ---- Form fields ----------------------------------------------------
+        const MP_TEXTISH_SELECTORS = ['entity', 'device', 'area', 'floor', 'label', 'icon', 'template',
+            'config_entry', 'attribute', 'state', 'theme', 'language', 'country', 'conversation_agent',
+            'assist_pipeline', 'addon', 'backup_location'];
+
+        function mpOptions(list) {
+            if (Array.isArray(list)) return list.map(o => Array.isArray(o) ? { value: o[0], label: o[1] }
+                : (o && typeof o === 'object') ? { value: o.value, label: o.label } : { value: o, label: o });
+            if (list && typeof list === 'object') return Object.entries(list).map(([value, label]) => ({ value, label }));
+            return [];
+        }
+
+        function mpFieldKind(f) {
+            if (f.selector) {
+                const [k, cfg] = Object.entries(f.selector)[0] || [];
+                const c = cfg || {};
+                if (k === 'text') return c.multiple ? { kind: 'unsupported' } : { kind: 'text', type: c.type || 'text', multiline: !!c.multiline };
+                if (k === 'number') return { kind: 'number', min: c.min, max: c.max, step: c.step, unit: c.unit_of_measurement };
+                if (k === 'boolean') return { kind: 'boolean' };
+                if (k === 'select') return { kind: c.multiple ? 'multi' : 'select', options: mpOptions(c.options), tkey: c.translation_key, custom: !!c.custom_value };
+                if (k === 'constant') return { kind: 'constant', value: c.value };
+                if (MP_TEXTISH_SELECTORS.includes(k)) return c.multiple ? { kind: 'unsupported' } : { kind: 'text', type: 'text', hint: k };
+                return { kind: 'unsupported' };
+            }
+            switch (f.type) {
+                case 'string': return { kind: 'text', type: f.format === 'password' || /pass|secret|token|api_?key/i.test(f.name) ? 'password' : 'text' };
+                case 'integer': return { kind: 'number', min: f.valueMin, max: f.valueMax, step: 1, integer: true };
+                case 'float': return { kind: 'number', min: f.valueMin, max: f.valueMax, step: 'any' };
+                case 'boolean': return { kind: 'boolean' };
+                case 'select': return { kind: 'select', options: mpOptions(f.options) };
+                case 'multi_select': return { kind: 'multi', options: mpOptions(f.options) };
+                case 'constant': return { kind: 'constant', value: f.value };
+                case 'expandable': return { kind: 'section' };
+                default: return { kind: 'unsupported' };
+            }
+        }
+
+        function mpFieldHtml(f, stepId, section, errors, parentSchemaFields) {
+            const k = mpFieldKind(f);
+            const base = section ? `step.${stepId}.sections.${section}` : `step.${stepId}`;
+            const ph = (mp.flow && mp.flow.description_placeholders) || {};
+            if (k.kind === 'section') {
+                const sectionName = mpTr(`step.${stepId}.sections.${f.name}.name`, ph) || mpHumanize(f.name);
+                const inner = (f.schema || []).map(sf => mpFieldHtml(sf, stepId, f.name, errors)).join('');
+                const open = !(f.expanded === false || (f.options && f.options.collapsed));
+                return `<details class="mp-section"${open ? ' open' : ''}><summary>${escapeHtml(sectionName)}</summary>${inner}</details>`;
+            }
+            const idx = mp.fields.length;
+            mp.fields.push({ f, k, section });
+            const label = mpTr(`${base}.data.${f.name}`, ph) || mpHumanize(f.name);
+            const help = mpTr(`${base}.data_description.${f.name}`, ph);
+            const req = f.required ? ' *' : '';
+            const def = f.default !== undefined ? f.default
+                : (f.description && f.description.suggested_value !== undefined ? f.description.suggested_value : undefined);
+            const err = errors && errors[f.name] ? (mpTr(`error.${errors[f.name]}`, ph) || mpHumanize(errors[f.name])) : '';
+            const id = `mpf${idx}`;
+            let control = '';
+            if (k.kind === 'text') {
+                const val = def != null ? ` value="${escapeHtml(String(def))}"` : '';
+                control = k.multiline
+                    ? `<textarea id="${id}" class="mp-input">${def != null ? escapeHtml(String(def)) : ''}</textarea>`
+                    : `<input id="${id}" class="mp-input" type="${escapeHtml(k.type)}"${val}${k.hint ? ` placeholder="${escapeHtml(k.hint)}"` : ''}${k.type === 'password' ? ' autocomplete="new-password"' : ''}>`;
+            } else if (k.kind === 'number') {
+                const attrs = [k.min != null ? `min="${k.min}"` : '', k.max != null ? `max="${k.max}"` : '', `step="${k.step != null ? k.step : 'any'}"`].join(' ');
+                control = `<input id="${id}" class="mp-input" type="number" inputmode="decimal" ${attrs}${def != null ? ` value="${escapeHtml(String(def))}"` : ''}>${k.unit ? `<div class="mp-help">${escapeHtml(k.unit)}</div>` : ''}`;
+            } else if (k.kind === 'boolean') {
+                return `<div class="mp-field"><label class="mp-check" for="${id}"><span class="mp-label" style="margin:0;">${escapeHtml(label)}</span><input id="${id}" type="checkbox"${def ? ' checked' : ''}></label>${help ? `<div class="mp-help">${mpMd(help)}</div>` : ''}${err ? `<div class="mp-field-error">${escapeHtml(err)}</div>` : ''}</div>`;
+            } else if (k.kind === 'select') {
+                const optLabel = o => (k.tkey && mp.translations[`component.${mp.trDomain}.selector.${k.tkey}.options.${o.value}`]) || o.label;
+                const opts = (f.required && def === undefined ? '' : '<option value=""></option>')
+                    + k.options.map((o, i) => `<option value="${i}"${def !== undefined && String(def) === String(o.value) ? ' selected' : ''}>${escapeHtml(String(optLabel(o)))}</option>`).join('');
+                control = `<select id="${id}" class="mp-input">${opts}</select>`;
+            } else if (k.kind === 'multi') {
+                const sel = Array.isArray(def) ? def.map(String) : [];
+                const optLabel = o => (k.tkey && mp.translations[`component.${mp.trDomain}.selector.${k.tkey}.options.${o.value}`]) || o.label;
+                control = `<div id="${id}" class="mp-multi">${k.options.map((o, i) => `<label><input type="checkbox" data-i="${i}"${sel.includes(String(o.value)) ? ' checked' : ''}> ${escapeHtml(String(optLabel(o)))}</label>`).join('')}</div>`;
+            } else if (k.kind === 'constant') {
+                control = `<input id="${id}" class="mp-input" type="text" value="${escapeHtml(String(k.value ?? ''))}" disabled>`;
+            }
+            return `<div class="mp-field"><label class="mp-label" for="${id}">${escapeHtml(label)}${req}</label>${control}${help ? `<div class="mp-help">${mpMd(help)}</div>` : ''}<div class="mp-field-error" data-err="${idx}">${escapeHtml(err)}</div></div>`;
+        }
+
+        // Read the form; returns null (and marks the fields) when a required one is empty.
+        function mpCollect() {
+            const out = {};
+            let ok = true;
+            mp.fields.forEach(({ f, k, section }, idx) => {
+                const el = document.getElementById(`mpf${idx}`);
+                const errEl = document.querySelector(`[data-err="${idx}"]`);
+                if (errEl) errEl.textContent = '';
+                let value; let has = true;
+                if (!el) return;
+                if (k.kind === 'text') {
+                    value = el.value;
+                    if (value === '') has = false;
+                } else if (k.kind === 'number') {
+                    if (el.value === '') has = false;
+                    else value = k.integer ? parseInt(el.value, 10) : Number(el.value);
+                } else if (k.kind === 'boolean') {
+                    value = !!el.checked;
+                } else if (k.kind === 'select') {
+                    if (el.value === '') has = false;
+                    else value = k.options[Number(el.value)].value;
+                } else if (k.kind === 'multi') {
+                    value = Array.from(el.querySelectorAll('input:checked')).map(cb => k.options[Number(cb.dataset.i)].value);
+                } else if (k.kind === 'constant') {
+                    value = k.value;
+                }
+                if (!has) {
+                    if (f.required) {
+                        ok = false;
+                        if (errEl) errEl.textContent = 'Required';
+                    }
+                    return;
+                }
+                if (section) {
+                    out[section] = out[section] || {};
+                    out[section][f.name] = value;
+                } else {
+                    out[f.name] = value;
+                }
+            });
+            return ok ? out : null;
+        }
+
+        async function mpSubmit() {
+            const data = mpCollect();
+            if (!data) return;
+            const btn = document.getElementById('mpSubmitBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="mdi mdi-loading mdi-spin"></i>'; }
+            mpEl('mpProg').style.display = 'block';
+            try {
+                mpShowStep(await mpCall('POST', data));
+            } catch (e) {
+                mpEl('mpProg').style.display = 'none';
+                if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+                const body = mpEl('mpBody');
+                const box = document.createElement('div');
+                box.className = 'mp-base-error';
+                box.innerHTML = `<i class="mdi mdi-alert-circle-outline"></i><div>${escapeHtml(e.message || 'Invalid input')}</div>`;
+                body.prepend(box);
+                body.scrollTop = 0;
+            }
+        }
+
+        // ---- Store details: status + facts cards -----------------------------
+        function relTime(iso) {
+            const t = Date.parse(iso || '');
+            if (!t) return '';
+            const s = Math.max(0, (Date.now() - t) / 1000);
+            const unit = (n, w) => `${n} ${w}${n === 1 ? '' : 's'} ago`;
+            if (s < 3600) return unit(Math.max(1, Math.round(s / 60)), 'minute');
+            if (s < 86400) return unit(Math.round(s / 3600), 'hour');
+            if (s < 86400 * 30) return unit(Math.round(s / 86400), 'day');
+            if (s < 86400 * 365) return unit(Math.round(s / (86400 * 30)), 'month');
+            return unit(Math.round(s / (86400 * 365)), 'year');
+        }
+
+        function storeDetailCardsHtml(i) {
+            if (!i) return '';
+            const o = i.owner, r = i.repo_name, t = i.type;
+            const name = formatName(r);
+            const ver = i.installed_version || i.latest_version || '';
+            const verLabel = ver ? (/^v/i.test(ver) ? ver : `v${ver}`) : '';
+            let icon, title, text, action = '';
+            const ok = '<i class="mdi mdi-check-circle" style="color:var(--success);"></i>';
+            if (!i.is_installed) {
+                icon = '<i class="mdi mdi-download" style="color:var(--primary);"></i>';
+                title = 'Not installed';
+                text = i.latest_version ? `Version ${escapeHtml(i.latest_version)} is available to install.` : 'Available to install.';
+                action = `<button class="mp-tonal" onclick="confirmInstWithVersion('${o}','${r}','${t}')"><i class="mdi mdi-download"></i> Install</button>`;
+            } else if (i.update_available) {
+                icon = '<i class="mdi mdi-update" style="color:var(--primary);"></i>';
+                title = 'Update available';
+                text = `Version ${escapeHtml(i.installed_version || '?')} → ${escapeHtml(i.latest_version || '?')}`;
+                action = `<button class="mp-tonal" onclick="confirmInstWithVersion('${o}','${r}','${t}')"><i class="mdi mdi-update"></i> Update</button>`;
+            } else if (t === 'integration' && needsRestart(o, r)) {
+                icon = '<i class="mdi mdi-restart" style="color:#ff9800;"></i>';
+                title = 'Restart required';
+                text = `${escapeHtml(name)} was updated. Restart Home Assistant to finish.`;
+                action = `<button class="mp-tonal" onclick="openNativeRestart()"><i class="mdi mdi-restart"></i> Restart</button>`;
+            } else if (t === 'integration' && i.can_setup && i.domain) {
+                icon = ok;
+                title = `Version ${escapeHtml(verLabel)} installed`;
+                text = `${escapeHtml(name)} is installed. Set it up to start using it.`;
+                action = `<button class="mp-tonal" onclick="mpOpenSetup('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
+            } else if (t === 'integration' && i.configured && i.domain) {
+                icon = ok;
+                title = `Version ${escapeHtml(verLabel)} installed`;
+                text = `${escapeHtml(name)} is installed and set up.`;
+                action = `<button class="mp-tonal" onclick="closeModal(); haNavigate('/config/integrations/integration/${encodeURIComponent(i.domain)}')"><i class="mdi mdi-open-in-new"></i> Open integration</button>`;
+            } else {
+                icon = ok;
+                title = verLabel ? `Version ${escapeHtml(verLabel)} installed` : 'Installed';
+                text = `${escapeHtml(name)} is installed.`;
+            }
+            const st = storeStatsFor(i);
+            const facts = [];
+            if (st && Number(st.downloads) > 0) facts.push(`<li><i class="mdi mdi-download-outline"></i> Downloaded <strong>${formatCount(st.downloads)}</strong> times</li>`);
+            if (st) facts.push(`<li><i class="mdi mdi-star-outline"></i> <strong>${formatCount(st.stars)}</strong> stars</li>`);
+            const changed = relTime(i.updated_at);
+            if (changed) facts.push(`<li><i class="mdi mdi-history"></i> Last change <strong>${escapeHtml(changed)}</strong></li>`);
+            facts.push(`<li><i class="mdi ${i.source === 'github' ? 'mdi-github' : 'mdi-store'}"></i> From <strong>${i.source === 'github' ? 'GitHub' : 'OnOff Store'}</strong></li>`);
+            return `
+                <div class="mp-card"><div class="mp-status">${icon}<div style="flex:1; min-width:0;">
+                    <div class="mp-status-title">${title}</div>
+                    <div class="mp-status-text">${text}</div>
+                    ${action ? `<div class="mp-status-actions">${action}</div>` : ''}
+                </div></div></div>
+                <div class="mp-card"><ul class="mp-facts">${facts.join('')}</ul></div>`;
+        }
+
+        function refreshDetailCards(o, r) {
+            const box = document.getElementById('mpDetailCards');
+            if (!box) return;
+            const item = findItemByRepo(o, r);
+            if (item) box.innerHTML = storeDetailCardsHtml(item);
+        }
+        function refreshDetailCardsByDomain(domain) {
+            const box = document.getElementById('mpDetailCards');
+            if (!box) return;
+            const top = document.querySelector('#mb .modal-top');
+            if (top) refreshDetailCards(top.dataset.owner, top.dataset.repo);
+            else {
+                const item = items.find(x => x.domain === domain);
+                if (item) box.innerHTML = storeDetailCardsHtml(item);
+            }
         }
 
         function pop(t, m, i, isReload, customActions) {
@@ -4868,6 +5811,8 @@
         window.onclick = (e) => {
             if (e.target == document.getElementById('modal')) closeModal();
             if (e.target == document.getElementById('customModal')) closeCustomModal();
+            // Tap outside a popup (e.g. the app details on a phone) closes it.
+            if (e.target == document.getElementById('pop-o')) closePop();
             if (!e.target.closest('.menu-container') && !e.target.closest('.dropdown')) {
                 document.getElementById('dropdown').style.display = 'none';
             }
@@ -5817,6 +6762,11 @@
         // instead of retrying the image (no flash on every refresh).
         const appIconMissing = new Set();
 
+        // App id -> list of releases (for the version picker and changelog).
+        const appReleasesCache = new Map();
+        // App id -> the version tag the user picked in the details dialog ('' = latest).
+        const appVersionChoice = {};
+
         const APP_TASK_LABELS = {
             starting: 'Starting…',
             downloading: 'Downloading…',
@@ -5994,7 +6944,7 @@
                                 <span>${escapeHtml(app.name || formatName(app.repo_name))}</span>
                                 <span class="type-tag tag-blue"><i class="mdi mdi-puzzle"></i> App</span>
                             </div>
-                            <div class="card-author">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` &middot; ${escapeHtml(version)}` : ''}</div>
+                            <div class="card-author">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` &middot; ${escapeHtml(version)}` : ''}${statsHtml(app.stats)}</div>
                             <div class="card-desc">${escapeHtml(app.description || '')}</div>
                             ${error}
                         </div>
@@ -6041,7 +6991,7 @@
                             <span class="type-tag tag-blue"><i class="mdi mdi-puzzle"></i> app</span>
                             ${badge}
                         </div>
-                        <div class="list-meta">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` • ${escapeHtml(version)}` : ''}${app.description ? ` • ${escapeHtml(app.description)}` : ''}</div>
+                        <div class="list-meta">by ${escapeHtml(app.owner_display || 'OnOff Store')}${version ? ` • ${escapeHtml(version)}` : ''}${app.description ? ` • ${escapeHtml(app.description)}` : ''}${statsHtml(app.stats)}</div>
                     </div>
                     <div class="list-actions">
                         ${action}
@@ -6167,7 +7117,7 @@
 
         function findApp(id) { return appsData.find(a => a.id === id); }
 
-        async function appAction(id, action, btn, value) {
+        async function appAction(id, action, btn, value, ref) {
             const app = findApp(id);
             if (!app) return;
             if (action === 'remove' && !confirm(`Remove ${app.name || app.repo_name}? Its settings and data in Home Assistant are deleted too.`)) return;
@@ -6176,7 +7126,7 @@
                 const res = await fetch('/api/yidstore/apps/action', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, action, value, slug: app.slug })
+                    body: JSON.stringify({ id, action, value, slug: app.slug, ref: ref || null })
                 });
                 const data = await parseJsonSafe(res);
                 if (!res.ok || data.error) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
@@ -6233,12 +7183,35 @@
             if (app.installed) versions.push(`Installed <strong>v${escapeHtml(app.installed_version || '?')}</strong>`);
             if (app.latest_version) versions.push(`Latest <strong>v${escapeHtml(app.latest_version)}</strong>`);
 
+            // Version picker (older versions / reinstall) — shown once the
+            // releases for this app have loaded and no job is running.
+            const rels = appReleasesCache.get(app.id);
+            let versionPicker = '';
+            if (!st.busy && Array.isArray(rels) && rels.length) {
+                const choice = appVersionChoice[app.id] || '';
+                const opts = [`<option value=""${choice === '' ? ' selected' : ''}>Latest (${escapeHtml(rels[0].tag_name)})</option>`]
+                    .concat(rels.slice(1).map(r => {
+                        const d = formatReleaseDate(r.published_at || r.created_at);
+                        return `<option value="${escapeHtml(r.tag_name)}"${choice === r.tag_name ? ' selected' : ''}>${escapeHtml(r.tag_name)}${r.name && r.name !== r.tag_name ? ' - ' + escapeHtml(r.name) : ''}${d ? ' - ' + escapeHtml(d) : ''}</option>`;
+                    }));
+                versionPicker = `
+                    <div class="version-wrap" style="margin:0 0 0.6rem;">
+                        <div class="version-row">
+                            <label style="color:var(--dim); font-size:0.85rem; white-space:nowrap;">Version:</label>
+                            <select id="appVersionSelect" class="version-select" onchange="appVersionChoice['${sid}']=this.value; renderAppChangelog('${sid}')">
+                                ${opts.join('')}
+                            </select>
+                        </div>
+                    </div>`;
+            }
+
             const primary = [];
             if (!st.busy) {
                 if (!app.installed) {
-                    primary.push(`<button class="btn btn-p" onclick="appAction('${sid}','install',this)"><i class="mdi mdi-download"></i> Install</button>`);
+                    primary.push(`<button class="btn btn-p" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-download"></i> Install</button>`);
                 } else {
                     if (app.update_available) primary.push(`<button class="btn btn-p" onclick="appAction('${sid}','update',this)"><i class="mdi mdi-update"></i> Update to v${escapeHtml(app.latest_version)}</button>`);
+                    if (Array.isArray(rels) && rels.length) primary.push(`<button class="btn btn-o" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-swap-vertical"></i> Switch version</button>`);
                     primary.push(running
                         ? `<button class="btn btn-o" onclick="appAction('${sid}','stop',this)"><i class="mdi mdi-stop"></i> Stop</button>`
                         : `<button class="btn btn-o" onclick="appAction('${sid}','start',this)"><i class="mdi mdi-play"></i> Start</button>`);
@@ -6254,7 +7227,7 @@
                     ${appIconHtml(app)}
                     <div style="min-width:0;">
                         <div style="color:var(--dim); font-size:0.85rem; line-height:1.4;">${escapeHtml(app.description || '')}</div>
-                        ${versions.length ? `<div style="font-size:0.8rem; margin-top:0.3rem;">${versions.join(' &middot; ')}</div>` : ''}
+                        ${versions.length || app.stats ? `<div style="font-size:0.8rem; margin-top:0.3rem;">${versions.join(' &middot; ')}${statsHtml(app.stats)}</div>` : ''}
                     </div>
                 </div>
                 <div class="card-status" style="border-top:1px solid var(--divider); border-bottom:1px solid var(--divider); padding:0.6rem 0; margin-bottom:0.6rem;">
@@ -6262,7 +7235,9 @@
                     <span>${escapeHtml(st.label)}</span>
                 </div>
                 ${error}
+                ${versionPicker}
                 ${primary.length ? `<div class="app-manage-actions" style="margin-top:0.2rem;">${primary.join('')}</div>` : ''}
+                <div id="appChangelog">${appReleaseNotesHtml(app.id)}</div>
                 ${app.installed && !st.busy ? `
                     <div style="margin-top:0.8rem;">
                         ${sw('boot', 'Start on boot', 'Start the app when Home Assistant starts', app.boot === 'auto')}
@@ -6290,6 +7265,69 @@
             appDetailsLast = appDetailsHtml(app);
             pop(app.name || formatName(app.repo_name), appDetailsLast, 'mdi-apps', false,
                 [{ t: 'Close', c: 'btn-o', f: 'closePop()' }]);
+            fetchAppReleases(id);
+        }
+
+        // Load the app's releases once (version picker + changelog), then
+        // re-render the open dialog so they appear.
+        async function fetchAppReleases(id) {
+            if (!appReleasesCache.has(id)) {
+                try {
+                    const res = await fetch(`/api/yidstore/apps/releases/${encodeURIComponent(id)}`);
+                    const data = await parseJsonSafe(res);
+                    appReleasesCache.set(id, Array.isArray(data) ? data : []);
+                } catch (_) {
+                    appReleasesCache.set(id, []);
+                }
+            }
+            if (appDetailsOpen() && appDetailsId === id) {
+                const app = findApp(id);
+                if (app) {
+                    appDetailsLast = appDetailsHtml(app);
+                    const pm = document.getElementById('pm');
+                    if (pm) pm.innerHTML = appDetailsLast;
+                }
+            }
+        }
+
+        // Release notes for the version currently selected ('' = latest).
+        function appReleaseNotesHtml(id) {
+            const rels = appReleasesCache.get(id);
+            if (!Array.isArray(rels) || !rels.length) return '';
+            const choice = appVersionChoice[id] || '';
+            const rel = choice ? rels.find(r => r.tag_name === choice) : rels[0];
+            if (!rel) return '';
+            const title = rel.name && rel.name !== rel.tag_name ? `${rel.tag_name} — ${rel.name}` : rel.tag_name;
+            const dateStr = formatReleaseDate(rel.published_at || rel.created_at);
+            const body = (rel.body || '').trim();
+            let bodyHtml;
+            if (body) {
+                try { bodyHtml = window.marked ? marked.parse(body) : escapeHtml(body).replace(/\n/g, '<br>'); }
+                catch (_) { bodyHtml = escapeHtml(body).replace(/\n/g, '<br>'); }
+            } else {
+                bodyHtml = '<span style="color:var(--dim);">No release notes for this version.</span>';
+            }
+            return `
+                <div class="app-changelog">
+                    <div class="app-changelog-title"><i class="mdi mdi-text-box-outline"></i> What's New — ${escapeHtml(title)}${dateStr ? ` <span style="color:var(--dim); font-weight:400;">· ${escapeHtml(dateStr)}</span>` : ''}</div>
+                    <div class="app-changelog-body">${bodyHtml}</div>
+                </div>`;
+        }
+
+        function renderAppChangelog(id) {
+            const el = document.getElementById('appChangelog');
+            if (el) el.innerHTML = appReleaseNotesHtml(id);
+        }
+
+        // Install / switch to the version chosen in the picker ('' = latest).
+        function appInstallSelectedVersion(id, action, btn) {
+            const sel = document.getElementById('appVersionSelect');
+            const ref = (sel ? sel.value : (appVersionChoice[id] || '')) || null;
+            const app = findApp(id);
+            if (app && app.installed && ref) {
+                if (!confirm(`Install ${app.name || app.repo_name} version ${ref}? The app will be rebuilt with this version.`)) return;
+            }
+            appAction(id, action, btn, undefined, ref);
         }
 
         // Keep an open details dialog in step with the latest data.

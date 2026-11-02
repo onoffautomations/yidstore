@@ -143,10 +143,38 @@ def _repo_slug(text: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", (text or "").strip().lower().replace("-", "_")).strip("_")
 
 
+def _read_config_flow_flags(config_dir: str, domains: list[str]) -> dict[str, bool]:
+    """Blocking: whether each installed custom integration has a config flow
+    (so it can be set up from the UI)."""
+    import json
+
+    flags: dict[str, bool] = {}
+    for domain in domains:
+        try:
+            manifest = Path(config_dir, "custom_components", domain, "manifest.json")
+            flags[domain] = bool(json.loads(manifest.read_text(encoding="utf-8")).get("config_flow"))
+        except Exception:
+            flags[domain] = False
+    return flags
+
+
+def _has_config_entry(hass: HomeAssistant, domain: str | None) -> bool:
+    try:
+        return bool(domain) and bool(hass.config_entries.async_entries(domain))
+    except Exception:
+        return False
+
+
 def _waiting_restart_from_package_data(hass: HomeAssistant, package_data: dict | None) -> bool:
     """Return restart-needed flag from tracked package data."""
     if not isinstance(package_data, dict):
         return False
+
+    # Authoritative flag set at install time (fresh config-flow integrations
+    # load without a restart, like Home Assistant's Marketplace).
+    restart_flag = package_data.get("restart_required")
+    if restart_flag is not None:
+        return bool(restart_flag)
 
     last_update_str = package_data.get("last_update")
     if not last_update_str:
@@ -826,6 +854,10 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(LocalBrandsIconView())
     hass.http.register_view(RepoIconView(eid))
     hass.http.register_view(BetaReleasesView(eid))
+    hass.http.register_view(OnOffStoreStatsView(eid))
+    # In-panel setup wizard (config flows) and restart, Marketplace-style.
+    from .flows import async_register_flow_views
+    async_register_flow_views(hass)
     hass.http.register_view(LocalBrandsListView())
     hass.http.register_view(LocalBrandsUploadView())
     hass.http.register_view(DocumentationReposView(eid))
@@ -1898,11 +1930,6 @@ class OnOffStoreInstallView(HomeAssistantView):
 
             await hass.services.async_call(DOMAIN, SERVICE_INSTALL, svc_data, blocking=True)
 
-            # Track that this repo requires restart
-            if "yidstore_requires_restart" not in hass.data:
-                hass.data["yidstore_requires_restart"] = set()
-            hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
-
             # The service resolves the *effective* download mode. For GitHub
             # integrations this may change the frontend's requested zipball
             # mode to a HACS release asset. Read the tracked package back so
@@ -1911,6 +1938,19 @@ class OnOffStoreInstallView(HomeAssistantView):
             tracked_pkg = coordinator.get_package_by_repo(o, r) or {}
             effective_mode = tracked_pkg.get("mode")
             effective_asset_name = tracked_pkg.get("asset_name")
+
+            # Only integrations can need a restart, and only when the new code
+            # could not be loaded on the fly (a fresh config-flow integration
+            # loads without a restart, like Home Assistant's Marketplace).
+            restart_required = t == "integration" and bool(
+                tracked_pkg.get("restart_required", True)
+            )
+            if "yidstore_requires_restart" not in hass.data:
+                hass.data["yidstore_requires_restart"] = set()
+            if restart_required:
+                hass.data["yidstore_requires_restart"].add(f"{o}/{r}".lower())
+            else:
+                hass.data["yidstore_requires_restart"].discard(f"{o}/{r}".lower())
 
             _patch_repos_cache(
                 o, r,
@@ -1923,12 +1963,30 @@ class OnOffStoreInstallView(HomeAssistantView):
                 asset_name=effective_asset_name,
             )
             _invalidate_local_state_cache()
+            # Ready to set up right away (a fresh config-flow integration that
+            # loaded without a restart and has no config entry yet): the panel
+            # then opens Home Assistant's "Add integration" dialog for it.
+            installed_domain = tracked_pkg.get("domain") if t == "integration" else None
+            config_flow = False
+            if installed_domain:
+                config_flow = (await hass.async_add_executor_job(
+                    _read_config_flow_flags, hass.config.config_dir, [installed_domain]
+                )).get(installed_domain, False)
+            can_setup = bool(
+                installed_domain and config_flow and not restart_required
+                and not _has_config_entry(hass, installed_domain)
+            )
+
             return web.json_response({
                 "success": True,
-                "requires_restart": True,
+                "requires_restart": restart_required,
                 "mode": effective_mode,
                 "asset_name": effective_asset_name,
                 "installed_version": tracked_pkg.get("installed_version"),
+                "domain": installed_domain,
+                "config_flow": config_flow,
+                "can_setup": can_setup,
+                "configured": _has_config_entry(hass, installed_domain),
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -2721,6 +2779,39 @@ class OnOffStoreUninstallView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
+class OnOffStoreStatsView(HomeAssistantView):
+    """Stars and download counts for the store items (read without a token)."""
+    url = "/api/yidstore/stats"
+    name = "api:yidstore:stats"
+    requires_auth = False
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+
+    async def get(self, request: web.Request) -> web.Response:
+        from .stats import async_get_stats, stats_for
+
+        hass = request.app["hass"]
+        eid = self.entry_id
+        if DOMAIN in hass.data and eid not in hass.data[DOMAIN]:
+            eids = list(hass.data[DOMAIN].keys())
+            eid = eids[0] if eids else eid
+        stats = await async_get_stats(hass)
+        out: dict[str, dict] = {}
+        if stats:
+            cached = _REPOS_CACHE.get(eid)
+            store_items = cached[1] if cached else (_REPOS_PREV_ITEMS.get(eid) or [])
+            for item in store_items or []:
+                if not isinstance(item, dict):
+                    continue
+                owner = item.get("owner") or ""
+                repo = item.get("repo_name") or ""
+                found = stats_for(stats, item.get("source"), owner, repo)
+                if found:
+                    out[f"{owner}/{repo}".lower()] = found
+        return web.json_response({"items": out})
+
+
 class OnOffStoreStatusView(HomeAssistantView):
     """Lightweight API to get install status for repos (for auto-refresh)."""
     url = "/api/yidstore/status"
@@ -2754,6 +2845,16 @@ class OnOffStoreStatusView(HomeAssistantView):
             status = {}
             restart_list: list[str] = []
             _LOGGER.debug("Status API: checking %d packages", len(coordinator.packages))
+            # Which installed integrations can be set up from the UI (one
+            # executor read per request, not one per package).
+            integration_domains = sorted({
+                p.get("domain") for p in coordinator.packages.values()
+                if p.get("package_type", "integration") == "integration" and p.get("domain")
+            })
+            config_flow_flags = await hass.async_add_executor_job(
+                _read_config_flow_flags, hass.config.config_dir, integration_domains
+            ) if integration_domains else {}
+
             for pkg_id, pkg_data in coordinator.packages.items():
                 owner = pkg_data.get("owner", "")
                 repo = pkg_data.get("repo_name", "")
@@ -2783,6 +2884,13 @@ class OnOffStoreStatusView(HomeAssistantView):
                     restart_list.append(key)
                     _LOGGER.info("Status API: adding %s to restart_list", key)
 
+                # Installed, loaded and not configured yet: offer "Set up".
+                can_setup = bool(
+                    pkg_type == "integration" and disk_installed and domain
+                    and not needs_restart and config_flow_flags.get(domain, False)
+                    and not _has_config_entry(hass, domain)
+                )
+
                 status[key] = {
                     "is_installed": disk_installed,
                     "install_source": "yidstore" if disk_installed else None,
@@ -2790,6 +2898,11 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "update_available": pkg_data.get("update_available", False) if disk_installed else False,
                     "installed_version": pkg_data.get("installed_version"),
                     "latest_version": pkg_data.get("latest_version"),
+                    "domain": domain if pkg_type == "integration" else None,
+                    "can_setup": can_setup,
+                    "configured": bool(
+                        pkg_type == "integration" and disk_installed and _has_config_entry(hass, domain)
+                    ),
                 }
 
             # "Authenticated" = a Gitea token is configured. We deliberately
@@ -2805,12 +2918,21 @@ class OnOffStoreStatusView(HomeAssistantView):
             cached = _REPOS_CACHE.get(eid)
             _maybe_retry_auth_rebuild(hass, eid)
 
+            # Running Home Assistant Core version (e.g. "2026.11.1"). The panel
+            # uses it to label installs (Marketplace vs HACS) and to show the
+            # one-time Marketplace migration notice.
+            try:
+                from homeassistant.const import __version__ as _ha_version
+            except Exception:
+                _ha_version = None
+
             return web.json_response({
                 "status": status,
                 "requires_restart_list": restart_list,
                 "is_authenticated": is_authenticated,
                 "beta_releases": bool(client and client.beta_enabled),
                 "repos_built_at": cached[0] if cached else None,
+                "ha_version": _ha_version,
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

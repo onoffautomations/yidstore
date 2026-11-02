@@ -184,8 +184,14 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         source: str = "gitea",
         domain: str | None = None,
         managed_by_yidstore: bool | None = None,
+        requires_restart: bool | None = None,
     ) -> str:
-        """Add or update a tracked package."""
+        """Add or update a tracked package.
+
+        ``requires_restart`` is the authoritative restart flag for this install:
+        True/False overrides the "updated since HA started" heuristic, None
+        leaves the previous value (so older records fall back to the heuristic).
+        """
         package_id = f"{owner}_{repo_name}".lower().replace("-", "_")
 
         is_new_package = package_id not in self.packages
@@ -204,6 +210,11 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
             "update_available": False,  # Just installed, so no update available
             "install_date": existing_data.get("install_date", datetime.now().isoformat()),
             "last_update": datetime.now().isoformat(),
+            # Authoritative restart flag (None -> fall back to the heuristic).
+            "restart_required": (
+                bool(requires_restart) if requires_restart is not None
+                else existing_data.get("restart_required")
+            ),
             "last_check": existing_data.get("last_check"),  # Preserve last check time
             "mode": mode,
             "asset_name": asset_name,
