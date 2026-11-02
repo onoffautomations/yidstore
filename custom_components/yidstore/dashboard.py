@@ -855,6 +855,9 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     hass.http.register_view(RepoIconView(eid))
     hass.http.register_view(BetaReleasesView(eid))
     hass.http.register_view(OnOffStoreStatsView(eid))
+    # In-panel setup wizard (config flows) and restart, Marketplace-style.
+    from .flows import async_register_flow_views
+    async_register_flow_views(hass)
     hass.http.register_view(LocalBrandsListView())
     hass.http.register_view(LocalBrandsUploadView())
     hass.http.register_view(DocumentationReposView(eid))
@@ -1983,6 +1986,7 @@ class OnOffStoreInstallView(HomeAssistantView):
                 "domain": installed_domain,
                 "config_flow": config_flow,
                 "can_setup": can_setup,
+                "configured": _has_config_entry(hass, installed_domain),
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -2896,6 +2900,9 @@ class OnOffStoreStatusView(HomeAssistantView):
                     "latest_version": pkg_data.get("latest_version"),
                     "domain": domain if pkg_type == "integration" else None,
                     "can_setup": can_setup,
+                    "configured": bool(
+                        pkg_type == "integration" and disk_installed and _has_config_entry(hass, domain)
+                    ),
                 }
 
             # "Authenticated" = a Gitea token is configured. We deliberately

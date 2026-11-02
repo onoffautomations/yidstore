@@ -1,5 +1,11 @@
 **Beta** — please test before 1.8.0 is released. Only offered to users who turn on beta versions for YidStore in the Marketplace (HACS).
 
+### New in beta 4: installs work like the Marketplace
+- **Install dialog**: shows what gets installed and which version; GitHub (community) items show a "you install this at your own risk" note. A progress bar runs while it installs.
+- **Setup right in the same dialog**: after a fresh integration installs, YidStore starts its configuration wizard in place, with the integration's own form, labels, errors and "Success" screen. Anything the dialog can't show offers "Continue in Home Assistant".
+- **Restart the native way**: when an update needs a restart, YidStore offers **Restart**, which opens Home Assistant's own restart dialog. No more "go to Repairs".
+- **Details page like the Marketplace**: a status card ("Not installed / Version X installed / Set it up to start using it / installed and set up") with Install, Update, Set up, Restart or Open integration, plus downloads, stars and last change.
+
 ### New in beta 3
 - After installing an integration that's ready to use (no restart needed), YidStore opens its setup straight away: the same dialog as Settings → Devices & Services → Add integration.
 - Installed integrations that aren't set up yet get a **Set up** button on their card, list row and details, so you can start the setup from YidStore at any time.
