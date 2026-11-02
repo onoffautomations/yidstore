@@ -2917,6 +2917,17 @@
         }
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
+        // "v1.99.67" newer than "v1.93.0"? Numeric parts, left to right.
+        function versionNewer(a, b) {
+            const pa = String(a || '').match(/\d+/g) || [];
+            const pb = String(b || '').match(/\d+/g) || [];
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const x = Number(pa[i] || 0), y = Number(pb[i] || 0);
+                if (x !== y) return x > y;
+            }
+            return false;
+        }
+
         function formatReleaseDate(dateString) {
             if (!dateString) return '';
             try {
@@ -4617,6 +4628,19 @@
                 console.log('Failed to fetch releases:', e);
             }
 
+            // The update check runs every couple of hours; the release list is
+            // live. If it already has a newer version than the one installed,
+            // offer the update now and let the backend catch up.
+            if (item.is_installed && Array.isArray(releases) && releases.length) {
+                const newest = releases[0] && releases[0].tag_name;
+                if (newest && item.installed_version && versionNewer(newest, item.installed_version) && !item.update_available) {
+                    item.update_available = true;
+                    item.latest_version = newest;
+                    fetch('/api/yidstore/refresh', { method: 'POST' }).catch(() => {});
+                    if (!isOverlayOpen()) apply();
+                }
+            }
+
             // Build version selector if releases are available
             let versionSelector = '';
             if (releases && releases.length > 0) {
@@ -5114,110 +5138,91 @@
         // Marketplace-style install + setup, and Home Assistant's own restart.
         // =====================================================================
 
-        // ---- Restart: Home Assistant's restart dialog, on this page ----------
-        // Uses Home Assistant's own dialog when its code is already loaded
-        // (opened before, or Settings -> System visited this session);
-        // otherwise YidStore's matching dialog. Never leaves the page.
-        function openNativeRestart() {
-            try {
-                const pw = window.parent;
-                if (!pw || pw === window) throw new Error('no parent');
-                const ha = pw.document.querySelector('home-assistant');
-                const ce = pw.customElements;
-                if (ha && ce) {
-                    if (ce.get('dialog-restart')) {
-                        ha.dispatchEvent(new pw.CustomEvent('show-dialog', { bubbles: true, composed: true,
-                            detail: { dialogTag: 'dialog-restart', dialogImport: () => pw.Promise.resolve(), dialogParams: {} } }));
-                        return;
-                    }
-                    const Nav = ce.get('ha-config-system-navigation');
-                    if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
-                        Nav.prototype._showRestartDialog.call(ha);
-                        return;
-                    }
-                }
-            } catch (_) {}
-            mpOpenRestart();
+        // ---- Restart: Home Assistant's own (native) restart dialog -----------
+        // Home Assistant only loads its restart dialog with Settings -> System.
+        // YidStore loads that code the same way Home Assistant's router does
+        // (Settings page -> System page), in the background, then opens the
+        // native dialog over the page you are on. Nothing is navigated.
+        function haDeepFind(root, selector) {
+            const stack = [root];
+            let guard = 0;
+            while (stack.length && guard++ < 5000) {
+                const r = stack.pop();
+                if (!r || !r.querySelector) continue;
+                const hit = r.querySelector(selector);
+                if (hit) return hit;
+                for (const el of r.querySelectorAll('*')) if (el.shadowRoot) stack.push(el.shadowRoot);
+            }
+            return null;
         }
 
-        // YidStore's restart dialog, matching Home Assistant's.
-        async function mpOpenRestart() {
-            closePop();
-            mp.flow = null; mp.finished = true; mp.busy = false; mp.onDone = null;
-            let supervisor = false;
+        async function openNativeRestart() {
+            let pw, ha, ce;
             try {
-                const res = await fetch('/api/yidstore/restart');
-                const data = await parseJsonSafe(res);
-                supervisor = !!data.supervisor;
-            } catch (_) {}
-            const row = (action, icon, title, desc) => `
-                <button type="button" onclick="mpRestartAsk('${action}')"><span style="display:flex; gap:0.8rem; align-items:center;">
-                    <i class="mdi ${icon}" style="font-size:1.4rem; color:var(--dim);"></i>
-                    <span><strong style="display:block; font-weight:600;">${title}</strong><span style="color:var(--dim); font-size:0.82rem;">${desc}</span></span>
-                </span></button>`;
-            mpRender({
-                title: 'Restart Home Assistant',
-                body: `<div class="mp-menu">
-                    ${row('reload', 'mdi-auto-fix', 'Quick reload', 'Loads new YAML configurations without a restart.')}
-                    ${row('restart', 'mdi-refresh', 'Restart Home Assistant', 'Interrupts all running automations and scripts.')}
-                    ${supervisor ? `<details style="margin-top:0.4rem;"><summary style="cursor:pointer; color:var(--dim); padding:0.4rem 0;">More options</summary><div class="mp-menu" style="margin-top:0.4rem;">
-                        ${row('reboot', 'mdi-power-cycle', 'Reboot system', 'Restarts the system running Home Assistant and all apps.')}
-                        ${row('shutdown', 'mdi-power', 'Shut down system', 'Shuts down the system running Home Assistant and all apps.')}
-                    </div></details>` : ''}
-                </div>`,
-                buttons: [{ t: 'Cancel', c: 'btn-o', f: () => mpClose() }],
-            });
-            mpShow();
-        }
-
-        const MP_RESTART = {
-            restart: { title: 'Restart Home Assistant?', text: 'All integrations will be reloaded.', btn: 'Restart', busy: 'Restarting Home Assistant…' },
-            reboot: { title: 'Reboot system?', text: 'This will reboot the complete system which includes Home Assistant and all apps.', btn: 'Reboot', busy: 'Rebooting system…' },
-            shutdown: { title: 'Shut down system?', text: 'This will shut down the complete system which includes Home Assistant and all apps.', btn: 'Shut down', busy: 'Shutting down system…' },
-        };
-
-        async function mpRestartAsk(action) {
-            if (action === 'reload') {
-                mpRender({ title: 'Quick reload', progress: true, body: mpCenter(MP_SPINNER, 'Reloading configuration'), buttons: [] });
-                try {
-                    const res = await fetch('/api/yidstore/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
-                    const data = await parseJsonSafe(res);
-                    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-                    mpClose();
-                } catch (e) {
-                    mpRender({ title: 'Quick reload', body: `<div class="mp-base-error"><i class="mdi mdi-alert-circle-outline"></i><div>Failed to reload configuration: ${escapeHtml(e.message)}</div></div>`, buttons: [{ t: 'Close', c: 'btn-p', f: () => mpClose() }] });
-                }
+                pw = window.parent;
+                if (!pw || pw === window) throw new Error('not inside Home Assistant');
+                ha = pw.document.querySelector('home-assistant');
+                ce = pw.customElements;
+                if (!ha || !ce) throw new Error('Home Assistant page not found');
+            } catch (_) {
+                restartViaYidStore();
                 return;
             }
-            const c = MP_RESTART[action];
-            mpRender({
-                title: c.title,
-                body: `<p>${escapeHtml(c.text)}</p>`,
-                buttons: [
-                    { t: 'Cancel', c: 'btn-o', f: () => mpOpenRestart() },
-                    { t: c.btn, c: 'btn-p', f: () => mpRestartDo(action) },
-                ],
-            });
+            const show = () => {
+                if (ce.get('dialog-restart')) {
+                    ha.dispatchEvent(new pw.CustomEvent('show-dialog', { bubbles: true, composed: true,
+                        detail: { dialogTag: 'dialog-restart', dialogImport: () => pw.Promise.resolve(), dialogParams: {} } }));
+                    return true;
+                }
+                const Nav = ce.get('ha-config-system-navigation');
+                if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
+                    Nav.prototype._showRestartDialog.call(ha);
+                    return true;
+                }
+                return false;
+            };
+            try {
+                if (show()) return;
+                // 1) The Settings panel, through Home Assistant's own panel router.
+                if (!ce.get('ha-panel-config')) {
+                    const resolver = haDeepFind(ha.shadowRoot || ha, 'partial-panel-resolver');
+                    const route = resolver && resolver.routerOptions && resolver.routerOptions.routes
+                        && resolver.routerOptions.routes.config;
+                    if (route && typeof route.load === 'function') await route.load();
+                }
+                // 2) Its System page, which brings the restart dialog with it.
+                if (ce.get('ha-panel-config') && !ce.get('ha-config-system-navigation')) {
+                    const cfg = pw.document.createElement('ha-panel-config');
+                    const route = cfg.routerOptions && cfg.routerOptions.routes && cfg.routerOptions.routes.system;
+                    if (route && typeof route.load === 'function') await route.load();
+                }
+                if (show()) return;
+            } catch (e) {
+                console.warn('YidStore: could not load the restart dialog in place', e);
+            }
+            // Last resort: open Settings -> System and its restart dialog there.
+            const script = pw.document.createElement('script');
+            script.textContent = `(() => {
+                const ha = document.querySelector('home-assistant');
+                history.pushState(null, '', '/config/system');
+                window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+                let tries = 0;
+                const t = setInterval(() => {
+                    const Nav = customElements.get('ha-config-system-navigation');
+                    if (Nav && typeof Nav.prototype._showRestartDialog === 'function') {
+                        clearInterval(t); Nav.prototype._showRestartDialog.call(ha);
+                    } else if (++tries > 40) clearInterval(t);
+                }, 250);
+            })();`;
+            pw.document.head.appendChild(script);
+            script.remove();
         }
 
-        async function mpRestartDo(action) {
-            const c = MP_RESTART[action];
-            mpRender({ title: c.title, progress: true, body: mpCenter(MP_SPINNER, escapeHtml(c.busy)), buttons: [] });
+        async function restartViaYidStore() {
+            if (!confirm('Restart Home Assistant now?')) return;
             try {
-                await fetch('/api/yidstore/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+                await fetch('/api/yidstore/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'restart' }) });
             } catch (_) {}
-            if (action !== 'restart') return;
-            // Reload YidStore once Home Assistant is back.
-            let wentDown = false;
-            const started = Date.now();
-            const check = async () => {
-                let up = false;
-                try { up = (await fetch('/api/yidstore/stats', { cache: 'no-store' })).ok; } catch (_) { up = false; }
-                if (!up) wentDown = true;
-                if (up && (wentDown || Date.now() - started > 90000)) { location.reload(); return; }
-                if (Date.now() - started < 10 * 60 * 1000) setTimeout(check, 3000);
-            };
-            setTimeout(check, 4000);
         }
 
         // "Restart required" with a Restart button that opens the native dialog.
