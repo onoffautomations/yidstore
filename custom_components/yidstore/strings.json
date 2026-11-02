@@ -8,13 +8,6 @@
           "side_panel": "Show Store in Sidebar (Admins Only)"
         }
       },
-      "store_selection": {
-        "title": "Install from Store",
-        "description": "Select packages to install from the store",
-        "data": {
-          "packages": "Packages"
-        }
-      },
       "reconfigure": {
         "title": "Reconfigure YidStore",
         "description": "Update your settings",
@@ -39,7 +32,6 @@
       "already_configured": "YidStore is already configured",
       "install_complete": "Setup complete! Packages installed successfully.",
       "setup_complete": "Setup complete!",
-      "no_packages": "Store list is empty",
       "no_valid_packages": "No valid packages in store",
       "reconfigure_successful": "Reconfiguration successful",
       "cannot_reconfigure": "Reconfiguration is not possible at this time",

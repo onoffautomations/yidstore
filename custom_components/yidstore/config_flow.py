@@ -6,8 +6,6 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv
 from homeassistant.util.yaml import load_yaml
 
 from .const import DOMAIN, MODE_ASSET, MODE_ZIPBALL, TYPE_INTEGRATION, TYPE_LOVELACE, TYPE_BLUEPRINTS, CONF_SIDE_PANEL
@@ -82,9 +80,12 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SIDE_PANEL: user_input.get(CONF_SIDE_PANEL, True),
                 }
 
-                # Move to store selection BEFORE creating entry
-                _LOGGER.debug("Moving to store selection...")
-                return await self.async_step_store_selection()
+                # Packages are installed from the YidStore panel afterwards;
+                # setup no longer asks which ones to install.
+                return self.async_create_entry(
+                    title="YidStore",
+                    data=self.config_data,
+                )
 
         schema = vol.Schema(
             {
@@ -174,126 +175,6 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SIDE_PANEL, default=entry.data.get(CONF_SIDE_PANEL, True)): bool,
             }
         )
-
-    async def async_step_store_selection(self, user_input=None):
-        """Show store list for package selection."""
-        errors = {}
-
-        if user_input is not None:
-            # Create the entry with pending installations metadata
-            selected = user_input.get("packages", [])
-            self.config_data["pending_installs"] = selected
-            return self.async_create_entry(
-                title="YidStore",
-                data=self.config_data,
-            )
-
-        return await self._show_store_form(errors)
-
-    async def _show_store_form(self, errors=None):
-        """Show the store selection form."""
-        if errors is None:
-            errors = {}
-
-        # Load store list
-        try:
-            packages = await self.hass.async_add_executor_job(load_store_list, self.hass)
-        except Exception as e:
-            _LOGGER.error("Failed to load store list: %s", e, exc_info=True)
-            packages = []
-
-        if not packages:
-            _LOGGER.info("Store list is empty, finishing setup")
-            return self.async_abort(reason="no_packages")
-
-        # Create options for multi-select
-        package_options = {}
-        for pkg in packages:
-            try:
-                name = pkg.get("name", "Unknown")
-                pkg_type = pkg.get("type", "unknown")
-                desc = pkg.get("description", "")
-                label = f"{name} ({pkg_type})"
-                if desc:
-                    label = f"{label} - {desc}"
-                key = f"{pkg.get('owner', '')}_{pkg.get('repo', '')}"
-                package_options[key] = label
-            except Exception as e:
-                _LOGGER.warning("Skipping invalid package: %s", e)
-                continue
-
-        schema = vol.Schema(
-            {
-                vol.Optional("packages", default=[]): cv.multi_select(package_options),
-            }
-        )
-
-        return self.async_show_form(
-            step_id="store_selection",
-            data_schema=schema,
-            errors=errors,
-        )
-
-    async def _install_packages_via_services(self, selected_keys: list[str]) -> bool:
-        """Install selected packages via services. Returns True if any integration was installed."""
-        packages = await self.hass.async_add_executor_job(load_store_list, self.hass)
-        installed_integration = False
-
-        for key in selected_keys:
-            # Find package by key
-            pkg = None
-            for p in packages:
-                pkg_key = f"{p.get('owner', '')}_{p.get('repo', '')}"
-                if pkg_key == key:
-                    pkg = p
-                    break
-
-            if not pkg:
-                _LOGGER.error("Package not found for key: %s", key)
-                continue
-
-            repo = pkg.get("repo")
-            owner = pkg.get("owner", self.config_data.get("owner", ""))
-            pkg_type = pkg.get("type", "integration")
-            mode = pkg.get("mode")
-            asset_name = pkg.get("asset_name")
-
-            if not repo or not owner:
-                _LOGGER.error("Invalid package data: %s", pkg)
-                raise HomeAssistantError(f"Invalid package: {pkg.get('name', 'unknown')}")
-
-            # Track if integration was installed
-            if pkg_type == "integration":
-                installed_integration = True
-
-            _LOGGER.info("Installing package: %s/%s (type: %s)", owner, repo, pkg_type)
-
-            # Build service data for unified Generic Install
-            service_data = {
-                "owner": owner,
-                "repo": repo,
-                "type": pkg_type,
-            }
-            if mode:
-                service_data["mode"] = mode
-            if asset_name:
-                service_data["asset_name"] = asset_name
-
-            # Call installation service
-            try:
-                await self.hass.services.async_call(
-                    DOMAIN,
-                    "install",
-                    service_data,
-                    blocking=True
-                )
-                _LOGGER.info("✓ Installed and tracked: %s/%s", owner, repo)
-            except Exception as e:
-                error_msg = str(e)
-                _LOGGER.error("Failed to install %s/%s: %s", owner, repo, error_msg, exc_info=True)
-                raise HomeAssistantError(f"Failed to install {owner}/{repo}: {error_msg}") from e
-
-        return installed_integration
 
     @staticmethod
     @callback
