@@ -1,7 +1,9 @@
-name: Publish YidStore beta (pre-release)
+name: Publish YidStore release
 
-# Publishes a GitHub pre-release with yidstore.zip attached when the version
-# in manifest.json is a beta (e.g. 1.8.0b1) and no release exists for it yet.
+# Publishes a GitHub release with yidstore.zip attached when the version in
+# manifest.json has no release yet:
+#   - a beta (e.g. 1.8.0b1), from any branch: a pre-release;
+#   - a full version (e.g. 1.8.0), only from main: the latest release.
 # Runs on a push that changes manifest.json, the release notes or this file,
 # or on pushing a beta tag such as v1.8.0b1. Notes: .github/release_notes.md.
 # HACS / the Marketplace only offer a pre-release to users who turn on beta
@@ -29,7 +31,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Work out the beta version
+      - name: Work out the version
         id: ver
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,8 +39,16 @@ jobs:
           version="$(python3 -c "import json;print(json.load(open('custom_components/yidstore/manifest.json'))['version'])")"
           tag="v${version}"
           echo "Manifest version: ${version}"
-          if ! echo "${version}" | grep -Eq '(a|b|rc)[0-9]+$'; then
-            echo "Not a beta version; nothing to publish."
+          if echo "${version}" | grep -Eq '(a|b|rc)[0-9]+$'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            echo "name=YidStore ${tag} (beta)" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+            echo "name=YidStore ${tag}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Full versions are only released from main; nothing to publish."
             echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
@@ -61,8 +71,8 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: YidStore ${{ steps.ver.outputs.tag }} (beta)
+          name: ${{ steps.ver.outputs.name }}
           body_path: .github/release_notes.md
-          prerelease: true
-          make_latest: false
+          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.ver.outputs.latest }}
           files: yidstore.zip
