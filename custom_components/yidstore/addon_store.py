@@ -32,14 +32,11 @@ re-publishing does not make the Supervisor see a change.
 
 from __future__ import annotations
 
-import gzip
 import hashlib
-import io
 import json
 import logging
 import shutil
 import struct
-import zipfile
 import zlib
 from pathlib import Path
 
@@ -179,42 +176,13 @@ def sync_addon_dir(root: Path, slug: str, source: Path) -> None:
     shutil.copytree(source, dest, ignore=shutil.ignore_patterns("__pycache__"))
 
 
-def add_addon_from_zip(root: Path, slug: str, zip_bytes: bytes) -> dict:
-    """Extract a Gitea archive into the store under ``src/<slug>/``.
-
-    Gitea zipballs wrap everything in a single top-level ``<repo>/`` folder;
-    that wrapper is stripped so ``config.yaml`` lands at the root of ``<slug>/``.
-    """
-    src_dir = root / "src" / slug
-    if src_dir.exists():
-        shutil.rmtree(src_dir)
-    src_dir.mkdir(parents=True, exist_ok=True)
-
-    config_found = False
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        names = [n for n in zf.namelist() if not n.endswith("/")]
-        top = None
-        first_parts = [n.split("/", 1) for n in names]
-        if first_parts and all(len(p) == 2 for p in first_parts):
-            tops = {p[0] for p in first_parts}
-            if len(tops) == 1:
-                top = next(iter(tops))
-        for name in names:
-            rel = name[len(top) + 1:] if top else name
-            if not rel or ".." in rel.split("/"):
-                continue
-            dest = src_dir / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(zf.read(name))
-            if rel.lower() in ("config.yaml", "config.yml", "config.json"):
-                config_found = True
-
-    return {"slug": slug, "config_found": config_found, "src_path": str(src_dir)}
-
-
 # ---------------------------------------------------------------------------
 # Smart HTTP protocol (git-upload-pack, protocol v0, stateless)
 # ---------------------------------------------------------------------------
+
+# Largest git negotiation request accepted (before and after gzip).
+MAX_REQUEST_BYTES = 1024 * 1024
+
 
 def _pkt(data: bytes) -> bytes:
     return f"{len(data) + 4:04x}".encode() + data
@@ -274,7 +242,12 @@ def upload_pack(git_dir: Path, body: bytes, content_encoding: str = "") -> bytes
     no shallow boundary, and every want is answered with the full pack.
     """
     if "gzip" in (content_encoding or "").lower():
-        body = gzip.decompress(body)
+        # A git negotiation is a few KB; cap the unpacked size so a small
+        # compressed request can't expand into gigabytes (no login needed).
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        body = inflater.decompress(body, MAX_REQUEST_BYTES)
+        if inflater.unconsumed_tail:
+            return b""
     lines = _read_pkts(body)
     wants = [ln.split()[1] for ln in lines if ln and ln.startswith("want ")]
     deepen = any(ln and ln.startswith(("deepen", "shallow ")) for ln in lines)

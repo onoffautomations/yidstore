@@ -20,7 +20,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components import frontend
 
-from .const import DOMAIN, CONF_SIDE_PANEL, SERVICE_INSTALL
+from .const import DOMAIN, CONF_SIDE_PANEL, SERVICE_INSTALL, LOVELACE_VENDOR_FOLDER
 from .config_flow import load_store_list
 from .installer import uninstall_package
 
@@ -417,6 +417,98 @@ async def _fetch_authors_map(hass: HomeAssistant, client, force: bool = False) -
 
 
 URL_BASE = "/yidstore_static"
+
+# Images from packages are served on Home Assistant's own address. An SVG
+# opened directly could run scripts there; these headers make the browser
+# treat every served image as inert (no scripts, no sniffing).
+IMAGE_SAFETY_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+class YidStorePageView(HomeAssistantView):
+    """YidStore's page for the sidebar panel, never stale.
+
+    Sent with "Cache-Control: no-cache" and an ETag: the browser keeps a
+    copy but asks every time whether it changed (a tiny 304 when it
+    didn't), so an update shows on the next load. Gzipped when accepted.
+    """
+    url = URL_BASE + "/index.html"
+    name = "yidstore:page"
+    requires_auth = False
+
+    def __init__(self, static_dir: str) -> None:
+        self._path = os.path.join(static_dir, "index.html")
+        self._cache: tuple | None = None  # (mtime, size, etag, raw, gz)
+
+    def _load(self) -> tuple:
+        import gzip
+        import hashlib
+
+        st = os.stat(self._path)
+        cached = self._cache
+        if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+            return cached
+        with open(self._path, "rb") as fh:
+            raw = fh.read()
+        # Stamp the page with the installed YidStore version, so an open page
+        # can tell it is out of date after an update and reload itself.
+        try:
+            import json
+
+            with open(os.path.join(os.path.dirname(os.path.dirname(self._path)), "manifest.json"), encoding="utf-8") as fh:
+                version = str(json.load(fh).get("version") or "")
+        except Exception:
+            version = ""
+        if version:
+            raw = raw.replace(
+                b"<head>",
+                b'<head>\n    <meta name="yidstore-version" content="' + version.encode() + b'">',
+                1,
+            )
+        etag = '"' + hashlib.sha1(raw).hexdigest()[:20] + '"'
+        self._cache = (st.st_mtime, st.st_size, etag, raw, gzip.compress(raw, compresslevel=9, mtime=0))
+        return self._cache
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        # Opened directly in a browser tab (not inside Home Assistant's
+        # sidebar, which loads it in an iframe): go to the YidStore panel,
+        # which needs a Home Assistant login. The store's data needs a login
+        # anyway; this just keeps the page from being used on its own.
+        if request.headers.get("Sec-Fetch-Dest", "").lower() == "document":
+            target = "/yidstore" if "yidstore" in (hass.data.get("frontend_panels") or {}) else "/"
+            return web.Response(status=302, headers={"Location": target, "Cache-Control": "no-store"})
+        try:
+            _mtime, _size, etag, raw, gz = await hass.async_add_executor_job(self._load)
+        except OSError:
+            return web.Response(status=404)
+        headers = {"Cache-Control": "no-cache", "ETag": etag, "Vary": "Accept-Encoding"}
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304, headers=headers)
+        if "gzip" in request.headers.get("Accept-Encoding", "").lower():
+            headers["Content-Encoding"] = "gzip"
+            return web.Response(body=gz, content_type="text/html", charset="utf-8", headers=headers)
+        return web.Response(body=raw, content_type="text/html", charset="utf-8", headers=headers)
+
+
+def _write_gzip_copies(static_dir: str) -> None:
+    """Blocking: write <file>.gz next to the panel's page and script."""
+    import gzip
+
+    for name in ("yidstore-brands.js",):
+        src = os.path.join(static_dir, name)
+        try:
+            if os.path.isfile(src):
+                with open(src, "rb") as fh:
+                    data = gzip.compress(fh.read(), compresslevel=9, mtime=0)
+                tmp = src + ".gz.tmp"
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                os.replace(tmp, src + ".gz")
+        except Exception as err:  # serving the plain file still works
+            _LOGGER.debug("Could not write %s.gz: %s", name, err)
 BRANDS_PATCHER_URL = "/yidstore_static/yidstore-brands.js"
 
 
@@ -629,159 +721,106 @@ def _is_repo_installed(
     return is_installed
 
 
-async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
-    """Setup the frontend brand icon patcher."""
-    # Create the JavaScript patcher file
-    static_dir = os.path.join(os.path.dirname(__file__), "dashboard_static")
-    js_path = os.path.join(static_dir, "yidstore-brands.js")
-
-    js_content = r'''/**
- * YidStore Brands Patcher
- * - Overrides Home Assistant brand icon/logo fetches to prefer local overrides:
- *     /config/custom_components/<domain>/brand/...
- *     /config/custom_components/<domain>/...
- * - Falls back to official brands site if no local file exists.
- */
-(function() {
-  'use strict';
-
-  const BRANDS_LIST_API = '/api/yidstore/brands';
-  let localBrands = {}; // domain -> { filename -> local url }
-  let patchApplied = false;
-
-  async function loadLocalBrands() {
-    try {
-      const res = await fetch(BRANDS_LIST_API, { cache: 'no-store' });
-      if (res.ok) {
-        localBrands = await res.json();
-        console.debug('[YidStore] Local brands loaded:', Object.keys(localBrands).length);
-      }
-    } catch (e) {
-      console.debug('[YidStore] Failed to load local brands list:', e);
-    }
-  }
-
-  function matchBrandUrl(u) {
-    if (typeof u !== 'string') return null;
-    if (!u.includes('brands.home-assistant.io')) return null;
-
-    // Supports:
-    //  - https://brands.home-assistant.io/<domain>/icon.png
-    //  - https://brands.home-assistant.io/_/<domain>/icon.png
-    //  - .../logo.png, dark_icon.png, dark_logo.png, @2x and svg
-    const m = u.match(/brands\.home-assistant\.io\/(?:_\/)?([^/]+)\/([^/?#]+)$/);
-    if (!m) return null;
-    return { domain: decodeURIComponent(m[1] || ''), filename: (m[2] || '').split('?')[0] };
-  }
-
-  function getLocalUrl(domain, filename) {
-    const d = (domain || '').toLowerCase();
-    const files = localBrands[d];
-    if (!files) return null;
-    if (files[filename]) return files[filename];
-
-    // Fallback order: if a specific file isn't present, fall back between dark/light, and logo->icon.
-    const alt = {
-      'dark_icon.png': 'icon.png',
-      'icon.png': 'dark_icon.png',
-      'dark_logo.png': 'logo.png',
-      'logo.png': 'dark_logo.png',
-      'dark_icon@2x.png': 'icon@2x.png',
-      'icon@2x.png': 'dark_icon@2x.png',
-      'dark_logo@2x.png': 'logo@2x.png',
-      'logo@2x.png': 'dark_logo@2x.png',
-    };
-    const a = alt[filename];
-    if (a && files[a]) return files[a];
-
-    // If logo missing, try icon
-    if (filename.startsWith('logo') && files['icon.png']) return files['icon.png'];
-    if (filename.startsWith('dark_logo') && files['dark_icon.png']) return files['dark_icon.png'];
-
-    return null;
-  }
-
-  function patch() {
-    if (patchApplied) return;
-
-    // Patch fetch
-    const origFetch = window.fetch;
-    window.fetch = async function(url, options) {
-      const hit = matchBrandUrl(url);
-      if (hit) {
-        const local = getLocalUrl(hit.domain, hit.filename);
-        if (local) return origFetch.call(this, local, options);
-      }
-      return origFetch.call(this, url, options);
-    };
-
-    // Patch <img src=...>
-    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
-    Object.defineProperty(HTMLImageElement.prototype, 'src', {
-      get() { return desc.get.call(this); },
-      set(v) {
-        const hit = matchBrandUrl(v);
-        if (hit) {
-          const local = getLocalUrl(hit.domain, hit.filename);
-          if (local) return desc.set.call(this, local);
-        }
-        return desc.set.call(this, v);
-      }
-    });
-
-    // Catch dynamically inserted images
-    const obs = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes || []) {
-          if (!node || node.nodeType !== 1) continue;
-          const imgs = node.tagName === 'IMG' ? [node] : (node.querySelectorAll ? node.querySelectorAll('img') : []);
-          imgs.forEach(img => {
-            const src = img.getAttribute('src') || '';
-            const hit = matchBrandUrl(src);
-            if (!hit) return;
-            const local = getLocalUrl(hit.domain, hit.filename);
-            if (local) img.src = local;
-          });
-        }
-      }
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-
-    patchApplied = true;
-    console.debug('[YidStore] Brands patcher active');
-  }
-
-  async function init() {
-    await loadLocalBrands();
-    patch();
-    // Refresh the local brand list rarely — it only changes when an
-    // integration is installed/removed, and a stale list just means the
-    // official brands site is used as fallback.
-    setInterval(loadLocalBrands, 12 * 60 * 60 * 1000);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-})(); 
-'''
-
-    # Write the JS file (in executor to avoid blocking event loop)
-    def _write_js_file():
-        os.makedirs(static_dir, exist_ok=True)
-        with open(js_path, 'w', encoding='utf-8') as f:
-            f.write(js_content)
+def _ha_serves_integration_brands() -> bool:
+    """Blocking: does Home Assistant serve custom integrations' brand/ images
+    itself (its built-in brands component, /api/brands/integration/...)?"""
+    import importlib.util
 
     try:
-        await hass.async_add_executor_job(_write_js_file)
-        _LOGGER.info("Created YidStore brands patcher JS at %s", js_path)
-    except Exception as e:
-        _LOGGER.error("Failed to create brands patcher JS: %s", e)
-        return
+        return importlib.util.find_spec("homeassistant.components.brands") is not None
+    except Exception:
+        return False
 
-    # Register as a Lovelace resource
+
+def _lovelace_resources_collection(hass: HomeAssistant):
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None and isinstance(data, dict):
+        resources = data.get("resources")
+    return resources if hasattr(resources, "async_create_item") else None
+
+
+async def _async_remove_card_resources(hass: HomeAssistant, repo: str) -> None:
+    """Take a removed card off the dashboard resources (any of its paths)."""
+    prefixes = (
+        f"/local/community/{LOVELACE_VENDOR_FOLDER}/{repo}/",
+        f"/local/community/{repo}/",
+        f"/hacsfiles/{repo}/",
+    )
+    try:
+        resources = _lovelace_resources_collection(hass)
+        if resources is not None:
+            if not getattr(resources, "loaded", True):
+                await resources.async_load()
+                resources.loaded = True
+            for item in list(resources.async_items()):
+                if str(item.get("url", "")).split("?")[0].startswith(prefixes):
+                    await resources.async_delete_item(item["id"])
+                    _LOGGER.info("Removed dashboard resource %s", item.get("url"))
+            return
+        store = Store(hass, 1, "lovelace_resources")
+        data = await store.async_load()
+        items = (data or {}).get("items") or []
+        kept = [i for i in items if not str(i.get("url", "")).split("?")[0].startswith(prefixes)]
+        if len(kept) != len(items):
+            data["items"] = kept
+            await store.async_save(data)
+    except Exception as err:
+        _LOGGER.warning("Could not remove the card's dashboard resource: %s", err)
+
+
+async def _async_remove_brand_patcher_resource(hass: HomeAssistant) -> None:
+    """Take the brands patcher off the dashboard resources (existing homes)."""
+    try:
+        resources = _lovelace_resources_collection(hass)
+        if resources is not None:
+            if not getattr(resources, "loaded", True):
+                await resources.async_load()
+                resources.loaded = True
+            for item in list(resources.async_items()):
+                if str(item.get("url", "")).split("?")[0] == BRANDS_PATCHER_URL:
+                    await resources.async_delete_item(item["id"])
+                    _LOGGER.info("Removed the YidStore brands patcher (Home Assistant shows integration icons itself)")
+            return
+        store = Store(hass, 1, "lovelace_resources")
+        data = await store.async_load()
+        items = (data or {}).get("items") or []
+        kept = [i for i in items if str(i.get("url", "")).split("?")[0] != BRANDS_PATCHER_URL]
+        if len(kept) != len(items):
+            data["items"] = kept
+            await store.async_save(data)
+            _LOGGER.info("Removed the YidStore brands patcher from dashboard resources")
+    except Exception as err:
+        _LOGGER.debug("Could not remove the brands patcher resource: %s", err)
+
+
+async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
+    """Setup the frontend brand icon patcher (older Home Assistant only).
+
+    Newer Home Assistant serves every custom integration's own brand/ images
+    (its built-in brands component), so the patcher isn't needed there: it
+    is not loaded, and removed from dashboards where an older YidStore added
+    it. Older versions keep it.
+    """
+    if await hass.async_add_executor_job(_ha_serves_integration_brands):
+        await _async_remove_brand_patcher_resource(hass)
+        return
+    # The patcher ships as dashboard_static/yidstore-brands.js.
+
+    # Register as a dashboard resource: Home Assistant's resources collection
+    # when it is loaded, else its storage file.
+    resources = _lovelace_resources_collection(hass)
+    if resources is not None:
+        try:
+            if not getattr(resources, "loaded", True):
+                await resources.async_load()
+                resources.loaded = True
+            if not any(str(i.get("url", "")).split("?")[0] == BRANDS_PATCHER_URL for i in resources.async_items()):
+                await resources.async_create_item({"res_type": "module", "url": f"{BRANDS_PATCHER_URL}?v={int(time.time())}"})
+                _LOGGER.info("Registered YidStore brands patcher as a dashboard resource")
+            return
+        except Exception as err:
+            _LOGGER.debug("Resources collection unavailable, using storage: %s", err)
     try:
         store = Store(hass, 1, "lovelace_resources")
         data = await store.async_load()
@@ -816,16 +855,47 @@ async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
         _LOGGER.warning("Could not register brands patcher as resource: %s", e)
 
 
+_AUDIO_EXTS = ('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac')
+
+
+def _scan_local_audio(www_path: Path, media_path: Path, owner: str, repo: str):
+    """Installed location and files of an audio pack (blocking; executor)."""
+    for base, location, url_root in (
+        (www_path, "www", "/local/audio"),
+        (media_path, "media", "/media/audio"),
+    ):
+        if not base.is_dir() or base.is_symlink():
+            continue
+        files = []
+        for f in base.rglob("*"):
+            if f.is_file() and f.suffix.lower() in _AUDIO_EXTS:
+                rel_url = str(f.relative_to(base)).replace("\\", "/")
+                files.append({
+                    "name": f.name,
+                    "path": rel_url,
+                    "url": f"{url_root}/{owner}/{repo}/{rel_url}",
+                })
+        return True, location, files
+    return False, None, []
+
+
+
 async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     """Set up the store dashboard."""
     static_dir = os.path.join(os.path.dirname(__file__), "dashboard_static")
-    if not os.path.exists(static_dir):
-        os.makedirs(static_dir, exist_ok=True)
 
     # cache_headers=True lets the browser cache the panel page, fonts and
     # icons instead of re-downloading them on every sidebar visit. The
     # panel URL carries a ?v=<startup time> cache-buster, so a new HTML is
     # fetched after each HA restart (i.e. after every update).
+    # Compressed copies (index.html is ~400 KB, ~80 KB gzipped). Home
+    # Assistant's web server sends the .gz file to browsers that accept it.
+    # Rebuilt at every start so it always matches the page after an update.
+    await hass.async_add_executor_job(_write_gzip_copies, static_dir)
+    # The page itself is served by its own view, before the static path, so
+    # browsers and proxies always check for a newer one (the static path
+    # would let them keep it for a month, so updates didn't show).
+    hass.http.register_view(YidStorePageView(static_dir))
     await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
 
     if entry.data.get(CONF_SIDE_PANEL, True):
@@ -894,10 +964,6 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
 
     for unsub in await async_setup_apps(hass, eid) or []:
         entry.async_on_unload(unsub)
-    hass.http.register_view(AddAutomationView())
-    hass.http.register_view(AddDashboardView())
-    hass.http.register_view(AddHelperView())
-    hass.http.register_view(ListHelpersView())
 
     # Initialize requires_restart set in hass.data
     if "yidstore_requires_restart" not in hass.data:
@@ -1266,12 +1332,15 @@ class OnOffStoreReposView(HomeAssistantView):
     """API to list Gitea repositories."""
     url = "/api/yidstore/repos"
     name = "api:yidstore:repos"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app.get("hass")
         try:
             # Dynamically find the entry if possible
@@ -1856,12 +1925,15 @@ class OnOffStoreAuthorsView(HomeAssistantView):
     """
     url = "/api/yidstore/authors"
     name = "api:yidstore:authors"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app.get("hass")
         try:
             eid = self.entry_id
@@ -1886,12 +1958,15 @@ class OnOffStoreInstallView(HomeAssistantView):
     """API to install integration."""
     url = "/api/yidstore/install"
     name = "api:yidstore:install"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2140,12 +2215,15 @@ class OnOffStoreAutoInstallView(HomeAssistantView):
 
     url = "/api/yidstore/autoinstall"
     name = "api:yidstore:autoinstall"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2281,12 +2359,15 @@ class OnOffStoreReadmeView(HomeAssistantView):
     """API to fetch README."""
     url = "/api/yidstore/readme/{owner}/{repo}"
     name = "api:yidstore:readme"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2332,12 +2413,15 @@ class OnOffStoreReleasesView(HomeAssistantView):
     """API to fetch all releases for a repository."""
     url = "/api/yidstore/releases/{owner}/{repo}"
     name = "api:yidstore:releases"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2442,12 +2526,15 @@ class OnOffStoreRefreshView(HomeAssistantView):
     """API to trigger update check."""
     url = "/api/yidstore/refresh"
     name = "api:yidstore:refresh"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2508,12 +2595,15 @@ class OnOffStoreAddCustomView(HomeAssistantView):
     """API to add a custom repository."""
     url = "/api/yidstore/custom/add"
     name = "api:yidstore:custom:add"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2570,12 +2660,15 @@ class OnOffStoreListCustomView(HomeAssistantView):
     """API to list custom repositories."""
     url = "/api/yidstore/custom/list"
     name = "api:yidstore:custom:list"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2644,12 +2737,15 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
     """API to remove a custom repository."""
     url = "/api/yidstore/custom/remove"
     name = "api:yidstore:custom:remove"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2682,12 +2778,15 @@ class OnOffStoreHideView(HomeAssistantView):
     """API to hide a repository."""
     url = "/api/yidstore/hide"
     name = "api:yidstore:hide"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2713,12 +2812,15 @@ class OnOffStoreUnhideView(HomeAssistantView):
     """API to unhide a repository."""
     url = "/api/yidstore/unhide"
     name = "api:yidstore:unhide"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2745,12 +2847,15 @@ class OnOffStoreUninstallView(HomeAssistantView):
     """API to uninstall a repository."""
     url = "/api/yidstore/uninstall"
     name = "api:yidstore:uninstall"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2765,14 +2870,55 @@ class OnOffStoreUninstallView(HomeAssistantView):
                 if eids: eid = eids[0]
                 else: return web.json_response({"error": "Not ready"}, status=503)
 
+            from .installer import valid_name
+
+            if not valid_name(o) or not valid_name(r):
+                return web.json_response({"error": "Invalid package name"}, status=400)
+
             coordinator = hass.data[DOMAIN][eid].get("coordinator")
             if coordinator:
-                tracked_pkg = coordinator.get_package_by_repo(o, r) or {}
+                tracked_pkg = coordinator.get_package_by_repo(o, r)
+                # Only packages YidStore installed itself, by their saved type
+                # and domain; never a folder named by the request.
+                if not tracked_pkg:
+                    return web.json_response({"error": "YidStore didn't install this package, so it can't remove it."}, status=400)
+                if not tracked_pkg.get("managed_by_yidstore", True):
+                    return web.json_response({"error": "This was installed by HACS / the Marketplace. Remove it there."}, status=400)
+                t = tracked_pkg.get("package_type") or t
                 domain = tracked_pkg.get("domain")
-                # 1. Delete folder
+                requires_restart = False
+
+                # 1. An integration is removed from Home Assistant first (its
+                #    configuration, devices and entities), then its files.
+                if t == "integration" and domain:
+                    try:
+                        from homeassistant.loader import async_get_loaded_integration
+
+                        async_get_loaded_integration(hass, domain)
+                        requires_restart = True  # its code is loaded until a restart
+                    except Exception:
+                        requires_restart = False
+                    for entry in list(hass.config_entries.async_entries(domain)):
+                        try:
+                            await hass.config_entries.async_remove(entry.entry_id)
+                        except Exception as err:
+                            _LOGGER.warning("Could not remove %s entry %s: %s", domain, entry.title, err)
+
+                # 2. A card is taken off the dashboard resources.
+                if t == "lovelace":
+                    await _async_remove_card_resources(hass, r)
+
+                # 3. Delete the files and stop tracking it.
                 await hass.async_add_executor_job(uninstall_package, hass, t, r, o, domain)
-                # 2. Remove tracking
                 await coordinator.async_remove_package(o, r)
+
+                # Forget its loaded code, so removing needs no restart and a
+                # later install loads the new code right away.
+                if t == "integration" and domain and requires_restart:
+                    from . import forget_loaded_integration
+
+                    if forget_loaded_integration(hass, domain):
+                        requires_restart = False
 
                 # Remove from requires_restart if present
                 if "yidstore_requires_restart" in hass.data:
@@ -2785,7 +2931,7 @@ class OnOffStoreUninstallView(HomeAssistantView):
                     update_available=False,
                 )
                 _invalidate_local_state_cache()
-                return web.json_response({"success": True})
+                return web.json_response({"success": True, "requires_restart": requires_restart})
             return web.json_response({"error": "Coordinator missing"}, status=503)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
@@ -2795,12 +2941,15 @@ class OnOffStoreStatsView(HomeAssistantView):
     """Stars and download counts for the store items (read without a token)."""
     url = "/api/yidstore/stats"
     name = "api:yidstore:stats"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         from .stats import async_get_stats, stats_for
 
         hass = request.app["hass"]
@@ -2828,12 +2977,15 @@ class OnOffStoreStatusView(HomeAssistantView):
     """Lightweight API to get install status for repos (for auto-refresh)."""
     url = "/api/yidstore/status"
     name = "api:yidstore:status"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         """Return lightweight status for all tracked repos."""
         hass = request.app["hass"]
         try:
@@ -2941,7 +3093,15 @@ class OnOffStoreStatusView(HomeAssistantView):
             except Exception:
                 _ha_version = None
 
+            try:
+                from homeassistant.loader import async_get_integration
+
+                _yid_version = str((await async_get_integration(hass, DOMAIN)).version or "")
+            except Exception:
+                _yid_version = ""
+
             return web.json_response({
+                "yidstore_version": _yid_version,
                 "status": status,
                 "requires_restart_list": restart_list,
                 "is_authenticated": is_authenticated,
@@ -3090,7 +3250,12 @@ class RepoIconView(HomeAssistantView):
             return web.Response(status=404)
         client = comp["client"]
 
-        key = f"{owner.lower()}/{repo.lower()}"
+        from .installer import valid_domain
+
+        # ?d= may only name an integration folder (no paths into other repos).
+        hint = request.query.get("d")
+        hint = hint if valid_domain(hint) else None
+        key = f"{owner.lower()}/{repo.lower()}|{hint or ''}"
         cached = _REPO_ICON_CACHE.get(key)
         if not cached or time.time() - cached[0] > _REPO_ICON_TTL:
             # Only repositories YidStore lists (no probing of other repos).
@@ -3106,7 +3271,7 @@ class RepoIconView(HomeAssistantView):
             if known is None:
                 return web.Response(status=404)
 
-            domain = request.query.get("d") or known.get("domain") or None
+            domain = hint or (known.get("domain") if valid_domain(known.get("domain")) else None)
             found: tuple[bytes | None, str] = (None, "")
             for path in _repo_icon_paths(domain):
                 data = await client.get_raw_file(owner, repo, path)
@@ -3120,10 +3285,11 @@ class RepoIconView(HomeAssistantView):
             _REPO_ICON_CACHE[key] = cached
 
         if not cached[1]:
-            return web.Response(status=404, headers={"Cache-Control": "public, max-age=3600"})
+            # Same answer as an unknown repository: names can't be probed.
+            return web.Response(status=404)
         return web.Response(
             body=cached[1], content_type=cached[2],
-            headers={"Cache-Control": "public, max-age=21600"},
+            headers={"Cache-Control": "public, max-age=21600", **IMAGE_SAFETY_HEADERS},
         )
 
 
@@ -3175,6 +3341,7 @@ class LocalBrandsIconView(HomeAssistantView):
                         headers={
                             'Cache-Control': 'public, max-age=86400',
                             'Access-Control-Allow-Origin': '*',
+                            **IMAGE_SAFETY_HEADERS,
                         }
                     )
             except Exception as e:
@@ -3213,6 +3380,7 @@ class LocalBrandsIconView(HomeAssistantView):
                         headers={
                             "Cache-Control": "public, max-age=86400",
                             "Access-Control-Allow-Origin": "*",
+                            **IMAGE_SAFETY_HEADERS,
                         },
                     )
             except Exception as e:
@@ -3226,7 +3394,7 @@ class LocalBrandsListView(HomeAssistantView):
     """List all available local brand icons."""
     url = "/api/yidstore/brands"
     name = "api:yidstore:brands_list"
-    requires_auth = False
+    requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         """Return list of domains with local icons."""
@@ -3284,9 +3452,12 @@ class LocalBrandsUploadView(HomeAssistantView):
     """Upload local brand icons for custom integrations."""
     url = "/api/yidstore/brands/upload"
     name = "api:yidstore:brands_upload"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
 
         reader = await request.multipart()
@@ -3364,12 +3535,15 @@ class DocumentationReposView(HomeAssistantView):
     """API to list documentation repositories from the Documentation organization."""
     url = "/api/yidstore/docs"
     name = "api:yidstore:docs"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3420,12 +3594,18 @@ class DocumentationFilesView(HomeAssistantView):
     """API to list files in a documentation repository."""
     url = "/api/yidstore/docs/{owner}/{repo}/files"
     name = "api:yidstore:docs:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3470,12 +3650,18 @@ class DocumentationContentView(HomeAssistantView):
     """API to get content of a documentation file."""
     url = "/api/yidstore/docs/{owner}/{repo}/content"
     name = "api:yidstore:docs:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3554,12 +3740,15 @@ class AutomationsReposView(HomeAssistantView):
     """API to list automation repositories from the Automations organization."""
     url = "/api/yidstore/automations"
     name = "api:yidstore:automations"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3609,12 +3798,18 @@ class AutomationsFilesView(HomeAssistantView):
     """API to list YAML files in an automations repository."""
     url = "/api/yidstore/automations/{owner}/{repo}/files"
     name = "api:yidstore:automations:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3656,12 +3851,18 @@ class AutomationsContentView(HomeAssistantView):
     """API to get content of an automation YAML file with linked instructions."""
     url = "/api/yidstore/automations/{owner}/{repo}/content"
     name = "api:yidstore:automations:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3741,12 +3942,15 @@ class DashboardsReposView(HomeAssistantView):
     """API to list dashboard repositories from the Dashboards organization or user."""
     url = "/api/yidstore/dashboards"
     name = "api:yidstore:dashboards"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3798,12 +4002,18 @@ class DashboardsFilesView(HomeAssistantView):
     """API to list YAML files in a dashboards repository."""
     url = "/api/yidstore/dashboards/{owner}/{repo}/files"
     name = "api:yidstore:dashboards:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3844,12 +4054,18 @@ class DashboardsContentView(HomeAssistantView):
     """API to get content of a dashboard YAML file with linked instructions."""
     url = "/api/yidstore/dashboards/{owner}/{repo}/content"
     name = "api:yidstore:dashboards:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -3924,162 +4140,19 @@ class DashboardsContentView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
-class AddAutomationView(HomeAssistantView):
-    """API to add an automation from YAML."""
-    url = "/api/yidstore/add_automation"
-    name = "api:yidstore:add_automation"
-    requires_auth = True
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            data = await request.json()
-            yaml_content = data.get("yaml", "")
-            name = data.get("name", "New Automation")
-
-            if not yaml_content:
-                return web.json_response({"error": "No YAML content provided"}, status=400)
-
-            import yaml
-            import uuid
-
-            # Parse YAML
-            try:
-                automation_config = yaml.safe_load(yaml_content)
-            except yaml.YAMLError as e:
-                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
-
-            # Generate unique ID if not present
-            if "id" not in automation_config:
-                automation_config["id"] = str(uuid.uuid4()).replace("-", "")[:12]
-
-            # Set alias if not present
-            if "alias" not in automation_config:
-                automation_config["alias"] = name
-
-            # Call HA service to create automation
-            await hass.services.async_call(
-                "automation",
-                "reload",
-                {},
-                blocking=True
-            )
-
-            # Write to automations.yaml
-            automations_path = Path(hass.config.path("automations.yaml"))
-            existing = []
-            if automations_path.exists():
-                content = automations_path.read_text()
-                if content.strip():
-                    try:
-                        existing = yaml.safe_load(content) or []
-                        if not isinstance(existing, list):
-                            existing = [existing]
-                    except:
-                        existing = []
-
-            existing.append(automation_config)
-
-            with open(automations_path, "w") as f:
-                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
-
-            # Reload automations
-            await hass.services.async_call(
-                "automation",
-                "reload",
-                {},
-                blocking=True
-            )
-
-            return web.json_response({"success": True, "id": automation_config["id"]})
-        except Exception as e:
-            _LOGGER.error("Error adding automation: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
-class AddDashboardView(HomeAssistantView):
-    """API to add a dashboard from YAML."""
-    url = "/api/yidstore/add_dashboard"
-    name = "api:yidstore:add_dashboard"
-    requires_auth = True
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            data = await request.json()
-            yaml_content = data.get("yaml", "")
-            name = data.get("name", "New Dashboard")
-            slug = data.get("slug", "custom-dashboard")
-
-            if not yaml_content:
-                return web.json_response({"error": "No YAML content provided"}, status=400)
-
-            import yaml
-
-            # Parse YAML
-            try:
-                dashboard_config = yaml.safe_load(yaml_content)
-            except yaml.YAMLError as e:
-                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
-
-            # Create lovelace dashboard storage file
-            storage_path = Path(hass.config.path(f".storage/lovelace.lovelace_{slug}"))
-
-            # Create storage entry
-            storage_data = {
-                "version": 1,
-                "minor_version": 1,
-                "key": f"lovelace.lovelace_{slug}",
-                "data": {"config": dashboard_config}
-            }
-
-            import json
-            with open(storage_path, "w") as f:
-                json.dump(storage_data, f, indent=2)
-
-            # Register dashboard in lovelace_dashboards storage
-            dashboards_storage_path = Path(hass.config.path(".storage/lovelace_dashboards"))
-            dashboards_data = {"version": 1, "minor_version": 1, "key": "lovelace_dashboards", "data": {"items": []}}
-
-            if dashboards_storage_path.exists():
-                with open(dashboards_storage_path, "r") as f:
-                    dashboards_data = json.load(f)
-
-            # Check if dashboard already exists
-            items = dashboards_data.get("data", {}).get("items", [])
-            existing = next((i for i in items if i.get("url_path") == slug), None)
-
-            if not existing:
-                items.append({
-                    "id": slug,
-                    "url_path": slug,
-                    "title": name,
-                    "icon": "mdi:view-dashboard",
-                    "show_in_sidebar": True,
-                    "require_admin": False,
-                    "mode": "storage"
-                })
-                dashboards_data["data"]["items"] = items
-
-                with open(dashboards_storage_path, "w") as f:
-                    json.dump(dashboards_data, f, indent=2)
-
-            return web.json_response({"success": True, "slug": slug, "message": "Dashboard created. Please restart Home Assistant to see it in the sidebar."})
-        except Exception as e:
-            _LOGGER.error("Error adding dashboard: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
 class HelpersReposView(HomeAssistantView):
     """API to list helper repositories from the Helpers organization."""
     url = "/api/yidstore/helpers"
     name = "api:yidstore:helpers"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4131,12 +4204,18 @@ class HelpersFilesView(HomeAssistantView):
     """API to list YAML files in a helpers repository."""
     url = "/api/yidstore/helpers/{owner}/{repo}/files"
     name = "api:yidstore:helpers:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4177,12 +4256,18 @@ class HelpersContentView(HomeAssistantView):
     """API to get content of a helper YAML file with linked instructions."""
     url = "/api/yidstore/helpers/{owner}/{repo}/content"
     name = "api:yidstore:helpers:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4255,143 +4340,19 @@ class HelpersContentView(HomeAssistantView):
             return web.json_response({"error": str(e)}, status=500)
 
 
-class AddHelperView(HomeAssistantView):
-    """API to add a helper from YAML."""
-    url = "/api/yidstore/add_helper"
-    name = "api:yidstore:add_helper"
-    requires_auth = True
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            data = await request.json()
-            yaml_content = data.get("yaml", "")
-            helper_type = data.get("type", "")  # input_boolean, input_number, input_text, etc.
-            name = data.get("name", "New Helper")
-
-            if not yaml_content:
-                return web.json_response({"error": "No YAML content provided"}, status=400)
-
-            import yaml
-
-            # Parse YAML
-            try:
-                helper_config = yaml.safe_load(yaml_content)
-            except yaml.YAMLError as e:
-                return web.json_response({"error": f"Invalid YAML: {e}"}, status=400)
-
-            # Detect helper type from YAML if not specified
-            if not helper_type:
-                if isinstance(helper_config, dict):
-                    for key in ["input_boolean", "input_number", "input_text", "input_select", "input_datetime", "input_button", "counter", "timer", "schedule"]:
-                        if key in helper_config:
-                            helper_type = key
-                            helper_config = helper_config[key]
-                            break
-
-            if not helper_type:
-                return web.json_response({"error": "Could not determine helper type"}, status=400)
-
-            # Create helper via HA service
-            if isinstance(helper_config, dict):
-                for helper_id, config in helper_config.items():
-                    if not isinstance(config, dict):
-                        config = {}
-
-                    config["name"] = config.get("name", helper_id.replace("_", " ").title())
-
-                    try:
-                        await hass.services.async_call(
-                            helper_type,
-                            "create",
-                            config,
-                            blocking=True
-                        )
-                    except Exception as e:
-                        _LOGGER.warning("Could not create helper via service, trying storage: %s", e)
-                        # Fall back to writing to storage
-                        return await self._create_via_storage(hass, helper_type, helper_id, config)
-
-            return web.json_response({"success": True, "type": helper_type})
-        except Exception as e:
-            _LOGGER.error("Error adding helper: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-    async def _create_via_storage(self, hass, helper_type: str, helper_id: str, config: dict) -> web.Response:
-        """Create helper via storage file when service is not available."""
-        import json
-        from pathlib import Path
-
-        storage_key = f"core.config_entries" if helper_type in ["counter", "timer"] else f"input_{helper_type.replace('input_', '')}"
-        storage_path = Path(hass.config.path(f".storage/{storage_key}"))
-
-        try:
-            storage_data = {"version": 1, "data": {}}
-            if storage_path.exists():
-                with open(storage_path, "r") as f:
-                    storage_data = json.load(f)
-
-            # Add new helper
-            items = storage_data.get("data", {}).get("items", [])
-            import uuid
-            new_item = {
-                "id": str(uuid.uuid4()),
-                "name": config.get("name", helper_id),
-                **config
-            }
-            items.append(new_item)
-            storage_data["data"]["items"] = items
-
-            with open(storage_path, "w") as f:
-                json.dump(storage_data, f, indent=2)
-
-            return web.json_response({"success": True, "type": helper_type, "message": "Helper created. Please restart Home Assistant."})
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
-
-
-class ListHelpersView(HomeAssistantView):
-    """API to list existing helpers in Home Assistant."""
-    url = "/api/yidstore/helpers/list"
-    name = "api:yidstore:helpers:list"
-    requires_auth = True
-
-    async def get(self, request: web.Request) -> web.Response:
-        hass = request.app["hass"]
-        try:
-            helpers = []
-
-            # Get all helper domains
-            helper_domains = ["input_boolean", "input_number", "input_text", "input_select", "input_datetime", "input_button", "counter", "timer", "schedule"]
-
-            for domain in helper_domains:
-                entities = hass.states.async_entity_ids(domain)
-                for entity_id in entities:
-                    state = hass.states.get(entity_id)
-                    if state:
-                        helpers.append({
-                            "entity_id": entity_id,
-                            "type": domain,
-                            "name": state.attributes.get("friendly_name", entity_id),
-                            "state": state.state,
-                        })
-
-            return web.json_response(helpers)
-        except Exception as e:
-            _LOGGER.error("Error listing helpers: %s", e)
-            return web.json_response({"error": str(e)}, status=500)
-
-
 class AudioReposView(HomeAssistantView):
     """API to list audio repositories from the Audio organization."""
     url = "/api/yidstore/audio"
     name = "api:yidstore:audio"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4448,12 +4409,18 @@ class AudioFilesView(HomeAssistantView):
     """API to list files in an audio repository."""
     url = "/api/yidstore/audio/{owner}/{repo}/files"
     name = "api:yidstore:audio:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4501,12 +4468,18 @@ class AudioContentView(HomeAssistantView):
     """API to get content/info of an audio repo for installation."""
     url = "/api/yidstore/audio/{owner}/{repo}/content"
     name = "api:yidstore:audio:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4526,6 +4499,10 @@ class AudioContentView(HomeAssistantView):
                     {"error": "Audio is only available with a store account."}, status=403
                 )
 
+            from .installer import valid_name
+            if not valid_name(owner) or not valid_name(repo):
+                return web.json_response({"error": "Invalid repository name"}, status=400)
+
             branch = request.query.get("branch", "main")
 
             # Get repo info
@@ -4543,35 +4520,12 @@ class AudioContentView(HomeAssistantView):
                     if name.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac')):
                         audio_files.append(entry.get("path", entry.get("name", "")))
 
-            # Check if already installed
+            # Check if already installed (file scan runs off the event loop)
             www_path = Path(hass.config.path("www", "audio", owner, repo))
             media_path = Path(hass.config.path("media", "audio", owner, repo))
-            is_installed = www_path.exists() or media_path.exists()
-            install_location = "www" if www_path.exists() else ("media" if media_path.exists() else None)
-
-            # Get local audio files if installed
-            local_files = []
-            if www_path.exists():
-                for f in www_path.rglob("*"):
-                    if f.is_file() and f.suffix.lower() in ('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'):
-                        rel = f.relative_to(www_path)
-                        # Use forward slashes for URLs (Windows uses backslashes)
-                        rel_url = str(rel).replace("\\", "/")
-                        local_files.append({
-                            "name": f.name,
-                            "path": rel_url,
-                            "url": f"/local/audio/{owner}/{repo}/{rel_url}"
-                        })
-            elif media_path.exists():
-                for f in media_path.rglob("*"):
-                    if f.is_file() and f.suffix.lower() in ('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'):
-                        rel = f.relative_to(media_path)
-                        rel_url = str(rel).replace("\\", "/")
-                        local_files.append({
-                            "name": f.name,
-                            "path": rel_url,
-                            "url": f"/media/audio/{owner}/{repo}/{rel_url}"
-                        })
+            is_installed, install_location, local_files = await hass.async_add_executor_job(
+                _scan_local_audio, www_path, media_path, owner, repo
+            )
 
             # Get README if available
             readme = await client.get_readme(owner, repo)
@@ -4596,12 +4550,15 @@ class BlueprintsReposView(HomeAssistantView):
     """API to list blueprint repositories from the Blueprints organization."""
     url = "/api/yidstore/blueprints"
     name = "api:yidstore:blueprints"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4652,12 +4609,18 @@ class BlueprintsFilesView(HomeAssistantView):
     """API to list YAML files in a blueprints repository."""
     url = "/api/yidstore/blueprints/{owner}/{repo}/files"
     name = "api:yidstore:blueprints:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -4698,12 +4661,18 @@ class BlueprintsContentView(HomeAssistantView):
     """API to get content of a blueprint YAML file with linked instructions."""
     url = "/api/yidstore/blueprints/{owner}/{repo}/content"
     name = "api:yidstore:blueprints:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def get(self, request: web.Request, owner: str, repo: str) -> web.Response:
+        # Store data: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
+        _bad_path = request.query.get("path", "")
+        if ".." in _bad_path.replace("\\", "/").split("/") or any(c in _bad_path for c in "?#\\"):
+            return web.json_response({"error": "Invalid path"}, status=400)
         hass = request.app["hass"]
         try:
             eid = self.entry_id

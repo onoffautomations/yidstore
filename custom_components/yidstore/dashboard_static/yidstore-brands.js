@@ -14,7 +14,14 @@
 
   async function loadLocalBrands() {
     try {
-      const res = await fetch(BRANDS_LIST_API, { cache: 'no-store' });
+      // The list needs a Home Assistant login: send this page's token.
+      const headers = {};
+      try {
+        const conn = window.hassConnection && await window.hassConnection;
+        const token = conn && conn.auth && conn.auth.accessToken;
+        if (token) headers.Authorization = `Bearer ${token}`;
+      } catch (_) {}
+      const res = await fetch(BRANDS_LIST_API, { cache: 'no-store', headers });
       if (res.ok) {
         localBrands = await res.json();
         console.debug('[YidStore] Local brands loaded:', Object.keys(localBrands).length);

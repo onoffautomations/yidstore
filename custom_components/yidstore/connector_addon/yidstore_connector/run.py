@@ -33,6 +33,8 @@ OPTIONS_FILE = Path("/data/options.json")
 SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 CONFIG_NAMES = ("config.yaml", "config.yml", "config.json")
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
+# Marks an /addons folder as installed by YidStore.
+MARKER = ".yidstore"
 
 
 def log(msg: str) -> None:
@@ -129,21 +131,41 @@ def _folders_with_slug(slug: str | None) -> list[Path]:
     return found
 
 
+def _ours(folder: Path, job_slug: str, addon_slug: str | None) -> bool:
+    """A folder YidStore may update or replace.
+
+    Folders YidStore installed carry a marker file. Older installs have no
+    marker but sit in the folder named after the app, so the folder name is
+    accepted too. Anything else in /addons belongs to the user (or another
+    store) and is never overwritten or removed.
+    """
+    if (folder / MARKER).is_file():
+        return True
+    return folder.name in {job_slug, addon_slug or ""}
+
+
 def _target_folder(default: Path, slug: str | None) -> tuple[Path, list[Path]]:
     """Where the app goes, and copies to remove.
 
-    An app that is already installed is updated in ITS folder, whatever
-    that folder is called (it may have been installed by hand). Two folders
-    with the same slug make Home Assistant keep reading the old one ("No
-    update available"), so a copy YidStore made in its default folder next
-    to the original is removed. The original is never removed.
+    An app that is already installed is updated in ITS folder, so Home
+    Assistant offers the update ("No update available" otherwise). Only
+    folders YidStore owns are reused or removed: if another folder declares
+    the same slug and was not installed by YidStore, the install stops
+    instead of replacing it.
     """
     existing = _folders_with_slug(slug)
     if not existing:
         return default, []
-    others = [f for f in existing if f != default]
+    mine = [f for f in existing if _ours(f, default.name, slug)]
+    foreign = [f for f in existing if f not in mine]
+    if foreign:
+        raise RuntimeError(
+            f"The app '{slug}' is already installed in /addons/{foreign[0].name}, "
+            "which YidStore did not install. Remove that folder first to install it from YidStore."
+        )
+    others = [f for f in mine if f != default]
     if others:
-        dupes = [default] if default in existing else []
+        dupes = [default] if default in mine else []
         return others[0], dupes
     return default, []
 
@@ -173,6 +195,7 @@ def install(job: dict, require_existing: bool = False) -> dict:
         if staging.exists():
             shutil.rmtree(staging)
         shutil.copytree(src, staging)
+        (staging / MARKER).write_text(json.dumps({"slug": job["slug"]}))
         if dest.exists():
             shutil.rmtree(dest)
         staging.rename(dest)
@@ -193,6 +216,8 @@ def stage(job: dict) -> dict:
 
 def uninstall(job: dict) -> dict:
     dest = ADDONS_DIR / job["slug"]
+    if dest.is_symlink():
+        raise RuntimeError("Refusing to remove a linked folder")
     if dest.exists():
         shutil.rmtree(dest)
     log(f"Removed {job['slug']}")

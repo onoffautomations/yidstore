@@ -60,6 +60,14 @@ def stats_for(items: dict, source: str | None, owner: str, repo: str) -> dict | 
     if not isinstance(entry, dict):
         return None
     return {
-        "stars": int(entry.get("stars") or 0),
-        "downloads": int(entry.get("downloads") or 0),
+        "stars": _count(entry.get("stars")),
+        "downloads": _count(entry.get("downloads")),
     }
+
+
+def _count(value) -> int:
+    """A non-negative whole number from the stats file, 0 if it is not one."""
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
