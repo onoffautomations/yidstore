@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import asyncio
 import base64
 import json
@@ -531,7 +533,9 @@ class GiteaClient:
         for e in entries:
             if (e or {}).get("type") == "dir":
                 name = (e.get("name") or "").strip()
-                if name and not name.startswith("."):
+                # Only real integration domains (lowercase letters, digits,
+                # _): a folder name ends up in file paths and in the panel.
+                if re.fullmatch(r"[a-z0-9_]{1,64}", name):
                     domains.append(name)
         return domains
 

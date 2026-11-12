@@ -1227,6 +1227,10 @@ class AppsActionView(HomeAssistantView):
         if action in ("install", "update"):
             # An optional explicit release/tag to install (version picker).
             ref = str(data.get("ref") or "").strip() or None
+            if ref and (
+                not re.match(r"^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$", ref) or ".." in ref.split("/")
+            ):
+                return web.json_response({"error": "Invalid version"})
             _set_task(app_id, "starting", action=action)
             hass.async_create_background_task(
                 _run_install(hass, self.entry_id, app_id, owner, repo, action == "update", ref=ref),
@@ -1355,7 +1359,11 @@ class AddonStoreGitView(HomeAssistantView):
         hass = request.app["hass"]
         if tail != "git-upload-pack":
             return web.Response(status=404)
-        payload = await request.read()
+        if (request.content_length or 0) > addon_store.MAX_REQUEST_BYTES:
+            return web.Response(status=413)
+        payload = await request.content.read(addon_store.MAX_REQUEST_BYTES + 1)
+        if len(payload) > addon_store.MAX_REQUEST_BYTES:
+            return web.Response(status=413)
         body = await hass.async_add_executor_job(
             addon_store.upload_pack,
             _store_root(hass) / "repo.git",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1
+
+- Never replaces or removes an app folder in /addons that YidStore did not install. If another folder already holds the same app, the install stops and says which folder to remove.
+- Marks the folders it installs so later updates find them.
+
 ## 1.3.0
 
 - Updates an app in the folder it is already installed in (also when it was installed by hand), and removes a duplicate copy of the same app. Fixes "No update available" when updating.

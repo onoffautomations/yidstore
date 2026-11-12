@@ -29,7 +29,7 @@ async def async_setup_entry(
 
     # Store the callback in coordinator for dynamic button creation
     coordinator._add_button_entities_callback = async_add_entities
-    _LOGGER.info("✓ Registered button entity callback with coordinator")
+    _LOGGER.info("Registered button entity callback with coordinator")
 
     # Create buttons for all currently tracked packages
     buttons = []
@@ -112,7 +112,7 @@ class PackageUpdateButton(ButtonEntity):
                 blocking=True
             )
 
-            _LOGGER.info("✓ Update triggered for %s/%s", owner, repo_name)
+            _LOGGER.info("Update triggered for %s/%s", owner, repo_name)
 
             # Send notification
             await self.hass.services.async_call(

@@ -133,7 +133,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         """Save tracked packages to storage."""
         _LOGGER.info("Saving %d tracked packages...", len(self.packages))
         await self._store.async_save({"packages": self.packages})
-        _LOGGER.info("✓ Packages saved")
+        _LOGGER.info("Packages saved")
 
     def _get_package_device(self, package_id: str):
         """Return this config entry's device for a tracked package."""
@@ -248,7 +248,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         # card, blueprint, audio, etc.) gets its own HA device.
         self._ensure_package_device(package_id, package_data)
 
-        _LOGGER.info("✓ Package %s tracked", package_id)
+        _LOGGER.info("Package %s tracked", package_id)
 
         # If this is a new package and we have the callback, create sensors immediately
         if is_new_package and self._add_entities_callback and package_id not in self._created_entities:
@@ -286,7 +286,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     new_sensors.append(WaitingRestartSensor(self, package_id, package_data, self.hass, self.entry_id))
 
                 self._add_entities_callback(new_sensors)
-                _LOGGER.info("✓ Created %d sensors for %s", len(new_sensors), package_data["repo_name"])
+                _LOGGER.info("Created %d sensors for %s", len(new_sensors), package_data["repo_name"])
 
             except Exception as e:
                 _LOGGER.error("Failed to create sensors for %s: %s", package_id, e, exc_info=True)
@@ -314,7 +314,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     ]
                     self._add_button_entities_callback(new_button)
                     self._created_entities.add(package_id)
-                    _LOGGER.info("✓ Created dynamic entities for %s", package_data["repo_name"])
+                    _LOGGER.info("Created dynamic entities for %s", package_data["repo_name"])
                 else:
                     _LOGGER.warning("Could not find config entry for button creation")
 
@@ -337,7 +337,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                 if entry:
                     new_update = [PackageUpdateEntity(self, package_id, package_data, entry)]
                     self._add_update_entities_callback(new_update)
-                    _LOGGER.info("✓ Created update entity for %s", package_data["repo_name"])
+                    _LOGGER.info("Created update entity for %s", package_data["repo_name"])
             except Exception as e:
                 _LOGGER.error("Failed to create update entity for %s: %s", package_id, e, exc_info=True)
         else:
@@ -402,7 +402,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                                 # show stale notes for the offered update.
                                 _clear_release_notes(package_data)
                             _LOGGER.info(
-                                "✓ Update available for %s (GitHub): %s → %s",
+                                "Update available for %s (GitHub): %s → %s",
                                 repo, installed_version, latest_tag,
                             )
                         else:
@@ -448,7 +448,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
                     # misleading release information.
                     if update_available:
                         _store_release_notes(package_data, latest_release)
-                        _LOGGER.info("✓ Update available for %s: %s → %s",
+                        _LOGGER.info("Update available for %s: %s → %s",
                                    repo, installed_version, latest_version)
                     else:
                         _clear_release_notes(package_data)
@@ -476,7 +476,7 @@ class OnOffGiteaStoreCoordinator(DataUpdateCoordinator):
         # Notify sensors to update
         self.async_update_listeners()
 
-        _LOGGER.info("✓ Update check complete")
+        _LOGGER.info("Update check complete")
 
     async def async_get_package_info(self, package_id: str) -> dict[str, Any] | None:
         """Get package information by ID."""

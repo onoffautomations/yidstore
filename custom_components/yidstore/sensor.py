@@ -47,7 +47,7 @@ async def async_setup_entry(
 
     # Store the callback in coordinator for dynamic sensor creation
     coordinator._add_entities_callback = async_add_entities
-    _LOGGER.info("✓ Registered entity callback with coordinator")
+    _LOGGER.info("Registered entity callback with coordinator")
 
     # Create sensors for all currently tracked packages
     sensors = []
@@ -66,11 +66,11 @@ async def async_setup_entry(
             # Add restart sensor only for integrations
             if package_type == 'integration':
                 sensors.append(WaitingRestartSensor(coordinator, package_id, package_data, hass, entry.entry_id))
-                _LOGGER.info("✓ Added WaitingRestartSensor for integration: %s", package_id)
+                _LOGGER.info("Added WaitingRestartSensor for integration: %s", package_id)
             else:
                 _LOGGER.debug("Skipped WaitingRestartSensor for non-integration package: %s", package_id)
 
-        _LOGGER.info("✓✓✓ Created %d total sensors for %d packages", len(sensors), len(coordinator.packages))
+        _LOGGER.info("Created %d total sensors for %d packages", len(sensors), len(coordinator.packages))
     else:
         _LOGGER.info("No packages tracked yet - sensors will be created when packages are installed")
 

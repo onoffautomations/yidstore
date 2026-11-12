@@ -3,20 +3,18 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YidStore</title>
     <link id="appFavicon" rel="icon" type="image/png" href="icon.png">
     <link id="appAppleTouch" rel="apple-touch-icon" href="icon.png">
     <meta id="appThemeColor" name="theme-color" content="#fafafa">
-    <!-- Connect early; nothing here blocks the first paint except the icons. -->
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
-        rel="stylesheet" media="print" onload="this.media='all'">
-    <!-- Only needed for READMEs and release notes: download in parallel, run after the page. -->
-    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+    <!-- Everything ships with YidStore: no outside site can change this page,
+         and it works without internet access. -->
+    <link rel="stylesheet" href="vendor/mdi-7.2.96/materialdesignicons.min.css">
+    <!-- Markdown (READMEs, release notes) is parsed by marked and always
+         cleaned by DOMPurify before it is shown. -->
+    <script src="vendor/purify-3.4.17.min.js" defer></script>
+    <script src="vendor/marked-12.0.2.min.js" defer></script>
     <style>
         /* Home Assistant style palette — light by default (matches HA) */
         :root {
@@ -83,10 +81,17 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        html.modal-open,
-        body.modal-open {
+        /* Popup open: freeze the page where it is (top is set from JS) so
+           closing the popup returns to the same spot, not the top. */
+        html.modal-open {
             overflow: hidden;
-            height: 100%;
+        }
+        body.modal-open {
+            position: fixed;
+            left: 0;
+            right: 0;
+            width: 100%;
+            overflow: hidden;
         }
 
         .container {
@@ -192,6 +197,11 @@
             outline: none;
             transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
             flex: 0 0 auto;
+        }
+
+        [role="button"][tabindex="0"]:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
         }
 
         .m3-switch:focus-visible {
@@ -2933,9 +2943,23 @@
         // Markdown to HTML. The markdown library loads in parallel with the
         // page; until it has arrived, show the text as plain lines.
         function mdToHtml(text) {
-            try { if (window.marked && typeof window.marked.parse === 'function') return window.marked.parse(text || ''); }
-            catch (_) {}
+            try {
+                if (window.marked && typeof window.marked.parse === 'function'
+                    && window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+                    return window.DOMPurify.sanitize(window.marked.parse(String(text || '')));
+                }
+            } catch (_) {}
             return escapeHtml(String(text || '')).replace(/\n/g, '<br>');
+        }
+
+        // HTML from a package (docs .html files): cleaned, never raw.
+        function safeHtml(html) {
+            try {
+                if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+                    return window.DOMPurify.sanitize(String(html || ''));
+                }
+            } catch (_) {}
+            return escapeHtml(String(html || '')).replace(/\n/g, '<br>');
         }
 
         // "v1.99.67" newer than "v1.93.0"? Numeric parts, left to right.
@@ -3025,13 +3049,6 @@
             }
         }
 
-        function getCacheAgeText(ageMs) {
-            const minutes = Math.floor(ageMs / 60000);
-            if (minutes < 1) return 'just now';
-            if (minutes < 60) return `${minutes}m ago`;
-            const hours = Math.floor(minutes / 60);
-            return `${hours}h ${minutes % 60}m ago`;
-        }
 
         function getAudioInstallLocation() {
             const saved = (localStorage.getItem(AUDIO_LOCATION_KEY) || 'www').toLowerCase();
@@ -3404,12 +3421,6 @@
             }, CACHE_DURATION);
         }
 
-        function stopAutoReload() {
-            if (autoReloadInterval) {
-                clearInterval(autoReloadInterval);
-                autoReloadInterval = null;
-            }
-        }
 
         function startLiveSync() {
             if (liveSyncInterval) clearInterval(liveSyncInterval);
@@ -3669,13 +3680,28 @@
                 (pop && pop.style.display === 'flex');
         }
 
+        let _scrollLockY = null;
         function updateScrollLock() {
             const lock = isOverlayOpen();
-            document.body.classList.toggle('modal-open', lock);
-            document.documentElement.classList.toggle('modal-open', lock);
+            const body = document.body;
+            const root = document.documentElement;
+            if (lock && _scrollLockY === null) {
+                _scrollLockY = window.scrollY || root.scrollTop || 0;
+                body.style.top = `-${_scrollLockY}px`;
+                body.classList.add('modal-open');
+                root.classList.add('modal-open');
+            } else if (!lock && _scrollLockY !== null) {
+                const y = _scrollLockY;
+                _scrollLockY = null;
+                body.classList.remove('modal-open');
+                root.classList.remove('modal-open');
+                body.style.top = '';
+                window.scrollTo(0, y);
+            }
         }
 
         function formatName(n) {
+            n = String(n ?? '');
             let s = n.startsWith('x-') ? n.substring(2) : n;
             s = s.replace(/[_-]/g, ' ');
             return s.split(' ').filter(w => w.length > 0).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -3876,16 +3902,6 @@
             }
         }
 
-        async function checkUpdates() {
-            // Explicit user action: ask the backend to run an update check,
-            // then sync the UI.
-            try {
-                await fetch('/api/yidstore/refresh', { method: 'POST' });
-            } catch (e) {
-                console.log('Backend refresh failed:', e);
-            }
-            await refreshDashboard();
-        }
 
         function apply() {
             if (toolbarView === 'apps') { renderAppsCards(); return; }
@@ -4005,8 +4021,8 @@
             const typeClass = i.type === 'lovelace'
                 ? 'tag-card'
                 : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
-            const displayTitle = formatName(i.repo_name);
-            const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
+            const displayTitle = escapeHtml(formatName(i.repo_name));
+            const authorDisplay = escapeHtml(getDisplayAuthor(i.owner, i.owner_display_name));
             const typeLabel = i.type === 'lovelace'
                 ? 'Card'
                 : (i.type === 'blueprints' ? 'Blueprint' : (i.type === 'audio' ? 'Audio' : 'Integration'));
@@ -4017,12 +4033,12 @@
             const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
             const primaryIcon = candidates[0] || '';
             const dataCandidates = candidates.join('|');
-            const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
+            const fallbackAttr = i.icon_url ? `data-fallback-url="${escapeHtml(i.icon_url)}"` : '';
 
             iconHtml = `
-                <img src="${primaryIcon || 'icon.png'}" alt="" class="card-icon" loading="lazy" decoding="async"
-                     data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
-                     data-candidates="${dataCandidates}"
+                <img src="${escapeHtml(primaryIcon || 'icon.png')}" alt="" class="card-icon" loading="lazy" decoding="async"
+                     data-brand-domain="${escapeHtml(domain)}" data-brand-kind="icon" ${fallbackAttr}
+                     data-candidates="${escapeHtml(dataCandidates)}"
                      onload="brandImgLoaded(this)"
                      onerror="brandImgError(this)"
                      style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
@@ -4046,7 +4062,7 @@
                 }
             }
             const versionInfo = (i.installed_version && i.latest_version)
-                ? `<span style="font-size:0.68rem; color:var(--dim); white-space:nowrap;">${i.installed_version} → ${i.latest_version}</span>`
+                ? `<span style="font-size:0.68rem; color:var(--dim); white-space:nowrap;">${escapeHtml(i.installed_version)} → ${escapeHtml(i.latest_version)}</span>`
                 : '';
             const updateChip = (i.is_installed && i.update_available)
                 ? `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
@@ -4062,7 +4078,7 @@
                 : '';
 
             card.innerHTML = `
-            <div class="select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
+            <div class="select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect(${jsArg(id)})"></div>
             <i class="mdi mdi-check-circle card-check"></i>
             <div class="card-main">
                 ${iconHtml}
@@ -4074,7 +4090,7 @@
                     <div class="card-author">by ${authorDisplay} &middot; ${sourceLabel}${statsHtml(storeStatsFor(i))}
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.85rem;"></i>' : ''}
                     </div>
-                    <div class="card-desc">${i.description || ''}</div>
+                    <div class="card-desc">${escapeHtml(i.description || '')}</div>
                 </div>
             </div>
             <div class="card-status">
@@ -4084,13 +4100,13 @@
                 ${newChip}
                 ${updateChip}
                 ${i.is_installed ? `${setupButtonHtml(i, 'card-install-btn')}
-                <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
+                <button class="action-btn" onclick="confirmRemove(${jsArg(i.owner)},${jsArg(i.repo_name)},${jsArg(i.type)},event)" title="Delete">
                     <i class="mdi mdi-trash-can-outline"></i>
                 </button>` : `
-                <button class="card-install-btn" onclick="event.stopPropagation(); confirmInst('${i.owner}','${i.repo_name}','${i.type}')" title="Install">
+                <button class="card-install-btn" onclick="event.stopPropagation(); confirmInst(${jsArg(i.owner)},${jsArg(i.repo_name)},${jsArg(i.type)})" title="Install">
                     <i class="mdi mdi-download"></i> Install
                 </button>`}
-                <button class="action-btn" onclick="openDet('${i.owner}','${i.repo_name}',event)" title="Details">
+                <button class="action-btn" onclick="openDet(${jsArg(i.owner)},${jsArg(i.repo_name)},event)" title="Details">
                     <i class="mdi mdi-chevron-right"></i>
                 </button>
             </div>
@@ -4115,8 +4131,8 @@
             const typeClass = i.type === 'lovelace'
                 ? 'tag-card'
                 : (i.type === 'blueprints' ? 'tag-blue' : (i.type === 'audio' ? 'tag-audio' : 'tag-int'));
-            const displayTitle = formatName(i.repo_name);
-            const authorDisplay = getDisplayAuthor(i.owner, i.owner_display_name);
+            const displayTitle = escapeHtml(formatName(i.repo_name));
+            const authorDisplay = escapeHtml(getDisplayAuthor(i.owner, i.owner_display_name));
 
             let iconHtml;
             {
@@ -4124,10 +4140,10 @@
                 const candidates = getBrandCandidates(domain, 'icon', i.icon_url || '');
                 const primaryIcon = candidates[0] || '';
                 const dataCandidates = candidates.join('|');
-                const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
-                iconHtml = `<img src="${primaryIcon || 'icon.png'}" alt="" class="list-icon" loading="lazy" decoding="async"
-                     data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
-                     data-candidates="${dataCandidates}"
+                const fallbackAttr = i.icon_url ? `data-fallback-url="${escapeHtml(i.icon_url)}"` : '';
+                iconHtml = `<img src="${escapeHtml(primaryIcon || 'icon.png')}" alt="" class="list-icon" loading="lazy" decoding="async"
+                     data-brand-domain="${escapeHtml(domain)}" data-brand-kind="icon" ${fallbackAttr}
+                     data-candidates="${escapeHtml(dataCandidates)}"
                      onload="brandImgLoaded(this)"
                      onerror="brandImgError(this)"
                      style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">
@@ -4139,7 +4155,7 @@
             const actionLabel = i.update_available ? 'Update' : (i.is_installed ? 'Reinstall' : 'Install');
 
             row.innerHTML = `
-                <div class="list-select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect('${id}')"></div>
+                <div class="list-select-checkbox ${selectedIds.has(id) ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelect(${jsArg(id)})"></div>
                 <div style="display:flex; align-items:center; justify-content:center;">
                     ${iconHtml}
                 </div>
@@ -4149,19 +4165,19 @@
                         <span class="type-tag ${typeClass}"><i class="mdi ${typeIcon}"></i> ${i.type}</span>
                         ${showsAsNew(i) ? `<span class="badge badge-new">${newBadgeLabel(i)}</span>` : ''}
                         ${i.is_hidden ? '<i class="mdi mdi-eye-off" title="Hidden" style="font-size:0.9rem;"></i>' : ''}
-                        ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${i.installed_version} → ${i.latest_version}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
+                        ${i.is_installed ? (i.update_available ? `<span class="badge badge-update">Update${(i.installed_version && i.latest_version) ? `: ${escapeHtml(i.installed_version)} → ${escapeHtml(i.latest_version)}` : ''}</span>` : getInstalledBadge(i.install_source, needsRestart(i.owner, i.repo_name), i.type)) : ''}
                     </div>
-                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${i.description}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}${statsHtml(storeStatsFor(i))}</div>
+                    <div class="list-meta">by ${authorDisplay}${i.description ? ` • ${escapeHtml(i.description)}` : ''} • ${i.source === 'github' ? '<i class="mdi mdi-github"></i> GitHub' : '<i class="mdi mdi-store"></i> OnOff Store'}${statsHtml(storeStatsFor(i))}</div>
                 </div>
                 <div class="list-actions">
                     ${setupButtonHtml(i, 'btn btn-p')}
-                    <button class="btn ${i.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInst('${i.owner}','${i.repo_name}','${i.type}'); event.stopPropagation();">${actionLabel}</button>
+                    <button class="btn ${i.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInst(${jsArg(i.owner)},${jsArg(i.repo_name)},${jsArg(i.type)}); event.stopPropagation();">${actionLabel}</button>
 
                     ${i.is_installed ? `
-                    <button class="action-btn" onclick="confirmRemove('${i.owner}','${i.repo_name}','${i.type}',event)" title="Delete">
+                    <button class="action-btn" onclick="confirmRemove(${jsArg(i.owner)},${jsArg(i.repo_name)},${jsArg(i.type)},event)" title="Delete">
                         <i class="mdi mdi-trash-can-outline"></i>
                     </button>` : ''}
-                    <button class="action-btn" onclick="openDet('${i.owner}','${i.repo_name}',event)" title="Details">
+                    <button class="action-btn" onclick="openDet(${jsArg(i.owner)},${jsArg(i.repo_name)},event)" title="Details">
                         <i class="mdi mdi-open-in-new"></i>
                     </button>
                 </div>
@@ -4177,9 +4193,6 @@
             return row;
         }
 
-        function createSectionHeader(title, icon, count) {
-            return createSectionHeaderWithToggle(title, icon, count, null);
-        }
 
         function createSectionHeaderWithToggle(title, icon, count, sectionKey) {
             const header = document.createElement('div');
@@ -4188,9 +4201,9 @@
             const toggleIcon = isCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up';
             header.innerHTML = `
                 <i class="mdi ${icon}" style="font-size: 1.2rem; color: var(--primary);"></i>
-                <span style="font-size: 1.1rem; font-weight: 600;">${title}</span>
+                <span style="font-size: 1.1rem; font-weight: 600;">${escapeHtml(title)}</span>
                 <span style="color: var(--dim); font-size: 0.85rem;">(${count})</span>
-                ${sectionKey ? `<button class="action-btn" style="margin-left:auto;" onclick="toggleSection('${sectionKey}')"><i class="mdi ${toggleIcon}"></i></button>` : ''}
+                ${sectionKey ? `<button class="action-btn" style="margin-left:auto;" onclick="toggleSection(${jsArg(sectionKey)})"><i class="mdi ${toggleIcon}"></i></button>` : ''}
             `;
             return header;
         }
@@ -4576,28 +4589,7 @@
             });
         }
 
-        async function executeRemoveDirect(o, r, t) {
-            try {
-                await fetch('/api/yidstore/uninstall', {
-                    method: 'POST',
-                    body: JSON.stringify({ owner: o, repo: r, type: t }),
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            } catch (e) { }
-        }
 
-        async function toggleHide(o, r, currentlyHidden, e) {
-            if (e) e.stopPropagation();
-            const endpoint = currentlyHidden ? '/api/yidstore/unhide' : '/api/yidstore/hide';
-            try {
-                await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ owner: o, repo: r })
-                });
-                load();
-            } catch (e) { alert('Action failed'); }
-        }
 
         function toggleShowHidden() {
             showHidden = !showHidden;
@@ -4646,7 +4638,7 @@
                 item = items.find(x => x.owner === o && x.repo_name === r);
             }
             if (!item) {
-                pop('Not Found', `${formatName(r)} is not available in the current store list.`, 'mdi-alert', false);
+                pop('Not Found', `${escapeHtml(formatName(r))} is not available in the current store list.`, 'mdi-alert', false);
                 return;
             }
             const body = document.getElementById('mb');
@@ -4692,11 +4684,11 @@
                         <div class="version-row">
                             <label style="color: var(--dim); font-size: 0.85rem; white-space: nowrap;">Version:</label>
                             <select id="versionSelect" class="version-select">
-                            <option value="">Latest (${releases[0]?.tag_name || 'default'})${latestDate ? ' - ' + latestDate : ''}</option>
+                            <option value="">Latest (${escapeHtml(releases[0]?.tag_name || 'default')})${latestDate ? ' - ' + escapeHtml(latestDate) : ''}</option>
                             ${olderReleases.map(rel => {
                                 const relDate = formatReleaseDate(rel.published_at || rel.created_at);
                                 const dateStr = relDate ? ' - ' + relDate : '';
-                                return `<option value="${rel.tag_name}">${rel.tag_name}${rel.name ? ' - ' + rel.name : ''}${dateStr}</option>`;
+                                return `<option value="${escapeHtml(rel.tag_name)}">${escapeHtml(rel.tag_name)}${rel.name ? ' - ' + escapeHtml(rel.name) : ''}${escapeHtml(dateStr)}</option>`;
                             }).join('')}
                             </select>
                         </div>
@@ -4713,27 +4705,29 @@
                     <div style="display: flex; gap: 0.8rem; justify-content: flex-end; flex-wrap: wrap;">
                         <button class="btn btn-o" onclick="closeModal()">Close</button>
                         ${setupButtonHtml(item, 'btn btn-p')}
-                        <button class="btn ${item.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInstWithVersion('${o}','${r}','${item.type}')">${btnTxt}</button>
+                        <button class="btn ${item.can_setup ? 'btn-o' : 'btn-p'}" onclick="confirmInstWithVersion(${jsArg(o)},${jsArg(r)},${jsArg(item.type)})">${btnTxt}</button>
                     </div>
                 </div>
             `;
 
             try {
                 const sourceParam = item.source === 'github' ? '?source=github' : '';
-                const resp = await fetch(`/api/yidstore/readme/${o}/${r}${sourceParam}`);
+                const resp = await fetch(`/api/yidstore/readme/${encodeURIComponent(o)}/${encodeURIComponent(r)}${sourceParam}`);
                 let md = '';
                 if (item.update_available && item.release_notes) md += `### What's New\n${item.release_notes}\n\n---\n\n`;
-                md += resp.ok ? await resp.text() : `${formatName(r)} has no instructions available.`;
+                if (resp.ok) md += await resp.text();
+                else if (resp.status === 404) md += `${escapeHtml(formatName(r))} has no instructions available.`;
+                else md += `**Could not load the instructions** (error ${resp.status}). Close this window and open it again to retry.`;
                 const logoMarkup = buildModalLogo(item);
                 const itemNeedsRestart = item.type === 'integration' && needsRestart(item.owner, item.repo_name);
                 const restartBadge = itemNeedsRestart ? '<span class="badge badge-restart" id="modalRestartBadge" style="margin-left: 0.5rem;">Restart Required</span>' : '<span id="modalRestartBadge" style="display:none;"></span>';
                 const headerMarkup = `
-                    <div class="modal-top" data-owner="${item.owner}" data-repo="${item.repo_name}" data-type="${item.type}">
+                    <div class="modal-top" data-owner="${escapeHtml(item.owner)}" data-repo="${escapeHtml(item.repo_name)}" data-type="${escapeHtml(item.type)}">
                         <div class="modal-top-row">
                             ${logoMarkup}
                             <div class="modal-top-text">
-                                <div class="modal-top-title">${formatName(item.repo_name)}${item.source === 'github' ? ` <a href="https://github.com/${item.owner}/${item.repo_name}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
-                                <div class="modal-top-author">by ${getDisplayAuthor(item.owner, item.owner_display_name)}${statsHtml(storeStatsFor(item))}</div>
+                                <div class="modal-top-title">${escapeHtml(formatName(item.repo_name))}${item.source === 'github' ? ` <a href="https://github.com/${encodeURIComponent(item.owner)}/${encodeURIComponent(item.repo_name)}" target="_blank" rel="noopener noreferrer" style="color: var(--dim); font-size: 0.8rem; margin-left: 0.5rem;" title="View on GitHub"><i class="mdi mdi-github"></i></a>` : ''}${restartBadge}</div>
+                                <div class="modal-top-author">by ${escapeHtml(getDisplayAuthor(item.owner, item.owner_display_name))}${statsHtml(storeStatsFor(item))}</div>
                             </div>
                         </div>
                         <div class="modal-divider"></div>
@@ -4741,7 +4735,9 @@
                 body.innerHTML = `${headerMarkup}<div id="mpDetailCards">${storeDetailCardsHtml(item)}</div>${mdToHtml(md)}`;
                 initModalLogo();
                 setupModalScroll();
-            } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
+            } catch (e) {
+                body.innerHTML = `<div style="padding:1rem;color:var(--dim);"><i class="mdi mdi-alert-circle-outline"></i> Could not load the instructions for ${escapeHtml(formatName(r))}: ${escapeHtml(e && e.message ? e.message : 'network error')}. Close this window and open it again to retry.</div>`;
+            }
         }
 
         function buildModalLogo(item) {
@@ -4760,16 +4756,16 @@
             const candidates = getBrandCandidates(domain, 'logo', fallbackLogo);
             const primary = candidates[0] || '';
             const dataAttr = candidates.join('|');
-            const fallbackAttr = fallbackLogo ? `data-fallback-url="${fallbackLogo}"` : '';
+            const fallbackAttr = fallbackLogo ? `data-fallback-url="${escapeHtml(fallbackLogo)}"` : '';
 
             return `
                 <div class="modal-logo" id="modalLogo">
                     <img id="modalLogoImg"
-                         src="${primary}"
-                         data-brand-domain="${domain}"
+                         src="${escapeHtml(primary)}"
+                         data-brand-domain="${escapeHtml(domain)}"
                          data-brand-kind="logo"
                          ${fallbackAttr}
-                         data-candidates="${dataAttr}"
+                         data-candidates="${escapeHtml(dataAttr)}"
                          onload="brandImgLoaded(this)"
                          onerror="brandImgError(this)"
                          alt="">
@@ -4805,39 +4801,6 @@
             mpStartInstall(o, r, t, version);
         }
 
-        async function executeInstWithVersion(o, r, t, version) {
-            closePop();
-            const item = items.find(x => x.owner === o && x.repo_name === r);
-
-            try {
-                const body = { owner: o, repo: r, type: t };
-                if (t === 'audio') body.audio_location = getAudioInstallLocation();
-                if (item && item.mode) body.mode = item.mode;
-                if (item && item.asset_name) body.asset_name = item.asset_name;
-                if (version) body.version = version;
-                if (item && item.source === 'github') {
-                    body.source = 'github';
-                    if (item.repo_url) body.repo_url = item.repo_url;
-                }
-
-                const res = await fetch('/api/yidstore/install', {
-                    method: 'POST',
-                    body: JSON.stringify(body),
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await res.json();
-                if (data.success) {
-                    closeModal();
-                    // Update item locally - mark as installed and remove from updates
-                    if (item) {
-                        item.is_installed = true;
-                        item.install_source = 'yidstore';
-                        item.update_available = false;
-                    }
-                    await afterStoreInstall(o, r, t, data);
-                } else pop('Error', data.error, 'mdi-alert', false);
-            } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
-        }
 
         function toggleMenu() {
             const d = document.getElementById('dropdown');
@@ -4875,9 +4838,9 @@
                                 ? `<span style="color: var(--dim); font-size: 0.78rem; margin-left:0.5rem;"><i class="mdi mdi-key-variant"></i> Key ••••${escapeHtml(r.key_last4)}</span>`
                                 : '');
                             const keyButtons = r.source === 'github' ? '' : (r.key_last4
-                                ? `<button class="action-btn" onclick="editRepoKey('${o}', '${n}')" title="Replace key"><i class="mdi mdi-key-change"></i></button>
-                                   <button class="action-btn" onclick="removeRepoKey('${o}', '${n}')" title="Remove key"><i class="mdi mdi-key-remove"></i></button>`
-                                : `<button class="action-btn" onclick="editRepoKey('${o}', '${n}')" title="Add key"><i class="mdi mdi-key-plus"></i></button>`);
+                                ? `<button class="action-btn" onclick="editRepoKey(${jsArg(o)}, ${jsArg(n)})" title="Replace key"><i class="mdi mdi-key-change"></i></button>
+                                   <button class="action-btn" onclick="removeRepoKey(${jsArg(o)}, ${jsArg(n)})" title="Remove key"><i class="mdi mdi-key-remove"></i></button>`
+                                : `<button class="action-btn" onclick="editRepoKey(${jsArg(o)}, ${jsArg(n)})" title="Add key"><i class="mdi mdi-key-plus"></i></button>`);
                             return `
                             <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.7rem; background: var(--code-bg); border-radius: 8px; margin-bottom: 0.5rem; gap: 0.5rem;">
                                 <div style="min-width: 0;">
@@ -4888,7 +4851,7 @@
                                 </div>
                                 <div style="display:flex; gap:0.3rem; flex: 0 0 auto;">
                                     ${keyButtons}
-                                    <button class="action-btn" onclick="removeCustomRepo('${o}', '${n}')" title="Remove" style="color: var(--danger);">
+                                    <button class="action-btn" onclick="removeCustomRepo(${jsArg(o)}, ${jsArg(n)})" title="Remove" style="color: var(--danger);">
                                         <i class="mdi mdi-trash-can-outline"></i>
                                     </button>
                                 </div>
@@ -5058,13 +5021,16 @@
 
         function confirmRemove(o, r, t, e) {
             if (e) e.stopPropagation();
+            const name = escapeHtml(formatName(r));
             const msg = t === 'integration'
-                ? `Delete ${formatName(r)}? Remove from HA Integrations first.`
-                : `Delete ${formatName(r)}?`;
-
+                ? `Delete <strong>${name}</strong>? It is removed from Home Assistant (its setup, devices and entities) and its files are deleted.`
+                : t === 'lovelace'
+                    ? `Delete <strong>${name}</strong>? Its files are deleted and it is removed from your dashboard resources.`
+                    : `Delete <strong>${name}</strong>?`;
+            window.__yidRemove = { o, r, t };
             pop('Confirm Delete', msg, 'mdi-trash-can', false, [
                 { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
-                { t: 'Delete', c: 'btn-p', f: `executeRemove('${o}','${r}','${t}')` }
+                { t: 'Delete', c: 'btn-p', f: 'executeRemove(window.__yidRemove.o, window.__yidRemove.r, window.__yidRemove.t)' }
             ]);
         }
 
@@ -5076,51 +5042,20 @@
                     body: JSON.stringify({ owner: o, repo: r, type: t }),
                     headers: { 'Content-Type': 'application/json' }
                 });
-                const data = await res.json();
-                if (data.success) {
+                const data = await parseJsonSafe(res);
+                if (res.ok && data.success) {
+                    await syncBackendAfterAction();
                     if (t === 'lovelace') {
-                        await syncBackendAfterAction();
-                        pop('Removed', 'Card deleted. Reload to finish frontend changes if needed.', 'mdi-check-circle', true);
+                        pop('Removed', 'Card deleted and removed from your dashboard resources. Reload to finish.', 'mdi-check-circle', true);
+                    } else if (data.requires_restart) {
+                        showRestartOffer(`${formatName(r)} was removed from Home Assistant and its files were deleted. Restart Home Assistant to finish.`);
                     } else {
-                        await syncBackendAfterAction();
-                        pop('Deleted', 'Files removed. Restart Home Assistant.', 'mdi-restart', false);
+                        pop('Deleted', `${escapeHtml(formatName(r))} was removed.`, 'mdi-check-circle', false);
                     }
-                } else pop('Error', data.error, 'mdi-alert', false);
-            } catch { pop('Error', 'Removal failed', 'mdi-alert', false); }
+                } else pop('Error', escapeHtml(data.error || `Removal failed (HTTP ${res.status})`), 'mdi-alert', false);
+            } catch (e) { pop('Error', escapeHtml((e && e.message) || 'Removal failed'), 'mdi-alert', false); }
         }
 
-        async function executeInst(o, r, t) {
-            closePop();
-            const item = items.find(x => x.owner === o && x.repo_name === r);
-
-            try {
-                const body = { owner: o, repo: r, type: t };
-                if (t === 'audio') body.audio_location = getAudioInstallLocation();
-                if (item && item.mode) body.mode = item.mode;
-                if (item && item.asset_name) body.asset_name = item.asset_name;
-                if (item && item.source === 'github') {
-                    body.source = 'github';
-                    if (item.repo_url) body.repo_url = item.repo_url;
-                }
-
-                const res = await fetch('/api/yidstore/install', {
-                    method: 'POST',
-                    body: JSON.stringify(body),
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await res.json();
-                if (data.success) {
-                    closeModal();
-                    // Update item locally - mark as installed and remove from updates
-                    if (item) {
-                        item.is_installed = true;
-                        item.install_source = 'yidstore';
-                        item.update_available = false;
-                    }
-                    await afterStoreInstall(o, r, t, data);
-                } else pop('Error', data.error, 'mdi-alert', false);
-            } catch { pop('Error', 'Install failed', 'mdi-alert', false); }
-        }
 
         // Shared post-install handling for the Store tab. Integrations now
         // follow the Marketplace: a fresh config-flow integration loads without
@@ -5141,7 +5076,7 @@
         }
         function setupButtonHtml(i, cls) {
             if (!i || i.type !== 'integration' || !i.can_setup || !i.domain) return '';
-            return `<button class="${cls}" onclick="setupStoreItem('${i.owner}','${i.repo_name}',event)" title="Set up this integration"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
+            return `<button class="${cls}" onclick="setupStoreItem(${jsArg(i.owner)},${jsArg(i.repo_name)},event)" title="Set up this integration"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
         }
 
         async function afterStoreInstall(o, r, t, data, wasInstalled = false) {
@@ -5161,16 +5096,16 @@
                 } else {
                     await syncBackendAfterAction();
                     pop('Installed',
-                        `${formatName(r)} is installed and ready — no restart needed. Add it under Settings → Devices &amp; Services.`,
+                        `${escapeHtml(formatName(r))} is installed and ready — no restart needed. Add it under Settings → Devices &amp; Services.`,
                         'mdi-check-circle', false);
                 }
             } else if (t === 'audio') {
                 await syncBackendAfterAction();
-                pop('Installed', `${formatName(r)} installed.`, 'mdi-check-circle', false);
+                pop('Installed', `${escapeHtml(formatName(r))} installed.`, 'mdi-check-circle', false);
             } else {
                 // Cards and blueprints - show reload popup
                 await syncBackendAfterAction();
-                pop('Installed', `${formatName(r)} installed. Reload to see changes.`, 'mdi-refresh', true);
+                pop('Installed', `${escapeHtml(formatName(r))} installed. Reload to see changes.`, 'mdi-refresh', true);
             }
         }
 
@@ -5573,7 +5508,7 @@
         }
         function mpMd(text) {
             if (!text) return '';
-            try { return window.marked ? marked.parse(text) : escapeHtml(text).replace(/\n/g, '<br>'); }
+            try { return mdToHtml(text); }
             catch (_) { return escapeHtml(text).replace(/\n/g, '<br>'); }
         }
         function mpHumanize(key) {
@@ -5644,7 +5579,7 @@
                 const title = mpTr(`step.${step.step_id}.title`, ph) || mp.name;
                 const desc = mpTr(`step.${step.step_id}.description`, ph);
                 const opts = (step.menu_options || []).map(opt =>
-                    `<button type="button" onclick="mpChooseMenu('${escapeHtml(String(opt))}')"><span>${escapeHtml(mpTr(`step.${step.step_id}.menu_options.${opt}`, ph) || mpHumanize(opt))}</span><i class="mdi mdi-chevron-right"></i></button>`).join('');
+                    `<button type="button" onclick="mpChooseMenu(${jsArg(String(opt))})"><span>${escapeHtml(mpTr(`step.${step.step_id}.menu_options.${opt}`, ph) || mpHumanize(opt))}</span><i class="mdi mdi-chevron-right"></i></button>`).join('');
                 mpRender({ title, body: `${desc ? mpMd(desc) : ''}<div class="mp-menu">${opts}</div>`, buttons: [], link });
                 return;
             }
@@ -5884,12 +5819,12 @@
                 icon = '<i class="mdi mdi-download" style="color:var(--primary);"></i>';
                 title = 'Not installed';
                 text = i.latest_version ? `Version ${escapeHtml(i.latest_version)} is available to install.` : 'Available to install.';
-                action = `<button class="mp-tonal" onclick="confirmInstWithVersion('${o}','${r}','${t}')"><i class="mdi mdi-download"></i> Install</button>`;
+                action = `<button class="mp-tonal" onclick="confirmInstWithVersion(${jsArg(o)},${jsArg(r)},${jsArg(t)})"><i class="mdi mdi-download"></i> Install</button>`;
             } else if (i.update_available) {
                 icon = '<i class="mdi mdi-update" style="color:var(--primary);"></i>';
                 title = 'Update available';
                 text = `Version ${escapeHtml(i.installed_version || '?')} → ${escapeHtml(i.latest_version || '?')}`;
-                action = `<button class="mp-tonal" onclick="confirmInstWithVersion('${o}','${r}','${t}')"><i class="mdi mdi-update"></i> Update</button>`;
+                action = `<button class="mp-tonal" onclick="confirmInstWithVersion(${jsArg(o)},${jsArg(r)},${jsArg(t)})"><i class="mdi mdi-update"></i> Update</button>`;
             } else if (t === 'integration' && needsRestart(o, r)) {
                 icon = '<i class="mdi mdi-restart" style="color:#ff9800;"></i>';
                 title = 'Restart required';
@@ -5899,12 +5834,12 @@
                 icon = ok;
                 title = `Version ${escapeHtml(verLabel)} installed`;
                 text = `${escapeHtml(name)} is installed. Set it up to start using it.`;
-                action = `<button class="mp-tonal" onclick="mpOpenSetup('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
+                action = `<button class="mp-tonal" onclick="mpOpenSetup(${jsArg(i.domain)},${jsArg(name)})"><i class="mdi mdi-cog-outline"></i> Set up</button>`;
             } else if (t === 'integration' && i.configured && i.domain) {
                 icon = ok;
                 title = `Version ${escapeHtml(verLabel)} installed`;
                 text = `${escapeHtml(name)} is installed and set up.`;
-                action = (i.can_configure ? `<button class="mp-tonal" onclick="openNativeConfigure('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Configure</button>` : '')
+                action = (i.can_configure ? `<button class="mp-tonal" onclick="openNativeConfigure(${jsArg(i.domain)},${jsArg(name)})"><i class="mdi mdi-cog-outline"></i> Configure</button>` : '')
                     + `<button class="mp-tonal" onclick="closeModal(); haNavigate('/config/integrations/integration/${encodeURIComponent(i.domain)}')"><i class="mdi mdi-open-in-new"></i> Open integration</button>`;
             } else {
                 icon = ok;
@@ -6133,8 +6068,8 @@
             container.innerHTML = `
                 <div class="docs-error">
                     <i class="mdi mdi-server-off"></i>
-                    <p>${message || 'Server is not reachable. Please check your connection.'}</p>
-                    <button class="btn btn-o" onclick="retryLoad('${containerId}')">
+                    <p>${escapeHtml(message || 'Server is not reachable. Please check your connection.')}</p>
+                    <button class="btn btn-o" onclick="retryLoad(${jsArg(containerId)})">
                         <i class="mdi mdi-refresh"></i> Retry
                     </button>
                 </div>
@@ -6215,9 +6150,9 @@
                 const repoId = `docs-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
                     <div class="docs-folder" id="${repoId}">
-                        <div class="docs-folder-header" onclick="toggleDocsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                        <div class="docs-folder-header" onclick="toggleDocsFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch)})">
                             <i class="mdi mdi-folder"></i>
-                            <span>${formatName(repo.repo_name)}</span>
+                            <span>${escapeHtml(formatName(repo.repo_name))}</span>
                         </div>
                         <div class="docs-folder-items" id="${repoId}-items">
                             <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
@@ -6275,9 +6210,9 @@
                         const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                         html += `
                             <div class="docs-folder" id="${subFolderId}">
-                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'docs')">
+                                <div class="docs-folder-header" onclick="toggleSubFolder(${jsArg(subFolderId)}, ${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)}, 'docs')">
                                     <i class="mdi mdi-folder"></i>
-                                    <span>${file.name}</span>
+                                    <span>${escapeHtml(file.name)}</span>
                                 </div>
                                 <div class="docs-folder-items" id="${subFolderId}-items"></div>
                             </div>
@@ -6285,9 +6220,9 @@
                     } else {
                         const icon = getDocIcon(file.name);
                         html += `
-                            <div class="docs-file" onclick="loadDocContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                            <div class="docs-file" onclick="loadDocContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(file.path)}, ${jsArg(branch)})">
                                 <i class="mdi ${icon}"></i>
-                                <span>${file.name}</span>
+                                <span>${escapeHtml(file.name)}</span>
                             </div>
                         `;
                     }
@@ -6345,17 +6280,17 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a href="#/docs" onclick="event.preventDefault(); switchView('docs')">Documentation</a> <i class="mdi mdi-chevron-right"></i> <a href="#/docs" onclick="event.preventDefault(); switchView('docs')">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/docs" onclick="event.preventDefault(); switchView('docs')">Documentation</a> <i class="mdi mdi-chevron-right"></i> <a href="#/docs" onclick="event.preventDefault(); switchView('docs')">${escapeHtml(formatName(repo))}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${escapeHtml(part)}</span>`;
                     } else {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${escapeHtml(part)}</strong>`;
                     }
                 });
 
@@ -6363,7 +6298,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${escapeHtml(getDisplayAuthor(data.last_modified_by, data.last_modified_by))}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
@@ -6379,7 +6314,7 @@
                 if (lowerPath.endsWith('.md')) {
                     bodyHtml = mdToHtml(data.content || '');
                 } else if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
-                    bodyHtml = data.content || '';
+                    bodyHtml = safeHtml(data.content || '');
                 } else {
                     bodyHtml = `<pre>${escapeHtml(data.content || '')}</pre>`;
                 }
@@ -6447,9 +6382,9 @@
                 const repoId = `automations-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
                     <div class="docs-folder" id="${repoId}">
-                        <div class="docs-folder-header" onclick="toggleAutomationsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                        <div class="docs-folder-header" onclick="toggleAutomationsFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch)})">
                             <i class="mdi mdi-folder"></i>
-                            <span>${formatName(repo.repo_name)}</span>
+                            <span>${escapeHtml(formatName(repo.repo_name))}</span>
                         </div>
                         <div class="docs-folder-items" id="${repoId}-items">
                             <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
@@ -6510,18 +6445,18 @@
                         const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                         html += `
                             <div class="docs-folder" id="${subFolderId}">
-                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'automations')">
+                                <div class="docs-folder-header" onclick="toggleSubFolder(${jsArg(subFolderId)}, ${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)}, 'automations')">
                                     <i class="mdi mdi-folder"></i>
-                                    <span>${file.name}</span>
+                                    <span>${escapeHtml(file.name)}</span>
                                 </div>
                                 <div class="docs-folder-items" id="${subFolderId}-items"></div>
                             </div>
                         `;
                     } else {
                         html += `
-                            <div class="yaml-file" onclick="loadAutomationContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                            <div class="yaml-file" onclick="loadAutomationContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(file.path)}, ${jsArg(branch)})">
                                 <i class="mdi mdi-robot"></i>
-                                <span>${file.name.replace(/\.(yaml|yml)$/i, '')}</span>
+                                <span>${escapeHtml(file.name.replace(/\.(yaml|yml)$/i, ''))}</span>
                             </div>
                         `;
                     }
@@ -6548,18 +6483,18 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
                 const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a href="#/automations" onclick="event.preventDefault(); switchView('automations')">Automations</a> <i class="mdi mdi-chevron-right"></i> <a href="#/automations" onclick="event.preventDefault(); switchView('automations')">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/automations" onclick="event.preventDefault(); switchView('automations')">Automations</a> <i class="mdi mdi-chevron-right"></i> <a href="#/automations" onclick="event.preventDefault(); switchView('automations')">${escapeHtml(formatName(repo))}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${escapeHtml(part)}</span>`;
                     } else {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${escapeHtml(part)}</strong>`;
                     }
                 });
 
@@ -6567,7 +6502,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${escapeHtml(getDisplayAuthor(data.last_modified_by, data.last_modified_by))}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
@@ -6616,12 +6551,12 @@
                 contentEl.innerHTML = `
                     <div class="docs-breadcrumb">${breadcrumbHtml}</div>
                     ${metaHtml}
-                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-robot" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-robot" style="color: var(--primary);"></i> ${escapeHtml(formatName(fileName))}</h2>
                     <div class="yaml-actions">
-                        <button class="btn btn-p" onclick="addAutomation('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                        <button class="btn btn-p" onclick="addAutomation(${jsArg(yamlEncoded)}, ${jsArg(formatName(fileName))})">
                             <i class="mdi mdi-plus"></i> Add Automation
                         </button>
-                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                        <button class="btn btn-o" onclick="copyYaml(${jsArg(yamlEncoded)})">
                             <i class="mdi mdi-content-copy"></i> Copy YAML
                         </button>
                     </div>
@@ -6720,9 +6655,9 @@
                 const repoId = `dashboards-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
                     <div class="docs-folder" id="${repoId}">
-                        <div class="docs-folder-header" onclick="toggleDashboardsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch}')">
+                        <div class="docs-folder-header" onclick="toggleDashboardsFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch)})">
                             <i class="mdi mdi-folder"></i>
-                            <span>${formatName(repo.repo_name)}</span>
+                            <span>${escapeHtml(formatName(repo.repo_name))}</span>
                         </div>
                         <div class="docs-folder-items" id="${repoId}-items">
                             <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
@@ -6782,18 +6717,18 @@
                         const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                         html += `
                             <div class="docs-folder" id="${subFolderId}">
-                                <div class="docs-folder-header" onclick="toggleSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}', 'dashboards')">
+                                <div class="docs-folder-header" onclick="toggleSubFolder(${jsArg(subFolderId)}, ${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)}, 'dashboards')">
                                     <i class="mdi mdi-folder"></i>
-                                    <span>${file.name}</span>
+                                    <span>${escapeHtml(file.name)}</span>
                                 </div>
                                 <div class="docs-folder-items" id="${subFolderId}-items"></div>
                             </div>
                         `;
                     } else {
                         html += `
-                            <div class="yaml-file" onclick="loadDashboardContent('${owner}', '${repo}', '${file.path}', '${branch}')">
+                            <div class="yaml-file" onclick="loadDashboardContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(file.path)}, ${jsArg(branch)})">
                                 <i class="mdi mdi-view-dashboard"></i>
-                                <span>${file.name.replace(/\.(yaml|yml)$/i, '')}</span>
+                                <span>${escapeHtml(file.name.replace(/\.(yaml|yml)$/i, ''))}</span>
                             </div>
                         `;
                     }
@@ -6820,18 +6755,18 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
                 const fileName = path.split('/').pop().replace(/\.(yaml|yml)$/i, '');
                 const pathParts = path.split('/').filter(Boolean);
-                let breadcrumbHtml = `<a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">Dashboards</a> <i class="mdi mdi-chevron-right"></i> <a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">${formatName(repo)}</a>`;
+                let breadcrumbHtml = `<a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">Dashboards</a> <i class="mdi mdi-chevron-right"></i> <a href="#/dashboards" onclick="event.preventDefault(); switchView('dashboards')">${escapeHtml(formatName(repo))}</a>`;
                 pathParts.forEach((part, idx) => {
                     if (idx < pathParts.length - 1) {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${part}</span>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <span>${escapeHtml(part)}</span>`;
                     } else {
-                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${part}</strong>`;
+                        breadcrumbHtml += ` <i class="mdi mdi-chevron-right"></i> <strong>${escapeHtml(part)}</strong>`;
                     }
                 });
 
@@ -6839,7 +6774,7 @@
                 if (data.last_modified_by || data.last_modified_at) {
                     metaHtml = '<div class="docs-meta">';
                     if (data.last_modified_by) {
-                        metaHtml += `<span><i class="mdi mdi-account"></i> ${getDisplayAuthor(data.last_modified_by, data.last_modified_by)}</span>`;
+                        metaHtml += `<span><i class="mdi mdi-account"></i> ${escapeHtml(getDisplayAuthor(data.last_modified_by, data.last_modified_by))}</span>`;
                     }
                     if (data.last_modified_at) {
                         const date = new Date(data.last_modified_at);
@@ -6886,12 +6821,12 @@
                 contentEl.innerHTML = `
                     <div class="docs-breadcrumb">${breadcrumbHtml}</div>
                     ${metaHtml}
-                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-view-dashboard" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-view-dashboard" style="color: var(--primary);"></i> ${escapeHtml(formatName(fileName))}</h2>
                     <div class="yaml-actions">
-                        <button class="btn btn-p" onclick="addDashboard('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                        <button class="btn btn-p" onclick="addDashboard(${jsArg(yamlEncoded)}, ${jsArg(formatName(fileName))})">
                             <i class="mdi mdi-plus"></i> Add Dashboard
                         </button>
-                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                        <button class="btn btn-o" onclick="copyYaml(${jsArg(yamlEncoded)})">
                             <i class="mdi mdi-content-copy"></i> Copy YAML
                         </button>
                     </div>
@@ -7109,7 +7044,7 @@
             const error = app.task && app.task.state === 'error' && app.task.error
                 ? `<div class="apps-error"><i class="mdi mdi-alert-circle-outline"></i> ${escapeHtml(app.task.error)}</div>` : '';
             return `
-                <div class="card" data-id="${id}" onclick="if(!event.target.closest('button')) openAppDetails('${id}')">
+                <div class="card" data-id="${id}" onclick="if(!event.target.closest('button')) openAppDetails(${jsArg(id)})">
                     <div class="card-main">
                         ${appIconHtml(app)}
                         <div style="flex: 1; min-width: 0;">
@@ -7127,9 +7062,9 @@
                         <span>${escapeHtml(st.label)}</span>
                         <span style="flex:1;"></span>
                         ${updateChip}
-                        ${!app.installed && !st.busy ? `<button class="card-install-btn" onclick="appAction('${id}','install',this)" title="Install"><i class="mdi mdi-download"></i> Install</button>` : ''}
-                        ${app.installed && app.state !== 'started' && !st.busy ? `<button class="card-install-btn" onclick="appAction('${id}','start',this)" title="Start"><i class="mdi mdi-play"></i> Start</button>` : ''}
-                        <button class="action-btn" onclick="openAppDetails('${id}')" title="Details">
+                        ${!app.installed && !st.busy ? `<button class="card-install-btn" onclick="appAction(${jsArg(id)},'install',this)" title="Install"><i class="mdi mdi-download"></i> Install</button>` : ''}
+                        ${app.installed && app.state !== 'started' && !st.busy ? `<button class="card-install-btn" onclick="appAction(${jsArg(id)},'start',this)" title="Start"><i class="mdi mdi-play"></i> Start</button>` : ''}
+                        <button class="action-btn" onclick="openAppDetails(${jsArg(id)})" title="Details">
                             <i class="mdi mdi-chevron-right"></i>
                         </button>
                     </div>
@@ -7146,9 +7081,9 @@
                 : (app.installed ? `<span class="badge ${app.state === 'started' ? 'badge-inst' : ''}" style="${app.state === 'started' ? '' : 'background:rgba(127,127,127,0.12); color:var(--dim);'}">${escapeHtml(st.label)}</span>` : '');
             let action = '';
             if (!st.busy) {
-                if (!app.installed) action = `<button class="btn btn-p" onclick="appAction('${id}','install',this)">Install</button>`;
-                else if (app.update_available) action = `<button class="btn btn-p" onclick="appAction('${id}','update',this)">Update</button>`;
-                else if (app.state !== 'started') action = `<button class="btn btn-p" onclick="appAction('${id}','start',this)">Start</button>`;
+                if (!app.installed) action = `<button class="btn btn-p" onclick="appAction(${jsArg(id)},'install',this)">Install</button>`;
+                else if (app.update_available) action = `<button class="btn btn-p" onclick="appAction(${jsArg(id)},'update',this)">Update</button>`;
+                else if (app.state !== 'started') action = `<button class="btn btn-p" onclick="appAction(${jsArg(id)},'start',this)">Start</button>`;
             } else {
                 action = `<span class="app-busy"><i class="mdi mdi-loading mdi-spin"></i> ${escapeHtml(st.label)}</span>`;
             }
@@ -7156,7 +7091,7 @@
                 ? '<i class="mdi mdi-puzzle-outline app-icon-fallback"></i>'
                 : `<img src="/api/yidstore/apps/icon/${id}" alt="" class="list-icon" loading="lazy" decoding="async" data-app="${id}" onerror="appIconFallback(this)" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">`;
             return `
-                <div class="list-row" data-id="${id}" onclick="if(!event.target.closest('button')) openAppDetails('${id}')">
+                <div class="list-row" data-id="${id}" onclick="if(!event.target.closest('button')) openAppDetails(${jsArg(id)})">
                     <div style="display:flex; align-items:center; justify-content:center;">${icon}</div>
                     <div style="min-width: 0;">
                         <div class="list-title">
@@ -7168,7 +7103,7 @@
                     </div>
                     <div class="list-actions">
                         ${action}
-                        <button class="action-btn" onclick="openAppDetails('${id}')" title="Details">
+                        <button class="action-btn" onclick="openAppDetails(${jsArg(id)})" title="Details">
                             <i class="mdi mdi-open-in-new"></i>
                         </button>
                     </div>
@@ -7180,9 +7115,9 @@
             return `
                 <div data-id="__${key}" style="grid-column: 1/-1; padding: 1rem 0 0.5rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
                     <i class="mdi ${icon}" style="font-size: 1.2rem; color: var(--primary);"></i>
-                    <span style="font-size: 1.1rem; font-weight: 600;">${title}</span>
+                    <span style="font-size: 1.1rem; font-weight: 600;">${escapeHtml(title)}</span>
                     <span style="color: var(--dim); font-size: 0.85rem;">(${count})</span>
-                    <button class="action-btn" style="margin-left:auto;" onclick="toggleAppsSection('${key}')"><i class="mdi ${collapsed ? 'mdi-chevron-down' : 'mdi-chevron-up'}"></i></button>
+                    <button class="action-btn" style="margin-left:auto;" onclick="toggleAppsSection(${jsArg(key)})"><i class="mdi ${collapsed ? 'mdi-chevron-down' : 'mdi-chevron-up'}"></i></button>
                 </div>`;
         }
 
@@ -7349,7 +7284,7 @@
             const sw = (key, label, hint, checked) => `
                 <label class="app-toggle-row">
                     <span>${label}<small>${hint}</small></span>
-                    <span class="app-switch"><input type="checkbox" ${checked ? 'checked' : ''} onchange="appAction('${sid}','${key}',null,this.checked)"><span></span></span>
+                    <span class="app-switch"><input type="checkbox" ${checked ? 'checked' : ''} onchange="appAction(${jsArg(sid)},${jsArg(key)},null,this.checked)"><span></span></span>
                 </label>`;
 
             const versions = [];
@@ -7371,7 +7306,7 @@
                     <div class="version-wrap" style="margin:0 0 0.6rem;">
                         <div class="version-row">
                             <label style="color:var(--dim); font-size:0.85rem; white-space:nowrap;">Version:</label>
-                            <select id="appVersionSelect" class="version-select" onchange="appVersionChoice['${sid}']=this.value; renderAppChangelog('${sid}')">
+                            <select id="appVersionSelect" class="version-select" onchange="appVersionChoice[${jsArg(sid)}]=this.value; renderAppChangelog(${jsArg(sid)})">
                                 ${opts.join('')}
                             </select>
                         </div>
@@ -7381,14 +7316,14 @@
             const primary = [];
             if (!st.busy) {
                 if (!app.installed) {
-                    primary.push(`<button class="btn btn-p" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-download"></i> Install</button>`);
+                    primary.push(`<button class="btn btn-p" onclick="appInstallSelectedVersion(${jsArg(sid)},'install',this)"><i class="mdi mdi-download"></i> Install</button>`);
                 } else {
-                    if (app.update_available) primary.push(`<button class="btn btn-p" onclick="appAction('${sid}','update',this)"><i class="mdi mdi-update"></i> Update to v${escapeHtml(app.latest_version)}</button>`);
-                    if (Array.isArray(rels) && rels.length) primary.push(`<button class="btn btn-o" onclick="appInstallSelectedVersion('${sid}','install',this)"><i class="mdi mdi-swap-vertical"></i> Switch version</button>`);
+                    if (app.update_available) primary.push(`<button class="btn btn-p" onclick="appAction(${jsArg(sid)},'update',this)"><i class="mdi mdi-update"></i> Update to v${escapeHtml(app.latest_version)}</button>`);
+                    if (Array.isArray(rels) && rels.length) primary.push(`<button class="btn btn-o" onclick="appInstallSelectedVersion(${jsArg(sid)},'install',this)"><i class="mdi mdi-swap-vertical"></i> Switch version</button>`);
                     primary.push(running
-                        ? `<button class="btn btn-o" onclick="appAction('${sid}','stop',this)"><i class="mdi mdi-stop"></i> Stop</button>`
-                        : `<button class="btn btn-o" onclick="appAction('${sid}','start',this)"><i class="mdi mdi-play"></i> Start</button>`);
-                    if (running && (app.open_path || appExternalUrl(app))) primary.push(`<button class="btn btn-o" onclick="openApp('${sid}')"><i class="mdi mdi-open-in-new"></i> Open</button>`);
+                        ? `<button class="btn btn-o" onclick="appAction(${jsArg(sid)},'stop',this)"><i class="mdi mdi-stop"></i> Stop</button>`
+                        : `<button class="btn btn-o" onclick="appAction(${jsArg(sid)},'start',this)"><i class="mdi mdi-play"></i> Start</button>`);
+                    if (running && (app.open_path || appExternalUrl(app))) primary.push(`<button class="btn btn-o" onclick="openApp(${jsArg(sid)})"><i class="mdi mdi-open-in-new"></i> Open</button>`);
                 }
             }
 
@@ -7417,11 +7352,11 @@
                         ${sw('watchdog', 'Watchdog', 'Restart the app if it crashes', !!app.watchdog)}
                     </div>
                     <div class="app-manage-actions">
-                        <button class="btn btn-o btn-sm" onclick="appAction('${sid}','restart',this)"><i class="mdi mdi-restart"></i> Restart</button>
-                        <button class="btn btn-o btn-sm" onclick="appGoTo('${sid}','config_path')"><i class="mdi mdi-tune"></i> Configuration</button>
-                        <button class="btn btn-o btn-sm" onclick="appGoTo('${sid}','logs_path')"><i class="mdi mdi-text-box-outline"></i> Logs</button>
-                        <button class="btn btn-o btn-sm" onclick="appGoTo('${sid}','info_path')"><i class="mdi mdi-information-outline"></i> App page</button>
-                        <button class="btn btn-o btn-sm" style="color:#ef5350; border-color:#ef5350;" onclick="appAction('${sid}','remove',this)"><i class="mdi mdi-trash-can-outline"></i> Remove</button>
+                        <button class="btn btn-o btn-sm" onclick="appAction(${jsArg(sid)},'restart',this)"><i class="mdi mdi-restart"></i> Restart</button>
+                        <button class="btn btn-o btn-sm" onclick="appGoTo(${jsArg(sid)},'config_path')"><i class="mdi mdi-tune"></i> Configuration</button>
+                        <button class="btn btn-o btn-sm" onclick="appGoTo(${jsArg(sid)},'logs_path')"><i class="mdi mdi-text-box-outline"></i> Logs</button>
+                        <button class="btn btn-o btn-sm" onclick="appGoTo(${jsArg(sid)},'info_path')"><i class="mdi mdi-information-outline"></i> App page</button>
+                        <button class="btn btn-o btn-sm" style="color:#ef5350; border-color:#ef5350;" onclick="appAction(${jsArg(sid)},'remove',this)"><i class="mdi mdi-trash-can-outline"></i> Remove</button>
                     </div>` : ''}`;
         }
 
@@ -7475,7 +7410,7 @@
             const body = (rel.body || '').trim();
             let bodyHtml;
             if (body) {
-                try { bodyHtml = window.marked ? marked.parse(body) : escapeHtml(body).replace(/\n/g, '<br>'); }
+                try { bodyHtml = mdToHtml(body); }
                 catch (_) { bodyHtml = escapeHtml(body).replace(/\n/g, '<br>'); }
             } else {
                 bodyHtml = '<span style="color:var(--dim);">No release notes for this version.</span>';
@@ -7593,9 +7528,9 @@
                 const repoId = `helpers-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
                     <div class="docs-folder" id="${repoId}">
-                        <div class="docs-folder-header" onclick="toggleHelpersFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                        <div class="docs-folder-header" onclick="toggleHelpersFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch || 'main')})">
                             <i class="mdi mdi-folder"></i>
-                            <span>${formatName(repo.repo_name)}</span>
+                            <span>${escapeHtml(formatName(repo.repo_name))}</span>
                         </div>
                         <div class="docs-folder-items" id="${repoId}-items">
                             <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
@@ -7649,18 +7584,18 @@
                         const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                         html += `
                             <div class="docs-folder" id="${subFolderId}">
-                                <div class="docs-folder-header" onclick="toggleHelpersSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}')">
+                                <div class="docs-folder-header" onclick="toggleHelpersSubFolder(${jsArg(subFolderId)}, ${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)})">
                                     <i class="mdi mdi-folder"></i>
-                                    <span>${file.name}</span>
+                                    <span>${escapeHtml(file.name)}</span>
                                 </div>
                                 <div class="docs-folder-items" id="${subFolderId}-items"></div>
                             </div>
                         `;
                     } else {
                         html += `
-                            <div class="yaml-file" onclick="loadHelperContent('${owner}', '${repo}', '${branch}', '${file.path}')">
+                            <div class="yaml-file" onclick="loadHelperContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)})">
                                 <i class="mdi mdi-file-document-outline"></i>
-                                <span>${file.name}</span>
+                                <span>${escapeHtml(file.name)}</span>
                             </div>
                         `;
                     }
@@ -7703,12 +7638,12 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
                 const fileName = filePath.split('/').pop();
-                let breadcrumbHtml = `<a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">Helpers</a> <i class="mdi mdi-chevron-right"></i> <a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+                let breadcrumbHtml = `<a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">Helpers</a> <i class="mdi mdi-chevron-right"></i> <a href="#/helpers" onclick="event.preventDefault(); switchView('helpers')">${escapeHtml(formatName(repo))}</a> <i class="mdi mdi-chevron-right"></i> ${escapeHtml(fileName)}`;
 
                 // Meta info
                 let metaHtml = '';
@@ -7761,12 +7696,12 @@
                 contentEl.innerHTML = `
                     <div class="docs-breadcrumb">${breadcrumbHtml}</div>
                     ${metaHtml}
-                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-toggle-switch" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-toggle-switch" style="color: var(--primary);"></i> ${escapeHtml(formatName(fileName))}</h2>
                     <div class="yaml-actions">
-                        <button class="btn btn-p" onclick="addHelper('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                        <button class="btn btn-p" onclick="addHelper(${jsArg(yamlEncoded)}, ${jsArg(formatName(fileName))})">
                             <i class="mdi mdi-plus"></i> Add Helper
                         </button>
-                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                        <button class="btn btn-o" onclick="copyYaml(${jsArg(yamlEncoded)})">
                             <i class="mdi mdi-content-copy"></i> Copy YAML
                         </button>
                     </div>
@@ -7853,11 +7788,11 @@
             filteredRepos.forEach(repo => {
                 const repoId = `audio-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
-                    <div class="audio-repo-item" id="${repoId}" onclick="toggleAudioFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                    <div class="audio-repo-item" id="${repoId}" onclick="toggleAudioFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch || 'main')})">
                         <i class="mdi mdi-music-box"></i>
                         <div class="audio-repo-info">
-                            <span class="audio-repo-name">${formatName(repo.repo_name)}</span>
-                            ${repo.description ? `<span class="audio-repo-desc">${repo.description}</span>` : ''}
+                            <span class="audio-repo-name">${escapeHtml(formatName(repo.repo_name))}</span>
+                            ${repo.description ? `<span class="audio-repo-desc">${escapeHtml(repo.description)}</span>` : ''}
                         </div>
                     </div>
                 `;
@@ -7889,11 +7824,11 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
-                const breadcrumbHtml = `<a href="#/audio" onclick="event.preventDefault(); switchView('audio')">Audio</a> <i class="mdi mdi-chevron-right"></i> ${formatName(repo)}`;
+                const breadcrumbHtml = `<a href="#/audio" onclick="event.preventDefault(); switchView('audio')">Audio</a> <i class="mdi mdi-chevron-right"></i> ${escapeHtml(formatName(repo))}`;
                 const isInstalled = data.is_installed;
                 const localFiles = data.local_files || [];
                 const audioFiles = data.audio_files || [];
@@ -7914,14 +7849,14 @@
                                     <div class="audio-file-item" style="background: var(--card); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
                                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
                                             <i class="mdi mdi-music-note" style="color: var(--primary);"></i>
-                                            <strong>${f.name}</strong>
+                                            <strong>${escapeHtml(f.name)}</strong>
                                         </div>
                                         <audio controls style="width: 100%; max-width: 500px;">
-                                            <source src="${f.url}" type="audio/mpeg">
+                                            <source src="${escapeHtml(f.url)}" type="audio/mpeg">
                                             Your browser does not support the audio element.
                                         </audio>
                                         <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">
-                                            Path: <code>${f.url}</code>
+                                            Path: <code>${escapeHtml(f.url)}</code>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -7944,7 +7879,7 @@
                                     <input id="audioSubfolder" type="text" placeholder="${escapeHtml(repo)}" value="${escapeHtml(repo)}"
                                         style="padding:0.35rem 0.6rem; border-radius:8px; background:var(--card); border:1px solid var(--border); color:var(--text); min-width:120px;">
                                 </div>
-                                <button class="btn btn-p btn-sm" onclick="executeAudioInstallSelected('${owner}','${repo}','${branch}')">
+                                <button class="btn btn-p btn-sm" onclick="executeAudioInstallSelected(${jsArg(owner)},${jsArg(repo)},${jsArg(branch)})">
                                     <i class="mdi mdi-download"></i> Install selected
                                 </button>
                             </div>
@@ -7965,10 +7900,10 @@
                 }
 
                 const actionButton = isInstalled
-                    ? `<button class="btn btn-dark" onclick="confirmAudioUninstall('${owner}', '${repo}')">
+                    ? `<button class="btn btn-dark" onclick="confirmAudioUninstall(${jsArg(owner)}, ${jsArg(repo)})">
                          <i class="mdi mdi-delete"></i> Uninstall
                        </button>`
-                    : `<button class="btn btn-p" onclick="confirmAudioInstall('${owner}', '${repo}')">
+                    : `<button class="btn btn-p" onclick="confirmAudioInstall(${jsArg(owner)}, ${jsArg(repo)})">
                          <i class="mdi mdi-download"></i> Install all to ${audioLocation === 'media' ? 'Media' : 'WWW'}
                        </button>`;
 
@@ -7979,15 +7914,15 @@
                 contentEl.innerHTML = `
                     <div class="docs-breadcrumb">${breadcrumbHtml}</div>
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
-                        <h2 style="margin: 0;"><i class="mdi mdi-music-box" style="color: var(--primary);"></i> ${formatName(repo)}</h2>
+                        <h2 style="margin: 0;"><i class="mdi mdi-music-box" style="color: var(--primary);"></i> ${escapeHtml(formatName(repo))}</h2>
                         ${statusBadge}
                     </div>
-                    ${data.description ? `<p style="color: var(--text-secondary); margin-bottom: 1rem;">${data.description}</p>` : ''}
+                    ${data.description ? `<p style="color: var(--text-secondary); margin-bottom: 1rem;">${escapeHtml(data.description)}</p>` : ''}
                     <div class="yaml-actions" style="margin-bottom: 1rem;">
                         ${actionButton}
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
                             <span style="font-size: 0.85rem; color: var(--text-secondary);">Install to:</span>
-                            <button class="btn btn-o btn-sm" onclick="toggleAudioInstallLocation(); loadAudioRepoContent('${owner}', '${repo}', '${branch}')">
+                            <button class="btn btn-o btn-sm" onclick="toggleAudioInstallLocation(); loadAudioRepoContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)})">
                                 <i class="mdi mdi-${audioLocation === 'media' ? 'folder-music' : 'web'}"></i>
                                 ${audioLocation === 'media' ? 'Media' : 'WWW'}
                             </button>
@@ -8008,9 +7943,9 @@
 
         function confirmAudioInstall(owner, repo) {
             const location = getAudioInstallLocation();
-            pop('Confirm Install', `Install audio pack <strong>${formatName(repo)}</strong> to ${location}?`, 'mdi-download', false, [
+            pop('Confirm Install', `Install audio pack <strong>${escapeHtml(formatName(repo))}</strong> to ${location}?`, 'mdi-download', false, [
                 { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
-                { t: 'Install', c: 'btn-p', f: `executeAudioInstall('${owner}','${repo}')` }
+                { t: 'Install', c: 'btn-p', f: `executeAudioInstall(${JSON.stringify(String(owner))},${JSON.stringify(String(repo))})` }
             ]);
         }
 
@@ -8031,13 +7966,13 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    pop('Installed', `${formatName(repo)} audio pack installed.`, 'mdi-check-circle', false);
+                    pop('Installed', `${escapeHtml(formatName(repo))} audio pack installed.`, 'mdi-check-circle', false);
                     // Reload the audio content to show local files
                     const repoData = audioRepos.find(r => r.owner === owner && r.repo_name === repo);
                     const branch = repoData?.default_branch || 'main';
                     await loadAudioRepoContent(owner, repo, branch);
                 } else {
-                    pop('Error', data.error || 'Install failed', 'mdi-alert', false);
+                    pop('Error', escapeHtml(data.error || 'Install failed'), 'mdi-alert', false);
                 }
             } catch (e) {
                 pop('Error', 'Install failed: ' + e.message, 'mdi-alert', false);
@@ -8069,10 +8004,10 @@
                 });
                 const data = await parseJsonSafe(res);
                 if (res.ok && data.success) {
-                    pop('Installed', `Installed ${selected.length} track${selected.length === 1 ? '' : 's'} from ${formatName(repo)}.`, 'mdi-check-circle', false);
+                    pop('Installed', `Installed ${selected.length} track${selected.length === 1 ? '' : 's'} from ${escapeHtml(formatName(repo))}.`, 'mdi-check-circle', false);
                     await loadAudioRepoContent(owner, repo, branch);
                 } else {
-                    pop('Error', data.error || `Install failed (HTTP ${res.status})`, 'mdi-alert', false);
+                    pop('Error', escapeHtml(data.error || `Install failed (HTTP ${res.status})`), 'mdi-alert', false);
                 }
             } catch (e) {
                 pop('Error', 'Install failed: ' + e.message, 'mdi-alert', false);
@@ -8080,9 +8015,9 @@
         }
 
         function confirmAudioUninstall(owner, repo) {
-            pop('Confirm Uninstall', `Remove audio pack <strong>${formatName(repo)}</strong>?`, 'mdi-delete', false, [
+            pop('Confirm Uninstall', `Remove audio pack <strong>${escapeHtml(formatName(repo))}</strong>?`, 'mdi-delete', false, [
                 { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
-                { t: 'Uninstall', c: 'btn-p', f: `executeAudioUninstall('${owner}','${repo}')` }
+                { t: 'Uninstall', c: 'btn-p', f: `executeAudioUninstall(${JSON.stringify(String(owner))},${JSON.stringify(String(repo))})` }
             ]);
         }
 
@@ -8096,13 +8031,13 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    pop('Uninstalled', `${formatName(repo)} audio pack removed.`, 'mdi-check-circle', false);
+                    pop('Uninstalled', `${escapeHtml(formatName(repo))} audio pack removed.`, 'mdi-check-circle', false);
                     // Reload the audio content
                     const repoData = audioRepos.find(r => r.owner === owner && r.repo_name === repo);
                     const branch = repoData?.default_branch || 'main';
                     await loadAudioRepoContent(owner, repo, branch);
                 } else {
-                    pop('Error', data.error || 'Uninstall failed', 'mdi-alert', false);
+                    pop('Error', escapeHtml(data.error || 'Uninstall failed'), 'mdi-alert', false);
                 }
             } catch (e) {
                 pop('Error', 'Uninstall failed: ' + e.message, 'mdi-alert', false);
@@ -8162,9 +8097,9 @@
                 const repoId = `blueprints-repo-${repo.owner}-${repo.repo_name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                 html += `
                     <div class="docs-folder" id="${repoId}">
-                        <div class="docs-folder-header" onclick="toggleBlueprintsFolder('${repoId}', '${repo.owner}', '${repo.repo_name}', '${repo.default_branch || 'main'}')">
+                        <div class="docs-folder-header" onclick="toggleBlueprintsFolder(${jsArg(repoId)}, ${jsArg(repo.owner)}, ${jsArg(repo.repo_name)}, ${jsArg(repo.default_branch || 'main')})">
                             <i class="mdi mdi-folder"></i>
-                            <span>${formatName(repo.repo_name)}</span>
+                            <span>${escapeHtml(formatName(repo.repo_name))}</span>
                         </div>
                         <div class="docs-folder-items" id="${repoId}-items">
                             <div class="docs-loading" style="padding: 0.5rem;"><i class="mdi mdi-loading mdi-spin"></i></div>
@@ -8218,18 +8153,18 @@
                         const subFolderId = `${folderId}-${file.name}`.replace(/[^a-zA-Z0-9-]/g, '-');
                         html += `
                             <div class="docs-folder" id="${subFolderId}">
-                                <div class="docs-folder-header" onclick="toggleBlueprintsSubFolder('${subFolderId}', '${owner}', '${repo}', '${branch}', '${file.path}')">
+                                <div class="docs-folder-header" onclick="toggleBlueprintsSubFolder(${jsArg(subFolderId)}, ${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)})">
                                     <i class="mdi mdi-folder"></i>
-                                    <span>${file.name}</span>
+                                    <span>${escapeHtml(file.name)}</span>
                                 </div>
                                 <div class="docs-folder-items" id="${subFolderId}-items"></div>
                             </div>
                         `;
                     } else {
                         html += `
-                            <div class="yaml-file" onclick="loadBlueprintContent('${owner}', '${repo}', '${branch}', '${file.path}')">
+                            <div class="yaml-file" onclick="loadBlueprintContent(${jsArg(owner)}, ${jsArg(repo)}, ${jsArg(branch)}, ${jsArg(file.path)})">
                                 <i class="mdi mdi-file-document-outline"></i>
-                                <span>${file.name}</span>
+                                <span>${escapeHtml(file.name)}</span>
                             </div>
                         `;
                     }
@@ -8271,12 +8206,12 @@
                 const data = await res.json();
 
                 if (data.error) {
-                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${data.error}</p></div>`;
+                    contentEl.innerHTML = `<div class="docs-error"><i class="mdi mdi-alert"></i><p>${escapeHtml(data.error)}</p></div>`;
                     return;
                 }
 
                 const fileName = filePath.split('/').pop();
-                let breadcrumbHtml = `<a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">Blueprints</a> <i class="mdi mdi-chevron-right"></i> <a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">${formatName(repo)}</a> <i class="mdi mdi-chevron-right"></i> ${fileName}`;
+                let breadcrumbHtml = `<a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">Blueprints</a> <i class="mdi mdi-chevron-right"></i> <a href="#/blueprints" onclick="event.preventDefault(); switchView('blueprints')">${escapeHtml(formatName(repo))}</a> <i class="mdi mdi-chevron-right"></i> ${escapeHtml(fileName)}`;
 
                 let metaHtml = '';
                 if (data.last_modified_by || data.last_modified_at) {
@@ -8328,12 +8263,12 @@
                 contentEl.innerHTML = `
                     <div class="docs-breadcrumb">${breadcrumbHtml}</div>
                     ${metaHtml}
-                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-file-document-outline" style="color: var(--primary);"></i> ${formatName(fileName)}</h2>
+                    <h2 style="margin-bottom: 1rem;"><i class="mdi mdi-file-document-outline" style="color: var(--primary);"></i> ${escapeHtml(formatName(fileName))}</h2>
                     <div class="yaml-actions">
-                        <button class="btn btn-p" onclick="addBlueprint('${yamlEncoded}', '${escapeHtml(formatName(fileName))}')">
+                        <button class="btn btn-p" onclick="addBlueprint(${jsArg(yamlEncoded)}, ${jsArg(formatName(fileName))})">
                             <i class="mdi mdi-plus"></i> Import Blueprint
                         </button>
-                        <button class="btn btn-o" onclick="copyYaml('${yamlEncoded}')">
+                        <button class="btn btn-o" onclick="copyYaml(${jsArg(yamlEncoded)})">
                             <i class="mdi mdi-content-copy"></i> Copy YAML
                         </button>
                     </div>
@@ -8367,10 +8302,18 @@
             }
         }
 
+        // Text -> safe HTML, also safe inside "..." and '...' attributes.
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text ?? '').replace(/[&<>"'`]/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;',
+            })[c]);
+        }
+
+        // A value as a JavaScript string argument inside an inline handler,
+        // e.g. onclick="openFile(${jsArg(file.path)})". The browser decodes the
+        // entities first, then reads a correctly quoted JS string.
+        function jsArg(value) {
+            return escapeHtml(JSON.stringify(String(value ?? '')));
         }
 
         // HA sidebar toggle (mobile). The panel is a same-origin iframe, so
@@ -8449,6 +8392,32 @@
                 stopLiveSync();
             }
         });
+
+        // Keyboard access: clickable cards and rows can be reached with Tab
+        // and opened with Enter or Space, like buttons.
+        (function keyboardAccess() {
+            const SEL = 'div[onclick]:not([tabindex]), span[onclick]:not([tabindex]), li[onclick]:not([tabindex]), tr[onclick]:not([tabindex])';
+            let queued = false;
+            const mark = () => {
+                queued = false;
+                document.querySelectorAll(SEL).forEach(el => {
+                    // Skip overlay backdrops (they close on click; Escape does that).
+                    if (/(^|\s)(modal|pop-o|mp-o|custom-modal)(\s|$)/.test(el.className || '') || el.id === 'modal' || el.id === 'customModal' || el.id === 'pop-o') return;
+                    el.setAttribute('tabindex', '0');
+                    if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+                });
+            };
+            new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(mark); } })
+                .observe(document.body, { childList: true, subtree: true });
+            mark();
+            document.addEventListener('keydown', ev => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                const el = ev.target;
+                if (!el || el.getAttribute('role') !== 'button' || !el.hasAttribute('onclick')) return;
+                ev.preventDefault();
+                el.click();
+            });
+        })();
     </script>
 </body>
 

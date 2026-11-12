@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import shutil
 import tempfile
 import zipfile
@@ -12,6 +13,67 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import AUDIO_VENDOR_FOLDER, LOVELACE_VENDOR_FOLDER
+
+_LOGGER = logging.getLogger(__name__)
+
+
+# Names that end up in file paths. Owner and repository names follow
+# GitHub/Gitea rules; integration domains follow Home Assistant's.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+_DOMAIN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+# Never overwritten or removed by a package.
+PROTECTED_DOMAINS = frozenset({"yidstore", "hacs", "homeassistant"})
+# Limits for downloaded archives.
+MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
+MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 20000
+
+
+def valid_name(value) -> bool:
+    """A safe owner or repository name (no path separators, not . or ..)."""
+    return isinstance(value, str) and bool(_NAME_RE.match(value))
+
+
+def valid_domain(value) -> bool:
+    """A Home Assistant integration domain (lowercase letters, digits, _)."""
+    return isinstance(value, str) and bool(_DOMAIN_RE.match(value))
+
+
+def _inside(base: Path, path: Path) -> bool:
+    """True when ``path`` is strictly inside ``base`` (after resolving)."""
+    try:
+        b = base.resolve()
+        p = path.resolve()
+    except OSError:
+        return False
+    return p != b and b in p.parents
+
+
+def _safe_rmtree(path: Path, base: Path) -> None:
+    """Delete a folder, but only one that sits inside ``base``."""
+    if path.is_symlink():
+        raise RuntimeError(f"Refusing to delete {path}: it is a link")
+    if not path.exists():
+        return
+    if not _inside(base, path):
+        raise RuntimeError(f"Refusing to delete {path}: it is outside {base}")
+    shutil.rmtree(path)
+
+
+def _swap_into_place(staging: Path, target: Path, base: Path) -> None:
+    """Replace ``target`` with the fully prepared ``staging`` folder, so a
+    failed or interrupted install never leaves a half-copied package."""
+    old = target.with_name(f".{target.name}.yidstore_old")
+    _safe_rmtree(old, base)
+    if target.exists():
+        target.rename(old)
+    try:
+        staging.rename(target)
+    except Exception:
+        if old.exists() and not target.exists():
+            old.rename(target)
+        raise
+    _safe_rmtree(old, base)
 
 
 def _detect_single_top_folder(extract_dir: Path) -> Path:
@@ -36,6 +98,13 @@ def _copytree_merge(src: Path, dst: Path) -> None:
 def _extract_zip_bytes(zip_bytes: bytes, extract_to: Path) -> None:
     extract_to.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        infos = zf.infolist()
+        if len(infos) > MAX_ARCHIVE_ENTRIES:
+            raise RuntimeError("The package archive has too many files.")
+        if sum(i.file_size for i in infos) > MAX_UNPACKED_BYTES:
+            raise RuntimeError("The package archive is too large when unpacked.")
+        # extractall drops "..", absolute paths and drive letters, and never
+        # creates links; the checks above stop zip bombs.
         zf.extractall(extract_to)
 
 
@@ -68,28 +137,30 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
             raise RuntimeError("HACS zip_release contains an invalid manifest.json.") from err
 
         domain = manifest.get("domain") if isinstance(manifest, dict) else None
-        if (
-            not isinstance(domain, str)
-            or not domain.strip()
-            or "/" in domain
-            or "\\" in domain
-            or domain in {".", ".."}
-        ):
+        domain = domain.strip() if isinstance(domain, str) else None
+        if not valid_domain(domain):
             raise RuntimeError("HACS zip_release manifest.json is missing a valid integration domain.")
+        if domain in PROTECTED_DOMAINS:
+            raise RuntimeError(f"A package can't replace the {domain} integration.")
 
-        domain = domain.strip()
         target = ha_custom_components / domain
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(extracted_root, target)
+        staging = ha_custom_components / f".{domain}.yidstore_new"
+        _safe_rmtree(staging, ha_custom_components)
+        shutil.copytree(extracted_root, staging)
+        _swap_into_place(staging, target, ha_custom_components)
         installed_domains.append(domain)
         _LOGGER.info("Installed HACS zip_release integration: %s", domain)
         return installed_domains
 
     for domain_dir in domain_dirs:
-        target = ha_custom_components / domain_dir.name
-        if target.exists():
-            shutil.rmtree(target)
+        if not valid_domain(domain_dir.name):
+            raise RuntimeError(f"Invalid integration folder name in the package: {domain_dir.name!r}")
+        if domain_dir.name in PROTECTED_DOMAINS:
+            raise RuntimeError(f"A package can't replace the {domain_dir.name} integration.")
+        final_target = ha_custom_components / domain_dir.name
+        # Build the new copy next to the old one, swap it in at the end.
+        target = ha_custom_components / f".{domain_dir.name}.yidstore_new"
+        _safe_rmtree(target, ha_custom_components)
         shutil.copytree(domain_dir, target)
         installed_domains.append(domain_dir.name)
 
@@ -161,6 +232,8 @@ def _install_integration_from_extracted(extracted_root: Path, ha_custom_componen
 
             _LOGGER.info("Icons installed for %s", domain_dir.name)
 
+        _swap_into_place(target, final_target, ha_custom_components)
+
     return installed_domains
 
 
@@ -215,57 +288,38 @@ def _install_lovelace_from_extracted(
     *,
     use_vendor_folder: bool = True,
 ) -> tuple[str, str]:
-    import logging
-    _LOGGER = logging.getLogger(__name__)
+    """Install a card into www/community[/onoff]/<repo>, built in a temporary
+    folder and swapped into place only once it is complete."""
+    if not valid_name(repo_name):
+        raise RuntimeError(f"Invalid card repository name: {repo_name!r}")
 
     # Gitea store cards are namespaced under onoff; GitHub custom cards use
     # the normal HACS-style community/<repo> path.
     base_folder = ha_www_community / LOVELACE_VENDOR_FOLDER if use_vendor_folder else ha_www_community
     dest = base_folder / repo_name
+    work = base_folder / f".{repo_name}.yidstore_new"
     hacs_filename = _find_hacs_filename(extracted_root)
 
-    _LOGGER.info("Installing Lovelace card...")
-    _LOGGER.info("  Base folder: %s", base_folder)
-    _LOGGER.info("  Repo destination: %s", dest)
-
     base_folder.mkdir(parents=True, exist_ok=True)
-    _LOGGER.info("✓ Vendor folder ready (other repos preserved)")
-
-    # Remove only this specific repo folder if it exists (for clean reinstall)
-    if dest.exists():
-        _LOGGER.info("  Removing old installation: %s", dest)
-        shutil.rmtree(dest)
-
-    # Create fresh repo folder
-    dest.mkdir(parents=True, exist_ok=True)
-    _LOGGER.info("✓ Destination prepared: %s", dest)
+    _safe_rmtree(work, base_folder)
+    work.mkdir(parents=True, exist_ok=True)
 
     dist = extracted_root / "dist"
-    if dist.exists() and dist.is_dir():
-        _LOGGER.info("Found dist/ folder, copying files")
-        _copytree_merge(dist, dest)
-        main_js = _find_main_js(dest, repo_name, hacs_filename)
-        if not main_js:
-            raise RuntimeError("Lovelace install: dist/ found but no .js files were found to register.")
-        _LOGGER.info("Found main JS file: %s", main_js)
-        return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
-
     repo_folder = extracted_root / repo_name
-    if repo_folder.exists() and repo_folder.is_dir():
-        _LOGGER.info("Found repo folder %s, copying files", repo_name)
-        _copytree_merge(repo_folder, dest)
-        main_js = _find_main_js(dest, repo_name, hacs_filename)
-        if not main_js:
-            raise RuntimeError("Lovelace install: repo folder copied but no .js files were found to register.")
-        _LOGGER.info("Found main JS file: %s", main_js)
-        return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
-
-    _LOGGER.info("Copying all files from root")
-    _copytree_merge(extracted_root, dest)
-    main_js = _find_main_js(dest, repo_name, hacs_filename)
+    if dist.is_dir():
+        source, what = dist, "dist/ found but no .js files were found to register."
+    elif repo_folder.is_dir():
+        source, what = repo_folder, "repo folder copied but no .js files were found to register."
+    else:
+        source, what = extracted_root, "no .js files were found to register."
+    _copytree_merge(source, work)
+    main_js = _find_main_js(work, repo_name, hacs_filename)
     if not main_js:
-        raise RuntimeError("Lovelace install: no .js files were found to register.")
-    _LOGGER.info("Found main JS file: %s", main_js)
+        _safe_rmtree(work, base_folder)
+        raise RuntimeError(f"Lovelace install: {what}")
+
+    _swap_into_place(work, dest, base_folder)
+    _LOGGER.info("Installed card %s (%s)", repo_name, main_js)
     return main_js, str(dest.relative_to(ha_www_community)).replace("\\", "/")
 
 
@@ -288,52 +342,6 @@ def _is_audio_file(path: Path) -> bool:
         ".webm",
     }
     return path.suffix.lower() in audio_exts
-
-
-def _install_addon_from_extracted(
-    extracted_root: Path,
-    repo_name: str,
-) -> dict:
-    """Install add-on files to the local add-ons directory for Supervisor discovery."""
-    import logging
-    _LOGGER = logging.getLogger(__name__)
-
-    addons_root: Path | None = None
-    for candidate in (Path("/addons"), Path("/config/addons")):
-        if candidate.is_dir():
-            addons_root = candidate
-            break
-    if addons_root is None:
-        # Create the local add-ons folder. Prefer /addons (the mount the
-        # Supervisor scans); fall back to /config/addons if that mount
-        # isn't writable from the Core container.
-        for candidate in (Path("/addons"), Path("/config/addons")):
-            try:
-                candidate.mkdir(parents=True, exist_ok=True)
-                addons_root = candidate
-                break
-            except Exception as exc:
-                _LOGGER.warning("Cannot create add-ons dir %s: %s", candidate, exc)
-        if addons_root is None:
-            raise RuntimeError(
-                "No writable local add-ons directory (/addons or /config/addons)."
-            )
-
-    slug = repo_name.lower().replace("-", "_")
-    dest = addons_root / slug
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True, exist_ok=True)
-
-    _copytree_merge(extracted_root, dest)
-
-    config_found = (
-        (dest / "config.yaml").exists()
-        or (dest / "config.json").exists()
-        or (dest / "config.yml").exists()
-    )
-    _LOGGER.info("Add-on installed to %s (config found: %s)", dest, config_found)
-    return {"addon_path": str(dest), "slug": slug, "config_found": config_found}
 
 
 def _install_audio_from_extracted(
@@ -359,6 +367,8 @@ def _install_audio_from_extracted(
     owner_slug = (owner or "").strip()
     if not owner_slug:
         raise RuntimeError("Audio install requires a repository owner.")
+    if not valid_name(owner_slug) or not valid_name(repo_name):
+        raise RuntimeError("Invalid audio package name.")
 
     location = (audio_location or "www").strip().lower()
     base = ha_media_root if location == "media" else ha_www_root
@@ -373,6 +383,8 @@ def _install_audio_from_extracted(
     else:
         rel_dest = f"{owner_slug}/{repo_name}"
     dest = base / AUDIO_VENDOR_FOLDER / rel_dest
+    if not _inside(base, dest):
+        raise RuntimeError("Invalid audio destination folder.")
 
     # Normalize the selected-file set for matching against repo-relative paths.
     selected = None
@@ -415,7 +427,9 @@ async def _download_zip_bytes(hass: HomeAssistant, url: str, headers: dict) -> b
     async def _get(u: str) -> bytes:
         # safe_get never follows redirects with a credential to another
         # host, and only sends one to the store host at all.
-        status, body, _final = await safe_get(hass, u, headers, timeout=120)
+        status, body, _final = await safe_get(hass, u, headers, timeout=120, max_bytes=MAX_ARCHIVE_BYTES)
+        if len(body) > MAX_ARCHIVE_BYTES:
+            raise RuntimeError("Download failed: the package is too large.")
         if status != 200:
             text = body[:2000].decode("utf-8", "replace")
             logging.getLogger(__name__).debug("Download failed: HTTP %s", status)
@@ -513,10 +527,7 @@ async def install_package(
                     subfolder=audio_subfolder,
                 )
 
-            if package_type == "addon":
-                return _install_addon_from_extracted(root, repo_name)
-
-            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio|addon.")
+            raise RuntimeError("Invalid package_type. Must be integration|lovelace|blueprints|audio.")
 
     return await hass.async_add_executor_job(_work)
 
@@ -555,54 +566,46 @@ def uninstall_package(
     owner: str | None = None,
     domain: str | None = None,
 ) -> None:
-    """Best effort uninstall of a package by deleting its folder."""
-    import logging
-    _LOGGER = logging.getLogger(__name__)
-    
+    """Delete an installed package's folder.
+
+    Names are checked strictly and every delete must stay inside the
+    package type's own folder, so a bad name can never remove anything else.
+    Add-ons are removed through the Apps tab (the connector), not here.
+    """
+    if not valid_name(repo_name) or (owner is not None and owner != "" and not valid_name(owner)):
+        raise RuntimeError(f"Invalid package name: {owner}/{repo_name}")
+
     if package_type == "lovelace":
-        for dest in (
-            Path(hass.config.path("www", "community", LOVELACE_VENDOR_FOLDER, repo_name)),
-            Path(hass.config.path("www", "community", repo_name)),
-        ):
+        community = Path(hass.config.path("www", "community"))
+        for base in (community / LOVELACE_VENDOR_FOLDER, community):
+            dest = base / repo_name
             if dest.exists():
-                _LOGGER.info("Uninstalling Lovelace card: %s", dest)
-                shutil.rmtree(dest)
+                _LOGGER.info("Uninstalling card: %s", dest)
+                _safe_rmtree(dest, base)
 
     elif package_type == "audio":
         if not owner:
             _LOGGER.warning("Audio uninstall skipped: missing owner for repo %s", repo_name)
             return
-        dest_www = Path(hass.config.path("www", AUDIO_VENDOR_FOLDER, owner, repo_name))
-        if dest_www.exists():
-            _LOGGER.info("Uninstalling audio package: %s", dest_www)
-            shutil.rmtree(dest_www)
-        dest_media = Path(hass.config.path("media", AUDIO_VENDOR_FOLDER, owner, repo_name))
-        if dest_media.exists():
-            _LOGGER.info("Uninstalling audio package: %s", dest_media)
-            shutil.rmtree(dest_media)
-            
-    elif package_type == "addon":
-        slug = repo_name.lower().replace("-", "_")
-        for root in (Path("/addons"), Path("/config/addons")):
-            dest = root / slug
+        for root in ("www", "media"):
+            base = Path(hass.config.path(root, AUDIO_VENDOR_FOLDER))
+            dest = base / owner / repo_name
             if dest.exists():
-                _LOGGER.info("Uninstalling add-on: %s", dest)
-                shutil.rmtree(dest)
+                _LOGGER.info("Uninstalling audio package: %s", dest)
+                _safe_rmtree(dest, base)
 
     elif package_type == "integration":
-        domains: list[str] = []
+        candidates = []
         if domain:
-            domains.append(domain.lower())
-            domains.append(domain.lower().replace("-", "_"))
-        domains.append(repo_name.lower())
-        domains.append(repo_name.lower().replace("-", "_"))
-        seen: set[str] = set()
+            candidates += [domain.lower(), domain.lower().replace("-", "_")]
+        candidates += [repo_name.lower(), repo_name.lower().replace("-", "_")]
         cc_root = Path(hass.config.path("custom_components"))
-        for dom in domains:
-            if not dom or dom in seen:
+        seen: set[str] = set()
+        for dom in candidates:
+            if dom in seen or not valid_domain(dom) or dom in PROTECTED_DOMAINS:
                 continue
             seen.add(dom)
             dest = cc_root / dom
             if dest.exists():
                 _LOGGER.info("Uninstalling integration: %s", dest)
-                shutil.rmtree(dest)
+                _safe_rmtree(dest, cc_root)
