@@ -501,7 +501,67 @@ async def _dump_resources_state(hass: HomeAssistant) -> None:
     _LOGGER.info("")
 
 
+def _lovelace_resources(hass: HomeAssistant):
+    """Home Assistant's dashboard-resources collection, or None."""
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None and isinstance(data, dict):
+        resources = data.get("resources")
+    return resources
+
+
 async def _register_or_update_lovelace_resource(hass: HomeAssistant, base_url: str, git_tag: str) -> None:
+    """Add or update a card's dashboard resource through Home Assistant's
+    official resources collection (the same API Settings -> Dashboards ->
+    Resources uses), with a cache-busting ?time-update= parameter.
+
+    Falls back to writing the resources storage only when the collection
+    isn't available (e.g. dashboards not loaded yet during startup)."""
+    desired_url = _with_time_update(base_url)
+    base = _strip_query(base_url)
+    alternates = _alternate_lovelace_resource_urls(base)
+    resources = _lovelace_resources(hass)
+
+    if resources is None:
+        _LOGGER.info("Dashboard resources not loaded yet; writing the resource to storage")
+        await _register_resource_in_storage(hass, base_url, git_tag)
+        return
+    if not hasattr(resources, "async_create_item"):
+        # Resources are managed in YAML: Home Assistant can't add them.
+        _LOGGER.warning(
+            "Dashboard resources are managed in YAML. Add this resource yourself: "
+            "url: %s, type: module", base,
+        )
+        return
+
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+        resources.loaded = True
+
+    found = None
+    stale = []
+    for item in list(resources.async_items()):
+        url = _strip_query(item.get("url", ""))
+        if url == base and found is None:
+            found = item
+        elif url == base or url in alternates:
+            stale.append(item)
+    for item in stale:
+        try:
+            await resources.async_delete_item(item["id"])
+            _LOGGER.info("Removed duplicate dashboard resource %s", item.get("url"))
+        except Exception as err:
+            _LOGGER.debug("Could not remove duplicate resource %s: %s", item.get("url"), err)
+
+    if found:
+        await resources.async_update_item(found["id"], {"res_type": "module", "url": desired_url})
+        _LOGGER.info("Updated dashboard resource %s (%s)", desired_url, git_tag)
+    else:
+        await resources.async_create_item({"res_type": "module", "url": desired_url})
+        _LOGGER.info("Added dashboard resource %s (%s)", desired_url, git_tag)
+
+
+async def _register_resource_in_storage(hass: HomeAssistant, base_url: str, git_tag: str) -> None:
     """
     Register or update a Lovelace resource with time-update parameter.
     Uses direct storage access + proper Home Assistant service calls.

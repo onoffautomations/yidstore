@@ -60,7 +60,7 @@ class OnOffGiteaStoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         if user_input is not None:
-            # Use hardcoded obfuscated endpoint
+            # The YidStore store server
             base_url = get_primary_endpoint()
 
             # No token during initial setup - public access only

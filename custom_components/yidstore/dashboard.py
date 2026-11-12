@@ -417,6 +417,24 @@ async def _fetch_authors_map(hass: HomeAssistant, client, force: bool = False) -
 
 
 URL_BASE = "/yidstore_static"
+
+
+def _write_gzip_copies(static_dir: str) -> None:
+    """Blocking: write <file>.gz next to the panel's page and script."""
+    import gzip
+
+    for name in ("index.html", "yidstore-brands.js"):
+        src = os.path.join(static_dir, name)
+        try:
+            if os.path.isfile(src):
+                with open(src, "rb") as fh:
+                    data = gzip.compress(fh.read(), compresslevel=9, mtime=0)
+                tmp = src + ".gz.tmp"
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                os.replace(tmp, src + ".gz")
+        except Exception as err:  # serving the plain file still works
+            _LOGGER.debug("Could not write %s.gz: %s", name, err)
 BRANDS_PATCHER_URL = "/yidstore_static/yidstore-brands.js"
 
 
@@ -826,6 +844,10 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     # icons instead of re-downloading them on every sidebar visit. The
     # panel URL carries a ?v=<startup time> cache-buster, so a new HTML is
     # fetched after each HA restart (i.e. after every update).
+    # Compressed copies (index.html is ~400 KB, ~80 KB gzipped). Home
+    # Assistant's web server sends the .gz file to browsers that accept it.
+    # Rebuilt at every start so it always matches the page after an update.
+    await hass.async_add_executor_job(_write_gzip_copies, static_dir)
     await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
 
     if entry.data.get(CONF_SIDE_PANEL, True):
@@ -1886,12 +1908,15 @@ class OnOffStoreInstallView(HomeAssistantView):
     """API to install integration."""
     url = "/api/yidstore/install"
     name = "api:yidstore:install"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2442,12 +2467,15 @@ class OnOffStoreRefreshView(HomeAssistantView):
     """API to trigger update check."""
     url = "/api/yidstore/refresh"
     name = "api:yidstore:refresh"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             eid = self.entry_id
@@ -2508,12 +2536,15 @@ class OnOffStoreAddCustomView(HomeAssistantView):
     """API to add a custom repository."""
     url = "/api/yidstore/custom/add"
     name = "api:yidstore:custom:add"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2644,12 +2675,15 @@ class OnOffStoreRemoveCustomView(HomeAssistantView):
     """API to remove a custom repository."""
     url = "/api/yidstore/custom/remove"
     name = "api:yidstore:custom:remove"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2682,12 +2716,15 @@ class OnOffStoreHideView(HomeAssistantView):
     """API to hide a repository."""
     url = "/api/yidstore/hide"
     name = "api:yidstore:hide"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2713,12 +2750,15 @@ class OnOffStoreUnhideView(HomeAssistantView):
     """API to unhide a repository."""
     url = "/api/yidstore/unhide"
     name = "api:yidstore:unhide"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -2745,12 +2785,15 @@ class OnOffStoreUninstallView(HomeAssistantView):
     """API to uninstall a repository."""
     url = "/api/yidstore/uninstall"
     name = "api:yidstore:uninstall"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -3284,9 +3327,12 @@ class LocalBrandsUploadView(HomeAssistantView):
     """Upload local brand icons for custom integrations."""
     url = "/api/yidstore/brands/upload"
     name = "api:yidstore:brands_upload"
-    requires_auth = False
+    requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
 
         reader = await request.multipart()
@@ -3931,6 +3977,9 @@ class AddAutomationView(HomeAssistantView):
     requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             data = await request.json()
@@ -4004,6 +4053,9 @@ class AddDashboardView(HomeAssistantView):
     requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             data = await request.json()
@@ -4262,6 +4314,9 @@ class AddHelperView(HomeAssistantView):
     requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
+        # Changes the system: a logged-in Home Assistant admin only.
+        if not _is_admin_request(request):
+            return web.json_response({"error": "Admin access is required"}, status=403)
         hass = request.app["hass"]
         try:
             data = await request.json()

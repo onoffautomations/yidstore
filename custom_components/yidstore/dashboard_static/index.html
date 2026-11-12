@@ -8,10 +8,15 @@
     <link id="appFavicon" rel="icon" type="image/png" href="icon.png">
     <link id="appAppleTouch" rel="apple-touch-icon" href="icon.png">
     <meta id="appThemeColor" name="theme-color" content="#fafafa">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
-        rel="stylesheet">
+    <!-- Connect early; nothing here blocks the first paint except the icons. -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+        rel="stylesheet" media="print" onload="this.media='all'">
+    <!-- Only needed for READMEs and release notes: download in parallel, run after the page. -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
     <style>
         /* Home Assistant style palette — light by default (matches HA) */
         :root {
@@ -542,6 +547,8 @@
         .mp-facts { list-style:none; margin:0; padding:0; }
         .mp-facts li { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 0; font-size:0.88rem; }
         .mp-facts .mdi { color:var(--dim); font-size:1.1rem; }
+        /* Long lists: the browser skips laying out cards that are off-screen. */
+        .grid > .card, .grid > .list-row { content-visibility: auto; contain-intrinsic-size: auto 150px; }
         /* Stars / downloads (public stats file, no token). */
         .stat-chips { display:inline-flex; align-items:center; gap:0.55rem; margin-left:0.35rem; vertical-align:middle; }
         .stat-chip { display:inline-flex; align-items:center; gap:0.15rem; color:var(--dim); font-size:0.75rem; white-space:nowrap; }
@@ -2917,6 +2924,14 @@
         }
         const OPTIMISTIC_RESTART_MS = 10 * 60 * 1000; // immediate pending restart after install/update
 
+        // Markdown to HTML. The markdown library loads in parallel with the
+        // page; until it has arrived, show the text as plain lines.
+        function mdToHtml(text) {
+            try { if (window.marked && typeof window.marked.parse === 'function') return window.marked.parse(text || ''); }
+            catch (_) {}
+            return escapeHtml(String(text || '')).replace(/\n/g, '<br>');
+        }
+
         // "v1.99.67" newer than "v1.93.0"? Numeric parts, left to right.
         function versionNewer(a, b) {
             const pa = String(a || '').match(/\d+/g) || [];
@@ -3980,7 +3995,7 @@
             const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
 
             iconHtml = `
-                <img src="${primaryIcon || 'icon.png'}" alt="" class="card-icon"
+                <img src="${primaryIcon || 'icon.png'}" alt="" class="card-icon" loading="lazy" decoding="async"
                      data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
                      data-candidates="${dataCandidates}"
                      onload="brandImgLoaded(this)"
@@ -4085,7 +4100,7 @@
                 const primaryIcon = candidates[0] || '';
                 const dataCandidates = candidates.join('|');
                 const fallbackAttr = i.icon_url ? `data-fallback-url="${i.icon_url}"` : '';
-                iconHtml = `<img src="${primaryIcon || 'icon.png'}" alt="" class="list-icon"
+                iconHtml = `<img src="${primaryIcon || 'icon.png'}" alt="" class="list-icon" loading="lazy" decoding="async"
                      data-brand-domain="${domain}" data-brand-kind="icon" ${fallbackAttr}
                      data-candidates="${dataCandidates}"
                      onload="brandImgLoaded(this)"
@@ -4698,7 +4713,7 @@
                         </div>
                         <div class="modal-divider"></div>
                     </div>`;
-                body.innerHTML = `${headerMarkup}<div id="mpDetailCards">${storeDetailCardsHtml(item)}</div>${marked.parse(md)}`;
+                body.innerHTML = `${headerMarkup}<div id="mpDetailCards">${storeDetailCardsHtml(item)}</div>${mdToHtml(md)}`;
                 initModalLogo();
                 setupModalScroll();
             } catch { body.innerHTML = `${formatName(r)} has no instructions available.`; }
@@ -5156,18 +5171,41 @@
             return null;
         }
 
-        async function openNativeRestart() {
-            let pw, ha, ce;
+        // The Home Assistant page around this panel, or null outside it.
+        function haParent() {
             try {
-                pw = window.parent;
-                if (!pw || pw === window) throw new Error('not inside Home Assistant');
-                ha = pw.document.querySelector('home-assistant');
-                ce = pw.customElements;
-                if (!ha || !ce) throw new Error('Home Assistant page not found');
-            } catch (_) {
-                restartViaYidStore();
-                return;
+                const pw = window.parent;
+                if (!pw || pw === window) return null;
+                const ha = pw.document.querySelector('home-assistant');
+                if (!ha || !pw.customElements) return null;
+                return { pw, ha, ce: pw.customElements };
+            } catch (_) { return null; }
+        }
+
+        // Load one page of Settings in the background, the way Home
+        // Assistant's own router does: the Settings panel through the panel
+        // router, then the page through the Settings panel's routes. Nothing
+        // is shown or navigated; it only makes Home Assistant's own dialogs
+        // (restart, integration settings) available here.
+        async function haLoadSettingsPage(ctx, page) {
+            const { pw, ha, ce } = ctx;
+            if (!ce.get('ha-panel-config')) {
+                const resolver = haDeepFind(ha.shadowRoot || ha, 'partial-panel-resolver');
+                const route = resolver && resolver.routerOptions && resolver.routerOptions.routes
+                    && resolver.routerOptions.routes.config;
+                if (route && typeof route.load === 'function') await route.load();
             }
+            if (!ce.get('ha-panel-config')) return false;
+            const cfg = pw.document.createElement('ha-panel-config');
+            const route = cfg.routerOptions && cfg.routerOptions.routes && cfg.routerOptions.routes[page];
+            if (route && typeof route.load === 'function') await route.load();
+            return true;
+        }
+
+        async function openNativeRestart() {
+            const ctx = haParent();
+            if (!ctx) { restartViaYidStore(); return; }
+            const { pw, ha, ce } = ctx;
             const show = () => {
                 if (ce.get('dialog-restart')) {
                     ha.dispatchEvent(new pw.CustomEvent('show-dialog', { bubbles: true, composed: true,
@@ -5183,19 +5221,7 @@
             };
             try {
                 if (show()) return;
-                // 1) The Settings panel, through Home Assistant's own panel router.
-                if (!ce.get('ha-panel-config')) {
-                    const resolver = haDeepFind(ha.shadowRoot || ha, 'partial-panel-resolver');
-                    const route = resolver && resolver.routerOptions && resolver.routerOptions.routes
-                        && resolver.routerOptions.routes.config;
-                    if (route && typeof route.load === 'function') await route.load();
-                }
-                // 2) Its System page, which brings the restart dialog with it.
-                if (ce.get('ha-panel-config') && !ce.get('ha-config-system-navigation')) {
-                    const cfg = pw.document.createElement('ha-panel-config');
-                    const route = cfg.routerOptions && cfg.routerOptions.routes && cfg.routerOptions.routes.system;
-                    if (route && typeof route.load === 'function') await route.load();
-                }
+                if (!ce.get('ha-config-system-navigation')) await haLoadSettingsPage(ctx, 'system');
                 if (show()) return;
             } catch (e) {
                 console.warn('YidStore: could not load the restart dialog in place', e);
@@ -5216,6 +5242,36 @@
             })();`;
             pw.document.head.appendChild(script);
             script.remove();
+        }
+
+        // "Configure": Home Assistant's own integration-settings dialog (the
+        // one behind the integration page's Configure button), on this page.
+        async function openNativeConfigure(domain, name) {
+            const ctx = haParent();
+            if (ctx && ctx.ha.hass && typeof ctx.ha.hass.callWS === 'function') {
+                const { ha, ce } = ctx;
+                try {
+                    const entries = await ha.hass.callWS({ type: 'config_entries/get', domain });
+                    const entry = (entries || []).find(e => e.supports_options);
+                    if (entry) {
+                        let manifest;
+                        try { manifest = await ha.hass.callWS({ type: 'manifest/get', integration: domain }); } catch (_) {}
+                        if (!ce.get('ha-config-entry-row')) await haLoadSettingsPage(ctx, 'integrations');
+                        const Row = ce.get('ha-config-entry-row');
+                        if (Row && typeof Row.prototype._showOptions === 'function') {
+                            closePop();
+                            // The dialog is opened by an event; send it to Home Assistant itself.
+                            const target = { data: { entry }, manifest, dispatchEvent: ev => ha.dispatchEvent(ev) };
+                            Row.prototype._showOptions.call(target);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('YidStore: could not open the native settings dialog', e);
+                }
+            }
+            // Not inside Home Assistant, or its code changed: YidStore's own dialog.
+            mpOpenConfigure(domain, name);
         }
 
         async function restartViaYidStore() {
@@ -5823,7 +5879,7 @@
                 icon = ok;
                 title = `Version ${escapeHtml(verLabel)} installed`;
                 text = `${escapeHtml(name)} is installed and set up.`;
-                action = (i.can_configure ? `<button class="mp-tonal" onclick="mpOpenConfigure('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Configure</button>` : '')
+                action = (i.can_configure ? `<button class="mp-tonal" onclick="openNativeConfigure('${escapeHtml(i.domain)}','${escapeHtml(name)}')"><i class="mdi mdi-cog-outline"></i> Configure</button>` : '')
                     + `<button class="mp-tonal" onclick="closeModal(); haNavigate('/config/integrations/integration/${encodeURIComponent(i.domain)}')"><i class="mdi mdi-open-in-new"></i> Open integration</button>`;
             } else {
                 icon = ok;
@@ -6296,7 +6352,7 @@
                 let bodyHtml = '';
                 const lowerPath = path.toLowerCase();
                 if (lowerPath.endsWith('.md')) {
-                    bodyHtml = marked.parse(data.content || '');
+                    bodyHtml = mdToHtml(data.content || '');
                 } else if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
                     bodyHtml = data.content || '';
                 } else {
@@ -6510,7 +6566,7 @@
                         instructionsHtml = `
                             <div class="instructions-section">
                                 <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
-                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                                <div class="docs-body">${mdToHtml(data.instructions)}</div>
                             </div>
                         `;
                     } else {
@@ -6780,7 +6836,7 @@
                         instructionsHtml = `
                             <div class="instructions-section">
                                 <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
-                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                                <div class="docs-body">${mdToHtml(data.instructions)}</div>
                             </div>
                         `;
                     } else {
@@ -6999,7 +7055,7 @@
 
         function appIconHtml(app) {
             if (appIconMissing.has(app.id)) return '<i class="mdi mdi-puzzle-outline app-icon-fallback"></i>';
-            return `<img src="/api/yidstore/apps/icon/${escapeHtml(app.id)}" alt="" class="card-icon" data-app="${escapeHtml(app.id)}" onerror="appIconFallback(this)" style="width:40px; height:40px; border-radius:8px; object-fit:contain;">`;
+            return `<img src="/api/yidstore/apps/icon/${escapeHtml(app.id)}" alt="" class="card-icon" loading="lazy" decoding="async" data-app="${escapeHtml(app.id)}" onerror="appIconFallback(this)" style="width:40px; height:40px; border-radius:8px; object-fit:contain;">`;
         }
 
         function appStatus(app) {
@@ -7073,7 +7129,7 @@
             }
             const icon = appIconMissing.has(app.id)
                 ? '<i class="mdi mdi-puzzle-outline app-icon-fallback"></i>'
-                : `<img src="/api/yidstore/apps/icon/${id}" alt="" class="list-icon" data-app="${id}" onerror="appIconFallback(this)" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">`;
+                : `<img src="/api/yidstore/apps/icon/${id}" alt="" class="list-icon" loading="lazy" decoding="async" data-app="${id}" onerror="appIconFallback(this)" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain;">`;
             return `
                 <div class="list-row" data-id="${id}" onclick="if(!event.target.closest('button')) openAppDetails('${id}')">
                     <div style="display:flex; align-items:center; justify-content:center;">${icon}</div>
@@ -7656,7 +7712,7 @@
                         instructionsHtml = `
                             <div class="instructions-section">
                                 <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
-                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                                <div class="docs-body">${mdToHtml(data.instructions)}</div>
                             </div>
                         `;
                     } else {
@@ -7916,7 +7972,7 @@
                     ${data.readme ? `
                         <div style="margin-top: 2rem;">
                             <h3 style="margin-bottom: 1rem;"><i class="mdi mdi-file-document" style="color: var(--primary);"></i> README</h3>
-                            <div class="docs-body">${marked.parse(data.readme)}</div>
+                            <div class="docs-body">${mdToHtml(data.readme)}</div>
                         </div>
                     ` : ''}
                 `;
@@ -8223,7 +8279,7 @@
                         instructionsHtml = `
                             <div class="instructions-section">
                                 <h3><i class="mdi mdi-information-outline"></i> Instructions</h3>
-                                <div class="docs-body">${marked.parse(data.instructions)}</div>
+                                <div class="docs-body">${mdToHtml(data.instructions)}</div>
                             </div>
                         `;
                     } else {

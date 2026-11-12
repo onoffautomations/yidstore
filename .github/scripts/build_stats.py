@@ -15,7 +15,6 @@ downloads when it installs a release).
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -26,9 +25,7 @@ import urllib.parse
 import urllib.request
 
 # Same store server the integration uses (custom_components/yidstore/_utils.py).
-GITEA_URL = os.environ.get("GITEA_URL") or base64.b64decode(
-    "aHR0cHM6Ly9naXQub25vZmZhcGkuY29t"
-).decode()
+GITEA_URL = os.environ.get("GITEA_URL") or "https://git.onoffapi.com"
 GITEA_TOKEN = os.environ.get("GITEA_TOKEN") or ""
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") or ""
 

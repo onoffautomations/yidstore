@@ -1,9 +1,7 @@
-## Fixes for 1.8.0
+**Beta** — please test before 1.8.2 is released. Only offered to users who turn on beta versions for YidStore.
 
-- **Home Assistant's own restart dialog.** Restart opens Home Assistant's native restart dialog right on the page, without going to Settings.
-- **Restart required no longer sticks.** After you restart, the message clears and the updated integration runs.
-- **Updates show up right away.** Opening an item's details checks its releases live. If a newer version is out, you see **Update available** and an **Update** button straight away.
-- **Updating doesn't ask you to set up.** The setup wizard only opens after a fresh install, like the Marketplace.
-- **Configure in YidStore.** Set-up integrations get a **Configure** button that opens their settings in the same dialog.
-
-Note: pre-releases (betas) of an integration are only offered when **Beta releases** is on in YidStore's menu.
+- **Safer.** Installing, removing, refreshing and other changes now need a logged-in Home Assistant admin. Before, anyone who could reach Home Assistant could use them. Browsing is unchanged.
+- **Configure opens Home Assistant's own settings dialog**, right on the page, just like Restart opens Home Assistant's own restart dialog.
+- **Cards register the official way**, through Home Assistant's dashboard resources, like Settings → Dashboards → Resources. Old duplicate entries are cleaned up.
+- **Loads faster.** The page downloads about 5 times smaller, nothing from other sites holds up the first screen, and icons and off-screen cards load only when needed.
+- The store server's address is now written plainly in the code.
