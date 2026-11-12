@@ -2,6 +2,13 @@
 
 After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift+R on a computer). From then on it updates by itself.
 
+### New in 1.8.2b7
+
+- **No restart after installing a new integration.** Only an update asks for a restart. Removing an integration also unloads it, so installing it again later doesn't need a restart either.
+- **Setup stays in YidStore.** When a setup step has options YidStore can't show itself, Home Assistant's own setup dialog opens right on the YidStore page and continues where you are. No more "Continue in Home Assistant".
+- **Cards fit.** When a card has an update, a Set up button and the version, the buttons move to their own line instead of being cut off.
+- Fixed a slow file read during installs that Home Assistant reported as a blocking call.
+
 ### New in 1.8.2b6 — fixes
 
 - **Installing works again.** 1.8.2b5 cut downloads short, so every install failed with "File is not a zip file". Fixed.
@@ -29,4 +36,4 @@ After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift
 - **Cards register the official way**, through Home Assistant's dashboard resources.
 - **Brand icons the built-in way** on newer Home Assistant.
 - **Loads faster**, about 5 times less to download.
-- **Version in the header**, for example "by: OnOff Automations · v1.8.2b6".
+- **Version in the header**, for example "by: OnOff Automations · v1.8.2b7".

@@ -2912,6 +2912,14 @@ class OnOffStoreUninstallView(HomeAssistantView):
                 await hass.async_add_executor_job(uninstall_package, hass, t, r, o, domain)
                 await coordinator.async_remove_package(o, r)
 
+                # Forget its loaded code, so removing needs no restart and a
+                # later install loads the new code right away.
+                if t == "integration" and domain and requires_restart:
+                    from . import forget_loaded_integration
+
+                    if forget_loaded_integration(hass, domain):
+                        requires_restart = False
+
                 # Remove from requires_restart if present
                 if "yidstore_requires_restart" in hass.data:
                     hass.data["yidstore_requires_restart"].discard(f"{o}/{r}".lower())

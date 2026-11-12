@@ -588,6 +588,7 @@
         /* HA-style bottom status row */
         .card-status {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 0.45rem;
             padding-top: 0.7rem;
@@ -596,6 +597,43 @@
             font-size: 0.8rem;
             color: var(--dim);
             min-height: 38px;
+        }
+
+        /* Status on the left, buttons on the right. When both don't fit on
+           one line, the buttons move to their own line (right-aligned)
+           instead of being pushed past the card's edge. */
+        .cs-info {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .cs-info .cs-label {
+            white-space: nowrap;
+        }
+
+        .cs-update {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+            margin-left: auto;
+        }
+
+        .cs-update .cs-ver {
+            font-size: 0.68rem;
+            color: var(--dim);
+            white-space: nowrap;
+        }
+
+        .cs-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            margin-left: auto;
+            flex: 0 0 auto;
         }
 
         .status-dot {
@@ -4094,10 +4132,10 @@
                 }
             }
             const versionInfo = (i.installed_version && i.latest_version)
-                ? `<span style="font-size:0.68rem; color:var(--dim); white-space:nowrap;">${escapeHtml(i.installed_version)} → ${escapeHtml(i.latest_version)}</span>`
+                ? `<span class="cs-ver">${escapeHtml(i.installed_version)} → ${escapeHtml(i.latest_version)}</span>`
                 : '';
             const updateChip = (i.is_installed && i.update_available)
-                ? `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                ? `<div class="cs-update">
                        <span class="chip-update"><i class="mdi mdi-update"></i> Update available</span>
                        ${versionInfo}
                    </div>`
@@ -4126,11 +4164,13 @@
                 </div>
             </div>
             <div class="card-status">
-                <span class="${dotClass}"></span>
-                <span>${statusLabel}</span>
-                <span style="flex:1;"></span>
-                ${newChip}
-                ${updateChip}
+                <div class="cs-info">
+                    <span class="${dotClass}"></span>
+                    <span class="cs-label">${statusLabel}</span>
+                    ${newChip ? `<span style="margin-left:auto;">${newChip}</span>` : ''}
+                    ${updateChip}
+                </div>
+                <div class="cs-actions">
                 ${i.is_installed ? `${setupButtonHtml(i, 'card-install-btn')}
                 <button class="action-btn" onclick="confirmRemove(${jsArg(i.owner)},${jsArg(i.repo_name)},${jsArg(i.type)},event)" title="Delete">
                     <i class="mdi mdi-trash-can-outline"></i>
@@ -4141,6 +4181,7 @@
                 <button class="action-btn" onclick="openDet(${jsArg(i.owner)},${jsArg(i.repo_name)},event)" title="Details">
                     <i class="mdi mdi-chevron-right"></i>
                 </button>
+                </div>
             </div>
         `;
             card.onclick = (e) => {
@@ -5241,7 +5282,7 @@
 
         // "Configure": Home Assistant's own integration-settings dialog (the
         // one behind the integration page's Configure button), on this page.
-        async function openNativeConfigure(domain, name) {
+        async function openNativeConfigure(domain, name, fallback = true) {
             const ctx = haParent();
             if (ctx && ctx.ha.hass && typeof ctx.ha.hass.callWS === 'function') {
                 const { ha, ce } = ctx;
@@ -5258,7 +5299,7 @@
                             // The dialog is opened by an event; send it to Home Assistant itself.
                             const target = { data: { entry }, manifest, dispatchEvent: ev => ha.dispatchEvent(ev) };
                             Row.prototype._showOptions.call(target);
-                            return;
+                            return true;
                         }
                     }
                 } catch (e) {
@@ -5266,7 +5307,40 @@
                 }
             }
             // Not inside Home Assistant, or its code changed: YidStore's own dialog.
-            mpOpenConfigure(domain, name);
+            if (fallback) mpOpenConfigure(domain, name);
+            return false;
+        }
+
+        // Hand a running setup to Home Assistant's own setup dialog, on this
+        // page (the dialog behind "Add integration"). It picks up the setup
+        // at the step it is on, so nothing is entered twice.
+        async function haContinueFlow(flowId, onClosed) {
+            const ctx = haParent();
+            if (!ctx || !flowId) return false;
+            const { ha, ce } = ctx;
+            try {
+                if (!ce.get('ha-config-flow-card')) await haLoadSettingsPage(ctx, 'integrations');
+                const Card = ce.get('ha-config-flow-card');
+                if (!Card || typeof Card.prototype._continueFlow !== 'function') return false;
+                const target = {
+                    hass: ha.hass,
+                    flow: { flow_id: flowId },
+                    _handleFlowUpdated: () => { try { if (onClosed) onClosed(); } catch (_) {} },
+                    // The dialog is opened by an event; send it to Home
+                    // Assistant itself, and stay on YidStore when it is done.
+                    dispatchEvent: ev => {
+                        try {
+                            if (ev && ev.detail && ev.detail.dialogParams) ev.detail.dialogParams.navigateToResult = false;
+                        } catch (_) {}
+                        return ha.dispatchEvent(ev);
+                    },
+                };
+                Card.prototype._continueFlow.call(target);
+                return true;
+            } catch (e) {
+                console.warn('YidStore: could not open the native setup dialog', e);
+                return false;
+            }
         }
 
         async function restartViaYidStore() {
@@ -5551,6 +5625,26 @@
             return s.charAt(0).toUpperCase() + s.slice(1);
         }
 
+        // A step this dialog can't draw: continue it in Home Assistant's own
+        // setup dialog right here. Only if that is not possible, offer to
+        // open the setup in Settings.
+        async function mpHandOff(message) {
+            const domain = mp.domain, kind = mp.kind, flow = mp.flow, name = mp.name;
+            const refresh = async () => { await syncBackendAfterAction(); refreshDetailCardsByDomain(domain); };
+            if (kind !== 'options' && flow && flow.flow_id) {
+                mp.finished = true;          // keep the setup running for Home Assistant
+                mp.onDone = null;
+                if (await haContinueFlow(flow.flow_id, refresh)) { await mpClose(); return; }
+                mp.finished = false;
+            } else if (kind === 'options') {
+                await mpClose();             // ends YidStore's copy of the settings
+                if (await openNativeConfigure(domain, name, false)) return;
+                mpShow();
+                mp.domain = domain; mp.kind = kind; mp.name = name;
+            }
+            mpShowFallback(message);
+        }
+
         // "Continue in Home Assistant": anything this dialog can't draw.
         function mpShowFallback(message) {
             const domain = mp.domain;
@@ -5586,12 +5680,12 @@
             mp.trDomain = step.translation_domain || (mp.kind === 'options' ? mp.domain : step.handler) || mp.domain;
             const ph = step.description_placeholders || {};
             const type = step.type;
-            const link = { t: 'Continue in Home Assistant', f: async () => { const d = mp.domain, k = mp.kind; await mpClose(); if (k === 'options') haNavigate(`/config/integrations/integration/${encodeURIComponent(d)}`); else openIntegrationSetup(d); } };
+            const link = { t: 'Continue in Home Assistant', f: () => mpHandOff('This setup could not be opened here.') };
 
             if (type === 'form') {
                 const fields = Array.isArray(step.data_schema) ? step.data_schema : [];
                 if (step.unsupported || fields.some(f => mpFieldKind(f).kind === 'unsupported')) {
-                    mpShowFallback('This setup step uses options YidStore can\'t show yet.');
+                    mpHandOff('This setup step uses options YidStore can\'t show yet.');
                     return;
                 }
                 const title = mpTr(`step.${step.step_id}.title`, ph) || mp.name;
@@ -5669,7 +5763,7 @@
                 });
                 return;
             }
-            mpShowFallback('This setup step can\'t be shown here.');
+            mpHandOff('This setup step can\'t be shown here.');
         }
 
         async function mpPoll() {
@@ -7072,9 +7166,9 @@
             const st = appStatus(app);
             const version = appVersionText(app);
             const updateChip = app.update_available && !st.busy
-                ? `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                ? `<div class="cs-update">
                        <span class="chip-update"><i class="mdi mdi-update"></i> Update available</span>
-                       <span style="font-size:0.68rem; color:var(--dim); white-space:nowrap;">${escapeHtml(app.installed_version || '?')} → ${escapeHtml(app.latest_version)}</span>
+                       <span class="cs-ver">${escapeHtml(app.installed_version || '?')} → ${escapeHtml(app.latest_version)}</span>
                    </div>` : '';
             const error = app.task && app.task.state === 'error' && app.task.error
                 ? `<div class="apps-error"><i class="mdi mdi-alert-circle-outline"></i> ${escapeHtml(app.task.error)}</div>` : '';
@@ -7093,15 +7187,18 @@
                         </div>
                     </div>
                     <div class="card-status">
+                        <div class="cs-info">
                         ${st.busy ? '<i class="mdi mdi-loading mdi-spin" style="color:var(--primary);"></i>' : `<span class="${st.dot}"></span>`}
-                        <span>${escapeHtml(st.label)}</span>
-                        <span style="flex:1;"></span>
+                        <span class="cs-label">${escapeHtml(st.label)}</span>
                         ${updateChip}
+                        </div>
+                        <div class="cs-actions">
                         ${!app.installed && !st.busy ? `<button class="card-install-btn" onclick="appAction(${jsArg(id)},'install',this)" title="Install"><i class="mdi mdi-download"></i> Install</button>` : ''}
                         ${app.installed && app.state !== 'started' && !st.busy ? `<button class="card-install-btn" onclick="appAction(${jsArg(id)},'start',this)" title="Start"><i class="mdi mdi-play"></i> Start</button>` : ''}
                         <button class="action-btn" onclick="openAppDetails(${jsArg(id)})" title="Details">
                             <i class="mdi mdi-chevron-right"></i>
                         </button>
+                        </div>
                     </div>
                 </div>`;
         }

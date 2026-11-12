@@ -175,21 +175,6 @@ async def _maybe_notify_marketplace_migration(hass: HomeAssistant) -> None:
         _LOGGER.debug("Could not create Marketplace migration notice: %s", exc)
 
 
-def _integration_config_flow(hass: HomeAssistant, domain: str | None) -> bool:
-    """Whether a freshly installed integration supports config-flow setup."""
-    if not domain:
-        return False
-    try:
-        data = json.loads(
-            Path(hass.config.path("custom_components", domain, "manifest.json")).read_text(
-                encoding="utf-8"
-            )
-        )
-        return bool(data.get("config_flow"))
-    except Exception:
-        return False
-
-
 def _domain_known_to_loader(hass: HomeAssistant, domain: str | None) -> bool:
     """Whether Home Assistant's loader already resolved this domain this run.
 
@@ -256,20 +241,51 @@ async def _async_refresh_custom_integrations(hass: HomeAssistant, domain: str | 
 
 
 async def _integration_pending_restart(hass: HomeAssistant, domain: str | None) -> bool:
-    """Decide whether an installed/updated integration needs a restart.
+    """Whether an installed integration needs a restart.
 
-    Follows Home Assistant's Marketplace: a brand-new config-flow integration
-    is loaded on the fly; code already imported this run (an update) or a
-    YAML-only integration needs a restart.
+    Only an update does: when the integration's code is already running in
+    this session, the old code stays loaded until Home Assistant restarts.
+    A new install (also a reinstall after YidStore removed it) is picked up
+    right away: the loader rescans custom_components so it can be set up
+    without a restart, like Home Assistant's Marketplace.
     """
     if not domain:
-        return True
+        return False
     was_loaded = _domain_known_to_loader(hass, domain)
-    found = await _async_refresh_custom_integrations(hass, domain)
-    if found and _integration_config_flow(hass, domain):
-        return was_loaded or (domain not in found)
-    # Loader refresh unsupported, or a YAML-only integration: restart needed.
-    return True
+    await _async_refresh_custom_integrations(hass, domain)
+    return was_loaded
+
+
+def forget_loaded_integration(hass: HomeAssistant, domain: str | None) -> bool:
+    """Drop a removed custom integration from Home Assistant's loader.
+
+    Called after YidStore removed all of its config entries and its files,
+    so a later install of the same integration loads its new code instead of
+    the copy still in memory (which would otherwise need a restart).
+    Returns True when nothing of it is left loaded.
+    """
+    import sys
+
+    if not domain or hass.config_entries.async_entries(domain):
+        return False
+    try:
+        cache = hass.data.get("integrations")
+        if isinstance(cache, dict):
+            cache.pop(domain, None)
+        prefix = f"custom_components.{domain}"
+        components = hass.data.get("components")
+        for name in list(sys.modules):
+            if name == prefix or name.startswith(prefix + "."):
+                sys.modules.pop(name, None)
+                if isinstance(components, dict):
+                    components.pop(name, None)
+        if domain in hass.config.components:
+            hass.config.components.remove(domain)
+        hass.data.pop("custom_components", None)
+        return True
+    except Exception as exc:  # unusual Home Assistant internals: restart instead
+        _LOGGER.debug("Could not unload %s from the loader: %s", domain, exc)
+        return False
 
 
 def _get_datetime_timestamp() -> str:
