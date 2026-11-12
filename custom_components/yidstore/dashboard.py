@@ -2984,7 +2984,15 @@ class OnOffStoreStatusView(HomeAssistantView):
             except Exception:
                 _ha_version = None
 
+            try:
+                from homeassistant.loader import async_get_integration
+
+                _yid_version = str((await async_get_integration(hass, DOMAIN)).version or "")
+            except Exception:
+                _yid_version = ""
+
             return web.json_response({
+                "yidstore_version": _yid_version,
                 "status": status,
                 "requires_restart_list": restart_list,
                 "is_authenticated": is_authenticated,

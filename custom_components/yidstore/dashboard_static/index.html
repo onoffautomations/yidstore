@@ -2276,7 +2276,7 @@
                         <i id="headerLogoFallback" class="mdi mdi-storefront"></i>
                         <span class="store-title">YidStore</span>
                     </div>
-                    <div class="logo-desc">by: OnOff Automations</div>
+                    <div class="logo-desc">by: OnOff Automations<span id="yidstoreVersion" style="opacity:0.75;"></span></div>
                     <!-- Shown only on the narrow/side-panel layout, where
                          .powered-by (which carries the same number) is hidden -->
                     <div class="logo-support">Support: <a href="tel:+18454008199">845.400.8199</a></div>
@@ -3225,6 +3225,12 @@
             requiresRestartSet = new Set(data.requires_restart_list || []);
             for (const k of requiresRestartSet) {
                 optimisticRestartUntil.delete(normalizeRestartKey(k));
+            }
+
+            // Show which YidStore version is running.
+            if (data.yidstore_version) {
+                const v = document.getElementById('yidstoreVersion');
+                if (v) v.textContent = ` · v${data.yidstore_version}`;
             }
 
             if (data.ha_version && data.ha_version !== haVersion) {
