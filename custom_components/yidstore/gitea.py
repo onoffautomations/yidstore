@@ -45,6 +45,24 @@ def strip_unsafe_auth(url: str, headers: dict | None) -> dict:
     return out
 
 
+async def read_limited(stream, max_bytes: int) -> bytes:
+    """Read a whole body, stopping once it is larger than max_bytes.
+
+    StreamReader.read(n) returns as soon as SOME data has arrived, so a
+    single call would cut a download short. Returns at most max_bytes + 1
+    bytes, so callers can tell "too large" from "complete".
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while total <= max_bytes:
+        chunk = await stream.read(min(1024 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 async def safe_get(hass, url: str, headers: dict | None = None, timeout: int = 30,
                    max_bytes: int | None = None) -> tuple[int, bytes, str]:
     """GET without automatic redirects.
@@ -63,7 +81,7 @@ async def safe_get(hass, url: str, headers: dict | None = None, timeout: int = 3
                 hdrs = strip_unsafe_auth(url, hdrs)
                 continue
             if max_bytes is not None:
-                body = await resp.content.read(max_bytes + 1)
+                body = await read_limited(resp.content, max_bytes)
             else:
                 body = await resp.read()
             return resp.status, body, url

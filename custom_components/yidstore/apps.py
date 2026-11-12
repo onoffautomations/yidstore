@@ -1361,7 +1361,8 @@ class AddonStoreGitView(HomeAssistantView):
             return web.Response(status=404)
         if (request.content_length or 0) > addon_store.MAX_REQUEST_BYTES:
             return web.Response(status=413)
-        payload = await request.content.read(addon_store.MAX_REQUEST_BYTES + 1)
+        from .gitea import read_limited
+        payload = await read_limited(request.content, addon_store.MAX_REQUEST_BYTES)
         if len(payload) > addon_store.MAX_REQUEST_BYTES:
             return web.Response(status=413)
         body = await hass.async_add_executor_job(

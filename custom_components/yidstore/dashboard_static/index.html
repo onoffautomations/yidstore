@@ -3244,6 +3244,28 @@
         }
         let authKnown = false;
 
+        function markItemRemoved(item) {
+            if (!item) return;
+            item.is_installed = false;
+            item.install_source = null;
+            item.update_available = false;
+            item.requires_restart = false;
+            item.installed_version = null;
+            item.can_setup = false;
+            item.configured = false;
+            item.can_configure = false;
+        }
+
+        // Redraw the grid now, or as soon as the open popup closes. Redraws
+        // are held back while a popup is open (no flicker behind it); this
+        // makes sure the held-back one still happens.
+        let _renderPending = false;
+        function applyWhenVisible() {
+            if (isOverlayOpen()) { _renderPending = true; return; }
+            _renderPending = false;
+            if (toolbarView !== 'apps') apply();
+        }
+
         function applyLiveStatus(data) {
             requiresRestartSet = new Set(data.requires_restart_list || []);
             for (const k of requiresRestartSet) {
@@ -3297,6 +3319,17 @@
                 if (betaSw) betaSw.setAttribute('aria-checked', betaReleases ? 'true' : 'false');
                 const autoBtn = document.getElementById('autoInstallBtn');
                 if (autoBtn) autoBtn.hidden = !isAuthenticated;
+            }
+
+            // /status lists only packages YidStore tracks. One it installed
+            // that is no longer listed was removed: show it as not installed.
+            if (data.status) {
+                const tracked = new Set(Object.keys(data.status).map(k => k.toLowerCase()));
+                for (const item of items) {
+                    if (item.install_source === 'yidstore' && !tracked.has(`${item.owner}/${item.repo_name}`.toLowerCase())) {
+                        markItemRemoved(item);
+                    }
+                }
             }
 
             for (const [key, status] of Object.entries(data.status || {})) {
@@ -3373,9 +3406,7 @@
                 if (digest !== _lastRenderDigest) {
                     _lastRenderDigest = digest;
                     setCachedData(items);
-                    if (!isOverlayOpen()) {
-                        apply();
-                    }
+                    applyWhenVisible();
                     updateModalRestartBadge();
                 }
             } catch (e) {
@@ -3697,6 +3728,7 @@
                 root.classList.remove('modal-open');
                 body.style.top = '';
                 window.scrollTo(0, y);
+                if (_renderPending) applyWhenVisible();
             }
         }
 
@@ -3723,7 +3755,7 @@
                 if (key === storeStatsKey) return;
                 storeStatsKey = key;
                 storeStats = next;
-                if (hasCompletedInitialLoad && toolbarView !== 'apps' && !isOverlayOpen()) apply();
+                if (hasCompletedInitialLoad && toolbarView !== 'apps') applyWhenVisible();
             } catch (_) {}
         }
         function storeStatsFor(i) {
@@ -3761,7 +3793,7 @@
                     // Author names live in their own (small) cache — refresh
                     // them in the background and re-render if they changed.
                     loadAuthorsMap()
-                        .then(changed => { if (changed && !isOverlayOpen()) apply(); })
+                        .then(changed => { if (changed) applyWhenVisible(); })
                         .catch(() => {});
                     fetch('/api/yidstore/status')
                         .then(res => res.ok ? res.json() : null)
@@ -3775,7 +3807,7 @@
                             }
                             applyLiveStatus(statusData);
                             setCachedData(items);
-                            if (!isOverlayOpen()) apply();
+                            applyWhenVisible();
                             updateModalRestartBadge();
                         })
                         .catch(() => {});
@@ -4669,7 +4701,7 @@
                     item.update_available = true;
                     item.latest_version = newest;
                     fetch('/api/yidstore/refresh', { method: 'POST' }).catch(() => {});
-                    if (!isOverlayOpen()) apply();
+                    applyWhenVisible();
                 }
             }
 
@@ -5044,6 +5076,9 @@
                 });
                 const data = await parseJsonSafe(res);
                 if (res.ok && data.success) {
+                    markItemRemoved(findItemByRepo(o, r));
+                    setCachedData(items);
+                    _renderPending = true;
                     await syncBackendAfterAction();
                     if (t === 'lovelace') {
                         pop('Removed', 'Card deleted and removed from your dashboard resources. Reload to finish.', 'mdi-check-circle', true);

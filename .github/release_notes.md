@@ -2,6 +2,12 @@
 
 After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift+R on a computer). From then on it updates by itself.
 
+### New in 1.8.2b6 — fixes
+
+- **Installing works again.** 1.8.2b5 cut downloads short, so every install failed with "File is not a zip file". Fixed.
+- **The store updates right after you install or remove.** No more reloading the page: the card shows Installed or Not installed as soon as the popup closes.
+- Fixed the same cut-short read for Home Assistant OS apps (built-in add-on store).
+
 ### New in 1.8.2b5 — security review fixes
 
 - **Removing an integration uninstalls it.** Deleting an integration in YidStore now also removes it from Home Assistant (its setup, devices and entities), then deletes its files and offers a restart.
@@ -23,4 +29,4 @@ After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift
 - **Cards register the official way**, through Home Assistant's dashboard resources.
 - **Brand icons the built-in way** on newer Home Assistant.
 - **Loads faster**, about 5 times less to download.
-- **Version in the header**, for example "by: OnOff Automations · v1.8.2b5".
+- **Version in the header**, for example "by: OnOff Automations · v1.8.2b6".
