@@ -1,5 +1,6 @@
 **Beta** — please test before 1.8.2 is released. Only offered to users who turn on beta versions for YidStore.
 
+- **Updates always show.** Before, browsers could keep showing an old copy of YidStore's page for up to a month after an update. Now they check for a newer page every time. After installing this, refresh the page once (Ctrl+Shift+R on a computer).
 - **Safer.** Installing, removing, refreshing and other changes now need a logged-in Home Assistant admin. Before, anyone who could reach Home Assistant could use them. Browsing is unchanged.
 - **Configure opens Home Assistant's own settings dialog**, right on the page, just like Restart opens Home Assistant's own restart dialog.
 - **Cards register the official way**, through Home Assistant's dashboard resources, like Settings → Dashboards → Resources. Old duplicate entries are cleaned up.

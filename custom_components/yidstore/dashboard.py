@@ -419,11 +419,55 @@ async def _fetch_authors_map(hass: HomeAssistant, client, force: bool = False) -
 URL_BASE = "/yidstore_static"
 
 
+class YidStorePageView(HomeAssistantView):
+    """YidStore's page (sidebar panel and direct link), never stale.
+
+    Sent with "Cache-Control: no-cache" and an ETag: the browser keeps a
+    copy but asks every time whether it changed (a tiny 304 when it
+    didn't), so an update shows on the next load. Gzipped when accepted.
+    """
+    url = URL_BASE + "/index.html"
+    name = "yidstore:page"
+    requires_auth = False
+
+    def __init__(self, static_dir: str) -> None:
+        self._path = os.path.join(static_dir, "index.html")
+        self._cache: tuple | None = None  # (mtime, size, etag, raw, gz)
+
+    def _load(self) -> tuple:
+        import gzip
+        import hashlib
+
+        st = os.stat(self._path)
+        cached = self._cache
+        if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+            return cached
+        with open(self._path, "rb") as fh:
+            raw = fh.read()
+        etag = '"' + hashlib.sha1(raw).hexdigest()[:20] + '"'
+        self._cache = (st.st_mtime, st.st_size, etag, raw, gzip.compress(raw, compresslevel=9, mtime=0))
+        return self._cache
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            _mtime, _size, etag, raw, gz = await hass.async_add_executor_job(self._load)
+        except OSError:
+            return web.Response(status=404)
+        headers = {"Cache-Control": "no-cache", "ETag": etag, "Vary": "Accept-Encoding"}
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304, headers=headers)
+        if "gzip" in request.headers.get("Accept-Encoding", "").lower():
+            headers["Content-Encoding"] = "gzip"
+            return web.Response(body=gz, content_type="text/html", charset="utf-8", headers=headers)
+        return web.Response(body=raw, content_type="text/html", charset="utf-8", headers=headers)
+
+
 def _write_gzip_copies(static_dir: str) -> None:
     """Blocking: write <file>.gz next to the panel's page and script."""
     import gzip
 
-    for name in ("index.html", "yidstore-brands.js"):
+    for name in ("yidstore-brands.js",):
         src = os.path.join(static_dir, name)
         try:
             if os.path.isfile(src):
@@ -848,6 +892,10 @@ async def async_setup_dashboard(hass: HomeAssistant, entry) -> None:
     # Assistant's web server sends the .gz file to browsers that accept it.
     # Rebuilt at every start so it always matches the page after an update.
     await hass.async_add_executor_job(_write_gzip_copies, static_dir)
+    # The page itself is served by its own view, before the static path, so
+    # browsers and proxies always check for a newer one (the static path
+    # would let them keep it for a month, so updates didn't show).
+    hass.http.register_view(YidStorePageView(static_dir))
     await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, static_dir, True)])
 
     if entry.data.get(CONF_SIDE_PANEL, True):
