@@ -5,3 +5,4 @@
 - **Cards register the official way**, through Home Assistant's dashboard resources, like Settings → Dashboards → Resources. Old duplicate entries are cleaned up.
 - **Loads faster.** The page downloads about 5 times smaller, nothing from other sites holds up the first screen, and icons and off-screen cards load only when needed.
 - The store server's address is now written plainly in the code.
+- **See which version you run:** the YidStore header now shows its version (for example "by: OnOff Automations · v1.8.2b2").
