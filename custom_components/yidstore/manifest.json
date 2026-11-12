@@ -1,13 +1,23 @@
 {
   "domain": "yidstore",
   "name": "YidStore",
-  "after_dependencies": ["hassio", "lovelace"],
-  "codeowners": ["@onoffautomations"],
+  "after_dependencies": [
+    "hassio",
+    "lovelace"
+  ],
+  "categories": [
+    "computers_network.cloud_developer_tools"
+  ],
+  "codeowners": [
+    "@onoffautomations"
+  ],
   "config_flow": true,
-  "dependencies": ["http"],
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://onoffautomations.com/integrations",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/onoffautomations/yidstore/issues",
   "requirements": [],
-  "version": "1.8.2b8"
+  "version": "1.8.2"
 }

@@ -38,8 +38,15 @@ To try a beta, open YidStore in the Marketplace (or HACS) and turn on beta versi
 ## Using the Store
 - Open **YidStore** in the left sidebar.
 - Each item shows its stars and downloads.
-- **Install** works like the Marketplace: a new integration loads without a restart and its setup opens right in YidStore. When an update needs a restart, **Restart** opens Home Assistant's own restart dialog.
-- An installed integration that isn't set up yet has a **Set up** button.
+- **Install** works like the Marketplace: a new integration loads without a restart and its setup opens right in YidStore. Steps YidStore can't show itself open in Home Assistant's own setup dialog, on the same page.
+- **Updating** an integration needs a restart; **Restart** opens Home Assistant's own restart dialog.
+- An installed integration that isn't set up yet has a **Set up** button, and **Configure** opens its settings.
+- **Removing** an integration also removes it from Home Assistant (its setup, devices and entities). Removing a card also removes its dashboard resource.
+
+## Security
+- YidStore's page, its store data and all its actions need a logged-in Home Assistant **admin**.
+- Packages only install into their own folders; YidStore never overwrites or deletes anything else, and never Home Assistant, HACS or itself.
+- Text from the store (names, readmes, release notes) is shown safely, and the page loads nothing from other sites.
 
 ## Apps
 The **Apps** tab installs add-ons on Home Assistant OS or Supervised installs.
