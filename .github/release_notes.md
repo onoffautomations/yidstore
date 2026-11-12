@@ -1,9 +1,12 @@
 **Beta** — please test before 1.8.2 is released. Only offered to users who turn on beta versions for YidStore.
 
-- **Updates always show.** Before, browsers could keep showing an old copy of YidStore's page for up to a month after an update. Now they check for a newer page every time. After installing this, refresh the page once (Ctrl+Shift+R on a computer).
-- **Safer.** Installing, removing, refreshing and other changes now need a logged-in Home Assistant admin. Before, anyone who could reach Home Assistant could use them. Browsing is unchanged.
-- **Configure opens Home Assistant's own settings dialog**, right on the page, just like Restart opens Home Assistant's own restart dialog.
-- **Cards register the official way**, through Home Assistant's dashboard resources, like Settings → Dashboards → Resources. Old duplicate entries are cleaned up.
-- **Loads faster.** The page downloads about 5 times smaller, nothing from other sites holds up the first screen, and icons and off-screen cards load only when needed.
-- The store server's address is now written plainly in the code.
-- **See which version you run:** the YidStore header now shows its version (for example "by: OnOff Automations · v1.8.2b2").
+After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift+R on a computer). From then on it updates by itself.
+
+- **Updates always show.** Browsers used to keep an old copy of YidStore's page for up to a month, so fixes didn't appear and the panel could show stale "update available" or "restart required". Now the page is always current, and an open page reloads itself after YidStore is updated.
+- **No public page anymore.** Opening YidStore's page address directly now goes to Home Assistant's login and the YidStore panel. The store's data (list, readmes, releases, status) needs a login too.
+- **Safer.** Installing, removing, refreshing and other changes need a logged-in Home Assistant admin.
+- **Configure opens Home Assistant's own settings dialog**, right on the page, like Restart opens Home Assistant's own restart dialog.
+- **Cards register the official way**, through Home Assistant's dashboard resources. Old duplicate entries are cleaned up.
+- **Brand icons the built-in way.** Newer Home Assistant shows each integration's own icons itself, so YidStore no longer loads its icon script on your dashboards there, and removes it where it was added before. Older Home Assistant keeps it.
+- **Loads faster.** About 5 times less to download, and nothing from other sites holds up the first screen.
+- **Version in the header**, for example "by: OnOff Automations · v1.8.2b4".

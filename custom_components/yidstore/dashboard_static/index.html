@@ -2751,6 +2751,12 @@
     </div>
 
     <script>
+        // YidStore only runs inside Home Assistant's sidebar. Opened on its
+        // own (a direct link), go to the panel, which needs a login.
+        if (window.top === window.self && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+            location.replace('/yidstore');
+        }
+
         // The panel runs in an iframe on the HA origin. Attach the signed-in
         // user's access token to YidStore API calls so endpoints that require
         // Home Assistant auth (Apps, connector) work.
@@ -3225,6 +3231,19 @@
             requiresRestartSet = new Set(data.requires_restart_list || []);
             for (const k of requiresRestartSet) {
                 optimisticRestartUntil.delete(normalizeRestartKey(k));
+            }
+
+            // YidStore was updated while this page was open: reload once to
+            // get the new page (it is never served from an old cache).
+            const pageVersion = (document.querySelector('meta[name="yidstore-version"]') || {}).content;
+            if (data.yidstore_version && pageVersion && data.yidstore_version !== pageVersion) {
+                let already = '';
+                try { already = sessionStorage.getItem('yidstore_reloaded_for') || ''; } catch (_) {}
+                if (already !== data.yidstore_version) {
+                    try { sessionStorage.setItem('yidstore_reloaded_for', data.yidstore_version); } catch (_) {}
+                    location.reload();
+                    return;
+                }
             }
 
             // Show which YidStore version is running.

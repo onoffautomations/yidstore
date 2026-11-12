@@ -420,7 +420,7 @@ URL_BASE = "/yidstore_static"
 
 
 class YidStorePageView(HomeAssistantView):
-    """YidStore's page (sidebar panel and direct link), never stale.
+    """YidStore's page for the sidebar panel, never stale.
 
     Sent with "Cache-Control: no-cache" and an ETag: the browser keeps a
     copy but asks every time whether it changed (a tiny 304 when it
@@ -444,12 +444,34 @@ class YidStorePageView(HomeAssistantView):
             return cached
         with open(self._path, "rb") as fh:
             raw = fh.read()
+        # Stamp the page with the installed YidStore version, so an open page
+        # can tell it is out of date after an update and reload itself.
+        try:
+            import json
+
+            with open(os.path.join(os.path.dirname(os.path.dirname(self._path)), "manifest.json"), encoding="utf-8") as fh:
+                version = str(json.load(fh).get("version") or "")
+        except Exception:
+            version = ""
+        if version:
+            raw = raw.replace(
+                b"<head>",
+                b'<head>\n    <meta name="yidstore-version" content="' + version.encode() + b'">',
+                1,
+            )
         etag = '"' + hashlib.sha1(raw).hexdigest()[:20] + '"'
         self._cache = (st.st_mtime, st.st_size, etag, raw, gzip.compress(raw, compresslevel=9, mtime=0))
         return self._cache
 
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
+        # Opened directly in a browser tab (not inside Home Assistant's
+        # sidebar, which loads it in an iframe): go to the YidStore panel,
+        # which needs a Home Assistant login. The store's data needs a login
+        # anyway; this just keeps the page from being used on its own.
+        if request.headers.get("Sec-Fetch-Dest", "").lower() == "document":
+            target = "/yidstore" if "yidstore" in (hass.data.get("frontend_panels") or {}) else "/"
+            return web.Response(status=302, headers={"Location": target, "Cache-Control": "no-store"})
         try:
             _mtime, _size, etag, raw, gz = await hass.async_add_executor_job(self._load)
         except OSError:
@@ -691,8 +713,61 @@ def _is_repo_installed(
     return is_installed
 
 
+def _ha_serves_integration_brands() -> bool:
+    """Blocking: does Home Assistant serve custom integrations' brand/ images
+    itself (its built-in brands component, /api/brands/integration/...)?"""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("homeassistant.components.brands") is not None
+    except Exception:
+        return False
+
+
+def _lovelace_resources_collection(hass: HomeAssistant):
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None and isinstance(data, dict):
+        resources = data.get("resources")
+    return resources if hasattr(resources, "async_create_item") else None
+
+
+async def _async_remove_brand_patcher_resource(hass: HomeAssistant) -> None:
+    """Take the brands patcher off the dashboard resources (existing homes)."""
+    try:
+        resources = _lovelace_resources_collection(hass)
+        if resources is not None:
+            if not getattr(resources, "loaded", True):
+                await resources.async_load()
+                resources.loaded = True
+            for item in list(resources.async_items()):
+                if str(item.get("url", "")).split("?")[0] == BRANDS_PATCHER_URL:
+                    await resources.async_delete_item(item["id"])
+                    _LOGGER.info("Removed the YidStore brands patcher (Home Assistant shows integration icons itself)")
+            return
+        store = Store(hass, 1, "lovelace_resources")
+        data = await store.async_load()
+        items = (data or {}).get("items") or []
+        kept = [i for i in items if str(i.get("url", "")).split("?")[0] != BRANDS_PATCHER_URL]
+        if len(kept) != len(items):
+            data["items"] = kept
+            await store.async_save(data)
+            _LOGGER.info("Removed the YidStore brands patcher from dashboard resources")
+    except Exception as err:
+        _LOGGER.debug("Could not remove the brands patcher resource: %s", err)
+
+
 async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
-    """Setup the frontend brand icon patcher."""
+    """Setup the frontend brand icon patcher (older Home Assistant only).
+
+    Newer Home Assistant serves every custom integration's own brand/ images
+    (its built-in brands component), so the patcher isn't needed there: it
+    is not loaded, and removed from dashboards where an older YidStore added
+    it. Older versions keep it.
+    """
+    if await hass.async_add_executor_job(_ha_serves_integration_brands):
+        await _async_remove_brand_patcher_resource(hass)
+        return
     # Create the JavaScript patcher file
     static_dir = os.path.join(os.path.dirname(__file__), "dashboard_static")
     js_path = os.path.join(static_dir, "yidstore-brands.js")
@@ -843,7 +918,20 @@ async def async_setup_brand_patcher(hass: HomeAssistant) -> None:
         _LOGGER.error("Failed to create brands patcher JS: %s", e)
         return
 
-    # Register as a Lovelace resource
+    # Register as a dashboard resource: Home Assistant's resources collection
+    # when it is loaded, else its storage file.
+    resources = _lovelace_resources_collection(hass)
+    if resources is not None:
+        try:
+            if not getattr(resources, "loaded", True):
+                await resources.async_load()
+                resources.loaded = True
+            if not any(str(i.get("url", "")).split("?")[0] == BRANDS_PATCHER_URL for i in resources.async_items()):
+                await resources.async_create_item({"res_type": "module", "url": f"{BRANDS_PATCHER_URL}?v={int(time.time())}"})
+                _LOGGER.info("Registered YidStore brands patcher as a dashboard resource")
+            return
+        except Exception as err:
+            _LOGGER.debug("Resources collection unavailable, using storage: %s", err)
     try:
         store = Store(hass, 1, "lovelace_resources")
         data = await store.async_load()
@@ -1336,7 +1424,7 @@ class OnOffStoreReposView(HomeAssistantView):
     """API to list Gitea repositories."""
     url = "/api/yidstore/repos"
     name = "api:yidstore:repos"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -1926,7 +2014,7 @@ class OnOffStoreAuthorsView(HomeAssistantView):
     """
     url = "/api/yidstore/authors"
     name = "api:yidstore:authors"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2213,7 +2301,7 @@ class OnOffStoreAutoInstallView(HomeAssistantView):
 
     url = "/api/yidstore/autoinstall"
     name = "api:yidstore:autoinstall"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2354,7 +2442,7 @@ class OnOffStoreReadmeView(HomeAssistantView):
     """API to fetch README."""
     url = "/api/yidstore/readme/{owner}/{repo}"
     name = "api:yidstore:readme"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2405,7 +2493,7 @@ class OnOffStoreReleasesView(HomeAssistantView):
     """API to fetch all releases for a repository."""
     url = "/api/yidstore/releases/{owner}/{repo}"
     name = "api:yidstore:releases"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2649,7 +2737,7 @@ class OnOffStoreListCustomView(HomeAssistantView):
     """API to list custom repositories."""
     url = "/api/yidstore/custom/list"
     name = "api:yidstore:custom:list"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2886,7 +2974,7 @@ class OnOffStoreStatsView(HomeAssistantView):
     """Stars and download counts for the store items (read without a token)."""
     url = "/api/yidstore/stats"
     name = "api:yidstore:stats"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -2919,7 +3007,7 @@ class OnOffStoreStatusView(HomeAssistantView):
     """Lightweight API to get install status for repos (for auto-refresh)."""
     url = "/api/yidstore/status"
     name = "api:yidstore:status"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3466,7 +3554,7 @@ class DocumentationReposView(HomeAssistantView):
     """API to list documentation repositories from the Documentation organization."""
     url = "/api/yidstore/docs"
     name = "api:yidstore:docs"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3522,7 +3610,7 @@ class DocumentationFilesView(HomeAssistantView):
     """API to list files in a documentation repository."""
     url = "/api/yidstore/docs/{owner}/{repo}/files"
     name = "api:yidstore:docs:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3572,7 +3660,7 @@ class DocumentationContentView(HomeAssistantView):
     """API to get content of a documentation file."""
     url = "/api/yidstore/docs/{owner}/{repo}/content"
     name = "api:yidstore:docs:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3656,7 +3744,7 @@ class AutomationsReposView(HomeAssistantView):
     """API to list automation repositories from the Automations organization."""
     url = "/api/yidstore/automations"
     name = "api:yidstore:automations"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3711,7 +3799,7 @@ class AutomationsFilesView(HomeAssistantView):
     """API to list YAML files in an automations repository."""
     url = "/api/yidstore/automations/{owner}/{repo}/files"
     name = "api:yidstore:automations:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3758,7 +3846,7 @@ class AutomationsContentView(HomeAssistantView):
     """API to get content of an automation YAML file with linked instructions."""
     url = "/api/yidstore/automations/{owner}/{repo}/content"
     name = "api:yidstore:automations:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3843,7 +3931,7 @@ class DashboardsReposView(HomeAssistantView):
     """API to list dashboard repositories from the Dashboards organization or user."""
     url = "/api/yidstore/dashboards"
     name = "api:yidstore:dashboards"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3900,7 +3988,7 @@ class DashboardsFilesView(HomeAssistantView):
     """API to list YAML files in a dashboards repository."""
     url = "/api/yidstore/dashboards/{owner}/{repo}/files"
     name = "api:yidstore:dashboards:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -3946,7 +4034,7 @@ class DashboardsContentView(HomeAssistantView):
     """API to get content of a dashboard YAML file with linked instructions."""
     url = "/api/yidstore/dashboards/{owner}/{repo}/content"
     name = "api:yidstore:dashboards:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4182,7 +4270,7 @@ class HelpersReposView(HomeAssistantView):
     """API to list helper repositories from the Helpers organization."""
     url = "/api/yidstore/helpers"
     name = "api:yidstore:helpers"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4239,7 +4327,7 @@ class HelpersFilesView(HomeAssistantView):
     """API to list YAML files in a helpers repository."""
     url = "/api/yidstore/helpers/{owner}/{repo}/files"
     name = "api:yidstore:helpers:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4285,7 +4373,7 @@ class HelpersContentView(HomeAssistantView):
     """API to get content of a helper YAML file with linked instructions."""
     url = "/api/yidstore/helpers/{owner}/{repo}/content"
     name = "api:yidstore:helpers:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4497,7 +4585,7 @@ class AudioReposView(HomeAssistantView):
     """API to list audio repositories from the Audio organization."""
     url = "/api/yidstore/audio"
     name = "api:yidstore:audio"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4559,7 +4647,7 @@ class AudioFilesView(HomeAssistantView):
     """API to list files in an audio repository."""
     url = "/api/yidstore/audio/{owner}/{repo}/files"
     name = "api:yidstore:audio:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4612,7 +4700,7 @@ class AudioContentView(HomeAssistantView):
     """API to get content/info of an audio repo for installation."""
     url = "/api/yidstore/audio/{owner}/{repo}/content"
     name = "api:yidstore:audio:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4707,7 +4795,7 @@ class BlueprintsReposView(HomeAssistantView):
     """API to list blueprint repositories from the Blueprints organization."""
     url = "/api/yidstore/blueprints"
     name = "api:yidstore:blueprints"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4763,7 +4851,7 @@ class BlueprintsFilesView(HomeAssistantView):
     """API to list YAML files in a blueprints repository."""
     url = "/api/yidstore/blueprints/{owner}/{repo}/files"
     name = "api:yidstore:blueprints:files"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
@@ -4809,7 +4897,7 @@ class BlueprintsContentView(HomeAssistantView):
     """API to get content of a blueprint YAML file with linked instructions."""
     url = "/api/yidstore/blueprints/{owner}/{repo}/content"
     name = "api:yidstore:blueprints:content"
-    requires_auth = False
+    requires_auth = True
 
     def __init__(self, entry_id: str) -> None:
         self.entry_id = entry_id
