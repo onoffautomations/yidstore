@@ -4425,18 +4425,19 @@
             let hasCards = false;
             let installedCount = 0;
             let failedCount = 0;
+            const restartNames = [];
             for (const id of ids) {
                 const [o, r] = id.split('/');
                 const item = items.find(x => x.owner === o && x.repo_name === r);
                 if (item) {
                     try {
-                        await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
+                        const res = await executeInstDirect(o, r, item.type, item.mode, item.asset_name, item);
                         item.is_installed = true;
                         item.install_source = 'yidstore';
                         item.update_available = false;
                         installedCount++;
                         if (item.type === 'integration') {
-                            addToRestartSet(o, r);
+                            if (res && res.requires_restart) { addToRestartSet(o, r); restartNames.push(formatName(r)); }
                         } else {
                             hasCards = true;
                         }
@@ -4448,6 +4449,8 @@
             await syncBackendAfterAction();
             if (failedCount > 0) {
                 pop('Error', `${failedCount} item${failedCount > 1 ? 's' : ''} failed to install.`, 'mdi-alert', false);
+            } else if (restartNames.length) {
+                showRestartOffer(`${restartNames.join(', ')} ${restartNames.length > 1 ? 'were' : 'was'} updated. Restart Home Assistant to finish.`);
             } else if (hasCards) {
                 pop('Installed', `${installedCount} item${installedCount > 1 ? 's' : ''} installed. Reload to see card changes.`, 'mdi-check-circle', true);
             } else if (installedCount > 0) {
@@ -4530,6 +4533,7 @@
         async function runAutoInstall(includeInstalled) {
             if (autoInstallRunning || !autoInstallEntries.length) return;
             autoInstallRunning = true;
+            let autoRestart = false;
 
             const states = autoInstallEntries.map(e =>
                 (!includeInstalled && e.is_installed && !e.update_available) ? 'skipped' : 'pending'
@@ -4562,11 +4566,11 @@
                         paint(`<div>Installing ${Math.min(idx + 2, autoInstallEntries.length)} of ${autoInstallEntries.length}…</div>`);
                         continue;
                     }
-                    await executeInstDirect(e.owner, e.repo_name, e.type, e.mode, e.asset_name, e);
+                    const res = await executeInstDirect(e.owner, e.repo_name, e.type, e.mode, e.asset_name, e);
                     states[idx] = 'done';
                     installed++;
                     if (e.type === 'integration') {
-                        addToRestartSet(e.owner, e.repo_name);
+                        if (res && res.requires_restart) { addToRestartSet(e.owner, e.repo_name); autoRestart = true; }
                     } else {
                         hasCards = true;
                     }
@@ -4594,9 +4598,15 @@
             // stay in the New section until the next full load.
             apply();
 
-            const summary = `<div>Installed <strong>${installed}</strong> package${installed === 1 ? '' : 's'}${failed ? `, <span style="color:var(--danger);">${failed} failed</span>` : ''}.</div>`;
+            const summary = `<div>Installed <strong>${installed}</strong> package${installed === 1 ? '' : 's'}${failed ? `, <span style="color:var(--danger);">${failed} failed</span>` : ''}.</div>`
+                + (autoRestart ? '<div style="margin-top:0.5rem;">Updated integrations need a restart of Home Assistant to finish.</div>' : '');
             const body = renderAutoInstallList(states, summary);
-            if (failed > 0) {
+            if (autoRestart) {
+                pop('Auto-Install', body, failed > 0 ? 'mdi-alert' : 'mdi-restart', false, [
+                    { t: 'Later', c: 'btn-o', f: 'closePop()' },
+                    { t: 'Restart', c: 'btn-p', f: 'closePop(); openNativeRestart();' }
+                ]);
+            } else if (failed > 0) {
                 pop('Auto-Install', body, 'mdi-alert', false);
             } else if (hasCards) {
                 pop('Auto-Install', body, 'mdi-check-circle', true);

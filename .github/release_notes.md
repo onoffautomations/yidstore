@@ -2,6 +2,10 @@
 
 After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift+R on a computer). From then on it updates by itself.
 
+### New in 1.8.2b8
+
+- **Updating an integration always asks for a restart**, with Home Assistant's own restart dialog. This now also covers integrations that weren't running yet, and updates from "Install selected" and Auto-Install. New installs still don't ask.
+
 ### New in 1.8.2b7
 
 - **No restart after installing a new integration.** Only an update asks for a restart. Removing an integration also unloads it, so installing it again later doesn't need a restart either.
@@ -36,4 +40,4 @@ After installing: restart Home Assistant, then refresh YidStore once (Ctrl+Shift
 - **Cards register the official way**, through Home Assistant's dashboard resources.
 - **Brand icons the built-in way** on newer Home Assistant.
 - **Loads faster**, about 5 times less to download.
-- **Version in the header**, for example "by: OnOff Automations · v1.8.2b7".
+- **Version in the header**, for example "by: OnOff Automations · v1.8.2b8".

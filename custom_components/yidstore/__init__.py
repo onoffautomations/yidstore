@@ -240,20 +240,31 @@ async def _async_refresh_custom_integrations(hass: HomeAssistant, domain: str | 
         return set()
 
 
-async def _integration_pending_restart(hass: HomeAssistant, domain: str | None) -> bool:
+def _custom_integration_dirs(path: str) -> set[str]:
+    """Folder names in custom_components (blocking; executor)."""
+    try:
+        return {p.name for p in Path(path).iterdir() if p.is_dir() and not p.name.startswith(".")}
+    except OSError:
+        return set()
+
+
+async def _integration_pending_restart(
+    hass: HomeAssistant, domain: str | None, was_on_disk: bool = False
+) -> bool:
     """Whether an installed integration needs a restart.
 
-    Only an update does: when the integration's code is already running in
-    this session, the old code stays loaded until Home Assistant restarts.
-    A new install (also a reinstall after YidStore removed it) is picked up
-    right away: the loader rescans custom_components so it can be set up
-    without a restart, like Home Assistant's Marketplace.
+    Only an update does: the integration was already installed (on disk) or
+    its code is already running in this session, and Home Assistant only
+    loads the new code after a restart. A new install (also a reinstall
+    after YidStore removed it) is picked up right away: the loader rescans
+    custom_components so it can be set up without a restart, like Home
+    Assistant's Marketplace.
     """
     if not domain:
         return False
     was_loaded = _domain_known_to_loader(hass, domain)
     await _async_refresh_custom_integrations(hass, domain)
-    return was_loaded
+    return was_loaded or was_on_disk
 
 
 def forget_loaded_integration(hass: HomeAssistant, domain: str | None) -> bool:
@@ -971,6 +982,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 download_headers.update(client.auth_headers(owner, repo))
 
+            # Integrations already on disk before this install: installing
+            # over one of them is an update, and an update needs a restart.
+            existing_integrations: set[str] = set()
+            if package_type == TYPE_INTEGRATION:
+                existing_integrations = await hass.async_add_executor_job(
+                    _custom_integration_dirs, hass.config.path("custom_components")
+                )
+
             result = await download_and_install(
                 hass,
                 url=url,
@@ -999,7 +1018,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if package_type == TYPE_INTEGRATION:
                 domain_for_restart = installed_domain or repo.lower().replace("-", "_")
                 try:
-                    pending_restart = await _integration_pending_restart(hass, domain_for_restart)
+                    pending_restart = await _integration_pending_restart(
+                        hass, domain_for_restart, domain_for_restart in existing_integrations
+                    )
                 except Exception as e:
                     _LOGGER.debug("Restart-need check failed, assuming restart needed: %s", e)
                     pending_restart = True
