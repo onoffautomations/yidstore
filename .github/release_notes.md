@@ -5,7 +5,7 @@ Beta. Turn on beta versions for YidStore in the Marketplace (or HACS) to get it.
 
 ### Changed
 - **No more Marketplace "re-add YidStore" popup or notification.** The popup is gone from the store, and the Home Assistant notification is cleared on startup.
-- **Multi-select install bar stays in place.** When you select several items, the Install / Cancel bar floats at the bottom of the screen and no longer scrolls away with the page.
+- **Multi-select install bar is docked to the bottom of the screen**, like a phone app's action bar, and stays there while you scroll. On phones: an X on the left to cancel, the count, and a big Install button on the right.
 - **Fits screens better.**
   - Phones: the header is now three tidy rows: YidStore, section, select and menu on top; a full-width search bar; then the filters.
   - Wide screens use more of the width, and the search bar grows on desktop.

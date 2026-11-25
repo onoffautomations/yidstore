@@ -367,45 +367,94 @@
             max-width: 130px;
         }
 
-        /* Multi-select install bar: floats at the bottom of the screen and
-           stays put while the page scrolls. */
+        /* Multi-select install bar: docked to the bottom edge of the screen,
+           like a phone app's action bar. It stays put while the page
+           scrolls. */
         .bulk-bar {
             position: fixed;
-            left: 50%;
-            bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-            transform: translateX(-50%);
+            left: 0;
+            right: 0;
+            bottom: 0;
             z-index: 900;
-            width: min(560px, calc(100vw - 2rem));
-            box-sizing: border-box;
-            background: var(--primary);
-            color: #fff;
-            padding: 0.6rem 0.75rem 0.6rem 1.1rem;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            background: var(--card);
+            border-top: 1px solid var(--border);
+            box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+            padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
             display: none;
-            align-items: center;
-            justify-content: space-between;
-            font-weight: 700;
-            font-size: 0.85rem;
-            animation: bulkUp 0.25s ease-out;
-            flex-wrap: wrap;
-            gap: 0.5rem;
+            animation: bulkUp 0.22s ease-out;
         }
 
-        /* Keep the last cards reachable above the floating bar. */
+        .bulk-inner {
+            width: 100%;
+            max-width: 1760px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        #bulkText {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bulk-close {
+            display: none;
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--text);
+            font-size: 1.4rem;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+
+        .bulk-bar .btn {
+            flex: 0 0 auto;
+        }
+
+        /* Phones: close icon on the left, a big Install button on the right. */
+        @media (max-width: 560px) {
+            .bulk-bar {
+                padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+            }
+
+            .bulk-close {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .bulk-bar .bulk-cancel {
+                display: none;
+            }
+
+            .bulk-bar .btn-p {
+                padding: 0.7rem 1.4rem;
+                font-size: 0.95rem;
+            }
+        }
+
+        /* Keep the last cards reachable above the docked bar. */
         body.bulk-open #storeView {
-            padding-bottom: 5.5rem;
+            padding-bottom: 5rem;
         }
 
         @keyframes bulkUp {
             from {
-                transform: translate(-50%, 20px);
-                opacity: 0;
+                transform: translateY(100%);
             }
 
             to {
-                transform: translate(-50%, 0);
-                opacity: 1;
+                transform: translateY(0);
             }
         }
 
@@ -2544,13 +2593,15 @@
 
         <!-- Store View -->
         <div id="storeView">
-            <div id="bulkBar" class="bulk-bar">
-                <span id="bulkText">0 selected</span>
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
-                    <button class="btn btn-dark" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
+            <div id="bulkBar" class="bulk-bar" role="toolbar" aria-label="Selected items">
+                <div class="bulk-inner">
+                    <button class="bulk-close" onclick="clearSelection()" title="Cancel" aria-label="Cancel">
+                        <i class="mdi mdi-close"></i>
+                    </button>
+                    <span id="bulkText">0 selected</span>
+                    <button class="btn btn-o bulk-cancel" onclick="clearSelection()">Cancel</button>
+                    <button class="btn btn-p" onclick="bulkAction('install')"><i class="mdi mdi-download"></i>
                         Install</button>
-                    <button class="btn btn-o" onclick="clearSelection()"
-                        style="border-color:#fff; color:#fff;">Cancel</button>
                 </div>
             </div>
 
