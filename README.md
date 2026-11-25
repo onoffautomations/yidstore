@@ -40,6 +40,8 @@ To try a beta, open YidStore in the Marketplace (or HACS) and turn on beta versi
 - Each item shows its stars and downloads.
 - **Install** works like the Marketplace: a new integration loads without a restart and its setup opens right in YidStore. Steps YidStore can't show itself open in Home Assistant's own setup dialog, on the same page.
 - **Updating** an integration needs a restart; **Restart** opens Home Assistant's own restart dialog.
+- **Update All** (in the menu) updates everything with a newer version in one go.
+- **Select Multiple** lets you tick several items and install them together from the bar at the bottom of the screen.
 - An installed integration that isn't set up yet has a **Set up** button, and **Configure** opens its settings.
 - **Removing** an integration also removes it from Home Assistant (its setup, devices and entities). Removing a card also removes its dashboard resource.
 

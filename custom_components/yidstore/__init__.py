@@ -127,52 +127,18 @@ SERVICE_SCHEMA_SIMPLE = vol.Schema(
 )
 
 
-def _ha_version_tuple(version: str) -> tuple[int, ...]:
-    """Leading integer parts of a Home Assistant version, e.g. "2026.11.1" -> (2026, 11, 1)."""
-    import re
-    return tuple(int(p) for p in re.findall(r"\d+", str(version or ""))[:3])
+# The Marketplace re-add notice is gone; clear one left by older versions.
+_MARKETPLACE_NOTICE_ID = "yidstore_marketplace_migration"
 
 
-def _ha_version_at_least(version: str, target: tuple[int, ...]) -> bool:
-    parts = _ha_version_tuple(version)
-    return bool(parts) and parts >= target
-
-
-# Home Assistant release that moved the community store to the built-in
-# "Marketplace"; from here on YidStore may need re-adding as a custom repo.
-MARKETPLACE_MIN_VERSION = (2026, 11, 1)
-
-
-async def _maybe_notify_marketplace_migration(hass: HomeAssistant) -> None:
-    """On HA 2026.11.1+, leave a persistent notification explaining that the
-    integration may need to be re-added as a custom repository in the
-    Marketplace (HACS), with the steps for doing so."""
-    try:
-        from homeassistant.const import __version__ as ha_version
-    except Exception:
-        return
-    if not _ha_version_at_least(ha_version, MARKETPLACE_MIN_VERSION):
-        return
+def _dismiss_marketplace_migration_notice(hass: HomeAssistant) -> None:
+    """Remove the Marketplace re-add notification older versions created."""
     try:
         from homeassistant.components import persistent_notification
 
-        persistent_notification.async_create(
-            hass,
-            title="YidStore: check the Marketplace after updating Home Assistant",
-            message=(
-                "You're on Home Assistant {ver}. After this update, YidStore "
-                "sometimes needs to be re-added as a **custom repository** in "
-                "the Marketplace (HACS).\n\n"
-                "**If YidStore is missing, add it back:**\n"
-                "1. Open **Marketplace** and tap the **add link** button next to the search bar.\n"
-                "2. Paste `https://github.com/onoffautomations/yidstore` and tap **Add**.\n"
-                "3. Install **YidStore**, then restart Home Assistant.\n\n"
-                "Everything already working? You can safely dismiss this notice."
-            ).format(ver=ha_version),
-            notification_id="yidstore_marketplace_migration",
-        )
+        persistent_notification.async_dismiss(hass, _MARKETPLACE_NOTICE_ID)
     except Exception as exc:
-        _LOGGER.debug("Could not create Marketplace migration notice: %s", exc)
+        _LOGGER.debug("Could not dismiss old Marketplace notice: %s", exc)
 
 
 def _domain_known_to_loader(hass: HomeAssistant, domain: str | None) -> bool:
@@ -671,9 +637,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as e:
         _LOGGER.error("Failed to setup OnOff Store Dashboard: %s", e, exc_info=True)
 
-    # On HA 2026.11.1+, remind the user they may need to re-add YidStore as a
-    # custom repository in the Marketplace (HACS).
-    await _maybe_notify_marketplace_migration(hass)
+    # Older versions left a "re-add in the Marketplace" notice; clear it.
+    _dismiss_marketplace_migration_notice(hass)
 
     # Check for updates on startup — run in the background so the network
     # round-trips don't block integration setup / HA boot.

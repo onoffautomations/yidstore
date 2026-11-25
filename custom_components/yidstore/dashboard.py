@@ -3086,8 +3086,7 @@ class OnOffStoreStatusView(HomeAssistantView):
             _maybe_retry_auth_rebuild(hass, eid)
 
             # Running Home Assistant Core version (e.g. "2026.11.1"). The panel
-            # uses it to label installs (Marketplace vs HACS) and to show the
-            # one-time Marketplace migration notice.
+            # uses it to label installs (Marketplace vs HACS).
             try:
                 from homeassistant.const import __version__ as _ha_version
             except Exception:

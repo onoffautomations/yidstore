@@ -367,20 +367,46 @@
             max-width: 130px;
         }
 
+        /* Multi-select install bar: floats at the bottom of the screen and
+           stays put while the page scrolls. */
         .bulk-bar {
+            position: fixed;
+            left: 50%;
+            bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+            transform: translateX(-50%);
+            z-index: 900;
+            width: min(560px, calc(100vw - 2rem));
+            box-sizing: border-box;
             background: var(--primary);
             color: #fff;
-            padding: 0.6rem 1rem;
-            border-radius: 12px;
-            margin-bottom: 1rem;
+            padding: 0.6rem 0.75rem 0.6rem 1.1rem;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
             display: none;
             align-items: center;
             justify-content: space-between;
             font-weight: 700;
             font-size: 0.85rem;
-            animation: slideDown 0.3s;
+            animation: bulkUp 0.25s ease-out;
             flex-wrap: wrap;
             gap: 0.5rem;
+        }
+
+        /* Keep the last cards reachable above the floating bar. */
+        body.bulk-open #storeView {
+            padding-bottom: 5.5rem;
+        }
+
+        @keyframes bulkUp {
+            from {
+                transform: translate(-50%, 20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translate(-50%, 0);
+                opacity: 1;
+            }
         }
 
         @keyframes slideDown {
@@ -441,6 +467,19 @@
         .dropdown div:hover {
             background: var(--hover-bg);
             color: var(--primary);
+        }
+
+        .dropdown .dropdown-count {
+            margin-left: auto;
+            min-width: 1.3rem;
+            padding: 0 0.4rem;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.72rem;
+            font-weight: 600;
+            line-height: 1.3rem;
+            text-align: center;
         }
 
         /* `.dropdown div { display: flex }` beats the UA [hidden] rule */
@@ -2306,6 +2345,70 @@
                 grid-template-columns: 22px 40px minmax(0, 1fr);
             }
         }
+        /* ---- Screen fit ------------------------------------------------- */
+        /* Wide screens: use more of the width before centring. */
+        @media (min-width: 1600px) {
+            .container {
+                max-width: 1760px;
+            }
+        }
+
+        /* Desktop: the search box grows into the free header space. */
+        @media (min-width: 1100px) {
+            .search-box {
+                flex: 1 1 260px;
+                max-width: 420px;
+            }
+        }
+
+        /* Phones: three tidy rows instead of one squeezed one.
+             [YidStore            ] [Section] [select] [menu]
+             [search ............................................]
+             [Filter] [Authors] [Sort ..........................]  */
+        @media (max-width: 560px) {
+            header {
+                grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+                grid-template-areas:
+                    "brand brand tab menu"
+                    "search search search search"
+                    "filter author sort sort";
+                row-gap: 0.55rem;
+                column-gap: 0.4rem;
+            }
+
+            header .header-brand { grid-area: brand; }
+            header .search-box { grid-area: search; }
+            header .mobile-tab-select { grid-area: tab; max-width: none; width: 100%; }
+            header .controls { display: contents; }
+            header #filterF { grid-area: filter; }
+            header #authorF { grid-area: author; }
+            header #sort { grid-area: sort; }
+            header .menu-container { grid-area: menu; justify-self: end; }
+
+            .search-box input {
+                padding: 0.6rem 0.75rem 0.6rem 2.2rem;
+                font-size: 0.9rem;
+            }
+
+            #filterF,
+            #authorF,
+            #sort {
+                width: 100%;
+                font-size: 0.78rem;
+            }
+        }
+
+        /* Very small phones: smaller touch-safe spacing. */
+        @media (max-width: 360px) {
+            body {
+                padding: 0.5rem;
+            }
+
+            .logo-desc,
+            .logo-support {
+                font-size: 0.52rem;
+            }
+        }
     </style>
 </head>
 
@@ -2382,6 +2485,9 @@
                         <div id="autoInstallBtn" onclick="openAutoInstall()" hidden>
                             <i class="mdi mdi-auto-download"></i> Auto-Install All
                         </div>
+                        <div id="updateAllBtn" onclick="openUpdateAll()">
+                            <i class="mdi mdi-update"></i> Update All<span id="updateAllCount" class="dropdown-count"></span>
+                        </div>
                         <!-- Authenticated store accounts only; shown by applyLiveStatus -->
                         <div id="betaReleasesItem" class="dropdown-theme" hidden onclick="event.stopPropagation(); toggleBetaReleases();"
                             title="Also offer pre-release (beta) versions">
@@ -2410,7 +2516,7 @@
                                 <span class="thumb"></span>
                             </button>
                         </div>
-                        <div id="audioLocationToggle" onclick="toggleAudioInstallLocation()">
+                        <div id="audioLocationToggle" onclick="toggleAudioInstallLocation()" hidden>
                             <i class="mdi mdi-music-note"></i> Audio Download: WWW/audio
                         </div>
                         <div onclick="fullReload()"><i class="mdi mdi-refresh"></i> Full Reload</div>
@@ -2938,7 +3044,7 @@
                     else if (view === 'dashboards') await loadDashboardContent(owner, repo, path, branch, true);
                     else if (view === 'helpers') await loadHelperContent(owner, repo, branch, path, true);
                     else if (view === 'blueprints') await loadBlueprintContent(owner, repo, branch, path, true);
-                } else if (view === 'audio' && parts[1] === 'repo' && parts.length >= 5) {
+                } else if (AUDIO_SECTION_ENABLED && view === 'audio' && parts[1] === 'repo' && parts.length >= 5) {
                     await loadAudioRepoContent(parts[2], parts[3], parts[4], true);
                 }
             } catch (e) {
@@ -2970,6 +3076,10 @@
         // Apps (Add-ons) is not ready for users yet — show a "Coming soon"
         // screen instead of the functional UI. Flip to false to re-enable.
         const APPS_COMING_SOON = false;
+        // The Audio section (tab, filter, download-location menu item) is
+        // hidden for now. Its code stays; set this to true to bring it back.
+        const AUDIO_SECTION_ENABLED = false;
+        function audioAllowed() { return AUDIO_SECTION_ENABLED && isAuthenticated; }
         function applyAppsGate() {
             const cs = document.getElementById('appsComingSoon');
             const fn = document.getElementById('appsFunctional');
@@ -3144,47 +3254,6 @@
             return at ? 'Installed (Marketplace)' : 'Installed (HACS)';
         }
 
-        // One-time popup (mirrors the Home Assistant persistent notification):
-        // after the HA 2026.11.1 update YidStore may need re-adding as a custom
-        // repository in the Marketplace (HACS).
-        let marketplaceNoticeChecked = false;
-        function maybeShowMarketplaceNotice() {
-            if (marketplaceNoticeChecked) return;
-            const at = haVersionAtLeast(MARKETPLACE_MIN);
-            if (at === null) return;       // version not known yet
-            marketplaceNoticeChecked = true;
-            if (!at) return;               // older HA: nothing to show
-            let seen = false;
-            try { seen = localStorage.getItem('yidstore_marketplace_notice') === '1'; } catch (_) {}
-            if (seen) return;
-            showMarketplaceNotice();
-        }
-
-        function marketplaceNoticeBody() {
-            return `
-                <div style="text-align:left; line-height:1.55;">
-                    <p style="margin:0 0 0.6rem;">After updating to <strong>Home Assistant ${escapeHtml(haVersion || '2026.11.1')}</strong>,
-                    YidStore sometimes needs to be re-added as a <strong>custom repository</strong> in the Marketplace (HACS).</p>
-                    <p style="margin:0 0 0.4rem; font-weight:600;"><i class="mdi mdi-store-plus"></i> If YidStore is missing, add it back:</p>
-                    <ol style="margin:0 0 0.6rem 1.1rem; padding:0;">
-                        <li>Open <strong>Marketplace</strong> and tap the <strong><i class="mdi mdi-link-plus"></i> add link</strong> button next to the search bar.</li>
-                        <li>Paste <code>https://github.com/onoffautomations/yidstore</code> and tap <strong>Add</strong>.</li>
-                        <li>Install <strong>YidStore</strong>, then restart Home Assistant.</li>
-                    </ol>
-                    <p style="margin:0; color:var(--dim); font-size:0.85rem;">Everything already working? You can safely dismiss this notice.</p>
-                </div>`;
-        }
-        function showMarketplaceNotice() {
-            pop('Marketplace update notice', marketplaceNoticeBody(), 'mdi-store-alert', false, [
-                { t: "Don't show again", c: 'btn-o', f: 'dismissMarketplaceNotice()' },
-                { t: 'Got it', c: 'btn-p', f: 'closePop()' }
-            ]);
-        }
-        function dismissMarketplaceNotice() {
-            try { localStorage.setItem('yidstore_marketplace_notice', '1'); } catch (_) {}
-            closePop();
-        }
-
         function getInstalledBadge(installSource, needsRestart = false, itemType = 'integration') {
             // Only integrations need restart - cards and blueprints just need reload
             if (needsRestart && itemType === 'integration') {
@@ -3334,20 +3403,22 @@
                 // The install labels (Marketplace vs HACS) depend on this, so
                 // re-render once the version becomes known.
                 try { if (toolbarView !== 'apps') apply(); } catch (_) {}
-                maybeShowMarketplaceNotice();
             }
 
             if (data.is_authenticated !== undefined) {
                 isAuthenticated = !!data.is_authenticated;
                 authKnown = true;
-                // Audio is for authenticated store accounts only.
-                if (!isAuthenticated && currentDocsView === 'audio') switchView('store');
+                // Audio is for authenticated store accounts only (and hidden
+                // while AUDIO_SECTION_ENABLED is false).
+                if (!audioAllowed() && currentDocsView === 'audio') switchView('store');
                 const audioTab = document.getElementById('audioTab');
-                if (audioTab) audioTab.style.display = isAuthenticated ? '' : 'none';
+                if (audioTab) audioTab.style.display = audioAllowed() ? '' : 'none';
+                const audioLoc = document.getElementById('audioLocationToggle');
+                if (audioLoc) audioLoc.hidden = !audioAllowed();
                 ['mobileAudioOption', 'filterAudioOption'].forEach(id => {
                     const el = document.getElementById(id);
                     // The Audio filter is Store-only; it stays hidden on the Apps tab.
-                    const off = !isAuthenticated || (id === 'filterAudioOption' && toolbarView === 'apps');
+                    const off = !audioAllowed() || (id === 'filterAudioOption' && toolbarView === 'apps');
                     if (el) { el.hidden = off; el.disabled = off; }
                 });
                 const betaItem = document.getElementById('betaReleasesItem');
@@ -3983,6 +4054,8 @@
             // First filter by everything except author (for populating author dropdown)
             let preAuthorFiltered = items.filter(i => {
                 if (!showHidden && i.is_hidden) return false;
+                // Audio packs belong to the (hidden) Audio section.
+                if (!AUDIO_SECTION_ENABLED && i.type === 'audio') return false;
                 const matchQ = i.repo_name.toLowerCase().includes(q) || i.description.toLowerCase().includes(q);
                 const matchFilter =
                     filterVal === 'all' ||
@@ -4384,12 +4457,14 @@
         function updateBulkBar() {
             const bar = document.getElementById('bulkBar');
             const text = document.getElementById('bulkText');
-            if (selectedIds.size > 0) {
+            const open = selectedIds.size > 0;
+            if (open) {
                 bar.style.display = 'flex';
                 text.innerText = `${selectedIds.size} selected`;
             } else {
                 bar.style.display = 'none';
             }
+            document.body.classList.toggle('bulk-open', open);
         }
 
         function clearSelection() {
@@ -4612,6 +4687,112 @@
                 pop('Auto-Install', body, 'mdi-check-circle', true);
             } else {
                 pop('Auto-Install', body, 'mdi-check-circle', false);
+            }
+        }
+
+        // ---- Update All ----------------------------------------------------
+        // Updates every installed store item that has a newer version, one at
+        // a time, through the same /api/yidstore/install call a single update
+        // uses. Items HACS / the Marketplace installed are left to it.
+        let updateAllEntries = [];
+        let updateAllRunning = false;
+
+        function updatableItems() {
+            return items.filter(i =>
+                i.is_installed && i.update_available &&
+                i.install_source !== 'hacs' &&
+                (AUDIO_SECTION_ENABLED || i.type !== 'audio'));
+        }
+
+        function refreshUpdateAllCount() {
+            const el = document.getElementById('updateAllCount');
+            if (!el) return;
+            const n = updatableItems().length;
+            el.textContent = n ? String(n) : '';
+            el.style.display = n ? '' : 'none';
+        }
+
+        function renderUpdateAllList(states, heading) {
+            const rows = updateAllEntries.map((e, idx) => {
+                const row = autoInstallRowHtml(e, idx, states[idx]).replace(`id="autoInstallRow${idx}"`, '');
+                const ver = (e.installed_version && e.latest_version)
+                    ? `<span style="color:var(--dim); font-size:0.78rem; white-space:nowrap;">${escapeHtml(e.installed_version)} → ${escapeHtml(e.latest_version)}</span>`
+                    : '';
+                return ver ? row.replace(/<\/div>\s*$/, `${ver}</div>`) : row;
+            }).join('');
+            return `<div style="text-align:left;">${heading}<div style="max-height:45vh; overflow-y:auto; margin-top:0.6rem;">${rows}</div></div>`;
+        }
+
+        function openUpdateAll() {
+            const dd = document.getElementById('dropdown');
+            if (dd) dd.style.display = 'none';
+            if (updateAllRunning) return;
+            updateAllEntries = updatableItems();
+            if (!updateAllEntries.length) {
+                pop('Update All', 'Everything is up to date.', 'mdi-check-circle', false);
+                return;
+            }
+            const n = updateAllEntries.length;
+            const states = updateAllEntries.map(() => 'pending');
+            pop('Update All', renderUpdateAllList(states, `<div>Update <strong>${n}</strong> item${n > 1 ? 's' : ''}?</div>`), 'mdi-update', false, [
+                { t: 'Cancel', c: 'btn-o', f: 'closePop()' },
+                { t: `Update ${n}`, c: 'btn-p', f: 'runUpdateAll()' }
+            ]);
+        }
+
+        async function runUpdateAll() {
+            if (updateAllRunning || !updateAllEntries.length) return;
+            updateAllRunning = true;
+            const total = updateAllEntries.length;
+            const states = updateAllEntries.map(() => 'pending');
+            const paint = (heading) => {
+                const msg = document.getElementById('pm');
+                if (msg) msg.innerHTML = renderUpdateAllList(states, heading);
+            };
+            pop('Update All', '', 'mdi-update', false, [{ t: 'Updating…', c: 'btn-o', f: 'void 0' }]);
+            const actionBar = document.getElementById('pa');
+            if (actionBar) actionBar.querySelectorAll('button').forEach(b => b.disabled = true);
+
+            let updated = 0, failed = 0, hasCards = false;
+            const restartNames = [];
+            for (let idx = 0; idx < total; idx++) {
+                const item = updateAllEntries[idx];
+                states[idx] = 'running';
+                paint(`<div>Updating ${idx + 1} of ${total}…</div>`);
+                try {
+                    const res = await executeInstDirect(item.owner, item.repo_name, item.type, item.mode, item.asset_name, item);
+                    states[idx] = 'done';
+                    updated++;
+                    item.is_installed = true;
+                    item.install_source = 'yidstore';
+                    item.update_available = false;
+                    if (item.latest_version) item.installed_version = item.latest_version;
+                    if (item.type === 'integration') {
+                        if (res && res.requires_restart) { addToRestartSet(item.owner, item.repo_name); restartNames.push(formatName(item.repo_name)); }
+                    } else {
+                        hasCards = true;
+                    }
+                } catch (err) {
+                    states[idx] = 'failed';
+                    item._error = err && err.message ? err.message : 'failed';
+                    failed++;
+                }
+            }
+
+            updateAllRunning = false;
+            await syncBackendAfterAction();
+            apply();
+
+            const summary = `<div>Updated <strong>${updated}</strong> item${updated === 1 ? '' : 's'}${failed ? `, <span style="color:var(--danger);">${failed} failed</span>` : ''}.</div>`
+                + (restartNames.length ? '<div style="margin-top:0.5rem;">Updated integrations need a restart of Home Assistant to finish.</div>' : '');
+            const body = renderUpdateAllList(states, summary);
+            if (restartNames.length) {
+                pop('Update All', body, failed > 0 ? 'mdi-alert' : 'mdi-restart', false, [
+                    { t: 'Later', c: 'btn-o', f: 'closePop()' },
+                    { t: 'Restart', c: 'btn-p', f: 'closePop(); openNativeRestart();' }
+                ]);
+            } else {
+                pop('Update All', body, failed > 0 ? 'mdi-alert' : 'mdi-check-circle', failed === 0 && hasCards);
             }
         }
 
@@ -4887,7 +5068,9 @@
 
         function toggleMenu() {
             const d = document.getElementById('dropdown');
-            d.style.display = d.style.display === 'block' ? 'none' : 'block';
+            const opening = d.style.display !== 'block';
+            if (opening) refreshUpdateAllCount();
+            d.style.display = opening ? 'block' : 'none';
         }
 
         async function openCustomModal(fromRoute = false) {
@@ -6124,7 +6307,7 @@
                 if (STORE_ONLY_FILTERS.includes(o.value)) {
                     if (o.id === 'filterAudioOption' && !apps) {
                         // Audio follows its own rule on the Store tab.
-                        o.hidden = o.disabled = !isAuthenticated;
+                        o.hidden = o.disabled = !audioAllowed();
                         return;
                     }
                     o.hidden = apps; o.disabled = apps;
@@ -6137,6 +6320,8 @@
             if (author) author.style.display = apps ? 'none' : '';
             const sel = document.getElementById('selectModeBtn');
             if (sel) sel.style.display = apps ? 'none' : '';
+            const upd = document.getElementById('updateAllBtn');
+            if (upd) upd.style.display = apps ? 'none' : '';
         }
 
         function switchView(view, fromRoute = false) {
@@ -6170,7 +6355,7 @@
             swapToolbarState(toolbarView);
             const controls = document.querySelector('.controls');
             if (controls) {
-                controls.style.display = toolbarView ? 'flex' : 'none';
+                controls.style.display = toolbarView ? '' : 'none';  // CSS picks flex / phone grid
             }
             // The store search bar lives at header level (next to the brand
             // on mobile) — hide it together with the controls.
@@ -6194,7 +6379,7 @@
                 loadHelpersRepos();
             } else if (view === 'audio') {
                 // Audio is for authenticated store accounts only.
-                if (authKnown && !isAuthenticated) { switchView('store'); return; }
+                if (!AUDIO_SECTION_ENABLED || (authKnown && !isAuthenticated)) { switchView('store'); return; }
                 loadAudioRepos();
             } else if (view === 'blueprints') {
                 loadBlueprintsRepos();
