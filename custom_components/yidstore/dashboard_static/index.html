@@ -2451,7 +2451,7 @@
                 <option value="store">Store</option>
                 <option value="apps">Apps</option>
                 <option value="docs">Documentation</option>
-                <option value="audio" id="mobileAudioOption" hidden disabled>Audio</option>
+                <option value="audio" id="mobileAudioOption" class="audio-opt" hidden disabled>Audio</option>
             </select>
             <div class="controls">
                 <select id="filterF" onchange="apply()" title="Filter">
@@ -2459,7 +2459,7 @@
                     <option value="integration">Filter: Integrations</option>
                     <option value="lovelace">Filter: Cards</option>
                     <option value="blueprints">Filter: Blueprints</option>
-                    <option value="audio" id="filterAudioOption" hidden disabled>Filter: Audio</option>
+                    <option value="audio" id="filterAudioOption" class="audio-opt" hidden disabled>Filter: Audio</option>
                     <option value="installed">Filter: Installed</option>
                     <option value="not_installed">Filter: Not Installed</option>
                     <option value="updates">Filter: Updates</option>
@@ -2516,7 +2516,7 @@
                                 <span class="thumb"></span>
                             </button>
                         </div>
-                        <div id="audioLocationToggle" onclick="toggleAudioInstallLocation()" hidden>
+                        <div id="audioLocationToggle" class="audio-opt" onclick="toggleAudioInstallLocation()" hidden>
                             <i class="mdi mdi-music-note"></i> Audio Download: WWW/audio
                         </div>
                         <div onclick="fullReload()"><i class="mdi mdi-refresh"></i> Full Reload</div>
@@ -2536,7 +2536,7 @@
             <button class="view-tab" id="docsTab" onclick="switchView('docs')">
                 <i class="mdi mdi-book-open-page-variant"></i> Documentation
             </button>
-            <button class="view-tab" id="audioTab" onclick="switchView('audio')" style="display:none;">
+            <button class="view-tab audio-opt" id="audioTab" onclick="switchView('audio')" style="display:none;">
                 <i class="mdi mdi-music-note"></i> Audio
             </button>
             <!-- Blueprints, Automations, Dashboards, Helpers tabs removed for now -->
@@ -2843,7 +2843,7 @@
                                 <option value="integration">Integration</option>
                                 <option value="lovelace">Lovelace Card</option>
                                 <option value="blueprints">Blueprint</option>
-                                <option value="audio">Audio</option>
+                                <option value="audio" class="audio-opt">Audio</option>
                             </select>
                         </div>
                     </div>
@@ -2854,7 +2854,7 @@
                                 <option value="integration">Integration</option>
                                 <option value="lovelace">Lovelace Card</option>
                                 <option value="blueprints">Blueprint</option>
-                                <option value="audio">Audio</option>
+                                <option value="audio" class="audio-opt">Audio</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -3080,6 +3080,11 @@
         // hidden for now. Its code stays; set this to true to bring it back.
         const AUDIO_SECTION_ENABLED = false;
         function audioAllowed() { return AUDIO_SECTION_ENABLED && isAuthenticated; }
+        // Section off: take every audio control out of the page, so nothing
+        // audio shows anywhere (iOS lists even hidden <option>s).
+        if (!AUDIO_SECTION_ENABLED) {
+            document.querySelectorAll('.audio-opt, #audioView').forEach(el => el.remove());
+        }
         function applyAppsGate() {
             const cs = document.getElementById('appsComingSoon');
             const fn = document.getElementById('appsFunctional');
@@ -4582,6 +4587,7 @@
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
                 entries = Array.isArray(data.entries) ? data.entries : [];
+                if (!AUDIO_SECTION_ENABLED) entries = entries.filter(e => e.type !== 'audio');
             } catch (err) {
                 pop('Auto-Install', escapeHtml(err.message || 'Could not load the Auto-Install list.'), 'mdi-alert', false);
                 return;
@@ -4901,7 +4907,7 @@
                 await load(false, false);
                 item = items.find(x => x.owner === o && x.repo_name === r);
             }
-            if (!item) {
+            if (!item || (!AUDIO_SECTION_ENABLED && item.type === 'audio')) {
                 pop('Not Found', `${escapeHtml(formatName(r))} is not available in the current store list.`, 'mdi-alert', false);
                 return;
             }
